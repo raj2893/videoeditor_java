@@ -30,7 +30,7 @@ public class VideoEditingService {
 
 
     private final String ffmpegPath = "C:\\Users\\raj.p\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe";
-    private final String baseDir = "D:\\VideoEditor backend\\videoEditor-main"; // Base directory constant
+    private final String baseDir = "D:\\Backend\\videoEditor-main"; // Base directory constant
 
     public VideoEditingService(
             ProjectRepository projectRepository,

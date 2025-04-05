@@ -2,7 +2,7 @@ package com.example.videoeditor.dto;
 
 import lombok.Data;
 
-import java.util.UUID;
+import java.util.*;
 
 @Data
 public class VideoSegment {
@@ -15,91 +15,56 @@ public class VideoSegment {
     private Integer positionY = 0;
     private Double scale = 1.0;
 
-    private Integer layer = 0;     // Layer of the segment (for multi-level timelines)
-    private double timelineStartTime; // Start time of the segment in the timeline (in seconds)
-    private double timelineEndTime;   // End time of the segment in the timeline (in seconds)
+    private Integer layer = 0;
+    private double timelineStartTime;
+    private double timelineEndTime;
 
-    public Integer getLayer() {
-        return layer;
-    }
-
-    public void setLayer(Integer layer) {
-        this.layer = layer;
-    }
-
-    public double getTimelineStartTime() {
-        return timelineStartTime;
-    }
-
-    public void setTimelineStartTime(double timelineStartTime) {
-        this.timelineStartTime = timelineStartTime;
-    }
-
-    public double getTimelineEndTime() {
-        return timelineEndTime;
-    }
-
-    public void setTimelineEndTime(double timelineEndTime) {
-        this.timelineEndTime = timelineEndTime;
-    }
-
-    public Integer getPositionX() {
-        return positionX;
-    }
-
-    public void setPositionX(Integer positionX) {
-        this.positionX = positionX;
-    }
-
-    public Integer getPositionY() {
-        return positionY;
-    }
-
-    public void setPositionY(Integer positionY) {
-        this.positionY = positionY;
-    }
-
-    public Double getScale() {
-        return scale;
-    }
-
-    public void setScale(Double scale) {
-        this.scale = scale;
-    }
+    // Keyframes for animatable properties
+    private Map<String, List<Keyframe>> keyframes = new HashMap<>();
 
     public VideoSegment() {
-        this.id = UUID.randomUUID().toString(); // Generate unique ID on creation
+        this.id = UUID.randomUUID().toString();
     }
 
-    public String getSourceVideoPath() {
-        return sourceVideoPath;
+    public Map<String, List<Keyframe>> getKeyframes() {
+        return keyframes;
     }
 
-    public void setSourceVideoPath(String sourceVideoPath) {
-        this.sourceVideoPath = sourceVideoPath;
+    public void setKeyframes(Map<String, List<Keyframe>> keyframes) {
+        this.keyframes = keyframes;
     }
 
-    public double getStartTime() {
-        return startTime;
+    public void addKeyframe(String property, Keyframe keyframe) {
+        keyframes.computeIfAbsent(property, k -> new ArrayList<>()).add(keyframe);
+        keyframes.get(property).sort(Comparator.comparingDouble(Keyframe::getTime));
     }
 
-    public void setStartTime(double startTime) {
-        this.startTime = startTime;
+    public void removeKeyframe(String property, double time) {
+        List<Keyframe> propertyKeyframes = keyframes.get(property);
+        if (propertyKeyframes != null) {
+            propertyKeyframes.removeIf(kf -> kf.getTime() == time);
+        }
     }
 
-    public double getEndTime() {
-        return endTime;
-    }
-
-    public void setEndTime(double endTime) {
-        this.endTime = endTime;
-    }
-
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
-    }
+    // Existing getters and setters remain unchanged...
+    public String getSourceVideoPath() { return sourceVideoPath; }
+    public void setSourceVideoPath(String sourceVideoPath) { this.sourceVideoPath = sourceVideoPath; }
+    public double getStartTime() { return startTime; }
+    public void setStartTime(double startTime) { this.startTime = startTime; }
+    public double getEndTime() { return endTime; }
+    public void setEndTime(double endTime) { this.endTime = endTime; }
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
+    public Integer getPositionX() { return positionX; }
+    public void setPositionX(Integer positionX) { this.positionX = positionX; }
+    public Integer getPositionY() { return positionY; }
+    public void setPositionY(Integer positionY) { this.positionY = positionY; }
+    public Double getScale() { return scale; }
+    public void setScale(Double scale) { this.scale = scale; }
+    public Integer getLayer() { return layer; }
+    public void setLayer(Integer layer) { this.layer = layer; }
+    public double getTimelineStartTime() { return timelineStartTime; }
+    public void setTimelineStartTime(double timelineStartTime) { this.timelineStartTime = timelineStartTime; }
+    public double getTimelineEndTime() { return timelineEndTime; }
+    public void setTimelineEndTime(double timelineEndTime) { this.timelineEndTime = timelineEndTime; }
 }

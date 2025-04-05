@@ -373,25 +373,22 @@ public class VideoEditingService {
     public void updateVideoSegment(String sessionId, String segmentId,
                                    Integer positionX, Integer positionY, Double scale,
                                    Double timelineStartTime, Integer layer, Double timelineEndTime,
-                                   Double startTime, Double endTime) {
-        // Log the incoming request parameters
+                                   Double startTime, Double endTime,
+                                   Map<String, List<Keyframe>> keyframes) throws IOException, InterruptedException {
         System.out.println("updateVideoSegment called with sessionId: " + sessionId);
         System.out.println("Segment ID: " + segmentId);
         System.out.println("Position X: " + positionX + ", Position Y: " + positionY + ", Scale: " + scale);
         System.out.println("Timeline Start Time: " + timelineStartTime + ", Layer: " + layer);
         System.out.println("Timeline End Time: " + timelineEndTime);
         System.out.println("Start Time: " + startTime + ", End Time: " + endTime);
+        System.out.println("Keyframes: " + (keyframes != null ? keyframes.size() : "none"));
 
         EditSession session = getSession(sessionId);
-
         if (session == null) {
             System.err.println("No active session found for sessionId: " + sessionId);
             throw new RuntimeException("No active session found for sessionId: " + sessionId);
         }
 
-        System.out.println("Session found, project ID: " + session.getProjectId());
-
-        // Find the segment with the given ID
         VideoSegment segmentToUpdate = null;
         for (VideoSegment segment : session.getTimelineState().getSegments()) {
             if (segment.getId().equals(segmentId)) {
@@ -404,82 +401,57 @@ public class VideoEditingService {
             throw new RuntimeException("No segment found with ID: " + segmentId);
         }
 
-        // Update the segment properties if provided
-        if (positionX != null) {
-            segmentToUpdate.setPositionX(positionX);
-        }
+        // Handle keyframes if provided
+        if (keyframes != null && !keyframes.isEmpty()) {
+            for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
+                String property = entry.getKey();
+                List<Keyframe> kfs = entry.getValue();
+                for (Keyframe kf : kfs) {
+                    if (kf.getTime() < 0 || kf.getTime() > (segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime())) {
+                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                    }
+                    segmentToUpdate.addKeyframe(property, kf);
+                }
+            }
+        } else {
+            // Update static properties if no keyframes are provided
+            if (positionX != null) segmentToUpdate.setPositionX(positionX);
+            if (positionY != null) segmentToUpdate.setPositionY(positionY);
+            if (scale != null) segmentToUpdate.setScale(scale);
+            if (timelineStartTime != null) {
+                double originalDuration = segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime();
+                segmentToUpdate.setTimelineStartTime(timelineStartTime);
+                if (timelineEndTime == null) {
+                    segmentToUpdate.setTimelineEndTime(timelineStartTime + originalDuration);
+                }
+            }
+            if (layer != null) segmentToUpdate.setLayer(layer);
+            if (timelineEndTime != null) segmentToUpdate.setTimelineEndTime(timelineEndTime);
+            if (startTime != null) {
+                segmentToUpdate.setStartTime(Math.max(0, startTime));
+                if (endTime == null && segmentToUpdate.getEndTime() <= startTime) {
+                    throw new IllegalArgumentException("End time must be greater than start time");
+                }
+            }
+            if (endTime != null) {
+                segmentToUpdate.setEndTime(endTime);
+                if (endTime <= segmentToUpdate.getStartTime()) {
+                    throw new IllegalArgumentException("End time must be greater than start time");
+                }
+                double originalVideoDuration = getVideoDuration(segmentToUpdate.getSourceVideoPath());
+                if (endTime > originalVideoDuration) {
+                    segmentToUpdate.setEndTime(originalVideoDuration);
+                }
+            }
 
-        if (positionY != null) {
-            segmentToUpdate.setPositionY(positionY);
-        }
-
-        if (scale != null) {
-            segmentToUpdate.setScale(scale);
-        }
-
-        // Update timelineStartTime if provided
-        if (timelineStartTime != null) {
-            double originalDuration = segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime();
-            segmentToUpdate.setTimelineStartTime(timelineStartTime);
-            // If timelineEndTime is not provided, maintain the duration
-            if (timelineEndTime == null) {
-                segmentToUpdate.setTimelineEndTime(timelineStartTime + originalDuration);
+            double newTimelineDuration = segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime();
+            double newClipDuration = segmentToUpdate.getEndTime() - segmentToUpdate.getStartTime();
+            if (newTimelineDuration < newClipDuration) {
+                segmentToUpdate.setTimelineEndTime(segmentToUpdate.getTimelineStartTime() + newClipDuration);
             }
         }
 
-        if (layer != null) {
-            segmentToUpdate.setLayer(layer);
-        }
-
-        // Update timelineEndTime if provided
-        if (timelineEndTime != null) {
-            segmentToUpdate.setTimelineEndTime(timelineEndTime);
-        }
-
-        // Update startTime if provided
-        if (startTime != null) {
-            segmentToUpdate.setStartTime(Math.max(0, startTime));
-            // If endTime isn't provided, ensure it remains greater than new startTime
-            if (endTime == null && segmentToUpdate.getEndTime() <= startTime) {
-                throw new IllegalArgumentException("End time must be greater than start time");
-            }
-        }
-
-        // Update endTime if provided
-        if (endTime != null) {
-            segmentToUpdate.setEndTime(endTime);
-            // Ensure endTime is greater than startTime
-            if (endTime <= segmentToUpdate.getStartTime()) {
-                throw new IllegalArgumentException("End time must be greater than start time");
-            }
-            // Ensure endTime doesn't exceed the original video duration
-            double originalVideoDuration = 7.43; // You might want to get this from segmentToUpdate.getSourceVideoDuration() or similar
-            if (endTime > originalVideoDuration) {
-                segmentToUpdate.setEndTime(originalVideoDuration);
-            }
-        }
-
-        // Validate timeline duration
-        double newTimelineDuration = segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime();
-        double newClipDuration = segmentToUpdate.getEndTime() - segmentToUpdate.getStartTime();
-        if (newTimelineDuration < newClipDuration) {
-            // Adjust timelineEndTime to match the clip duration if necessary
-            segmentToUpdate.setTimelineEndTime(segmentToUpdate.getTimelineStartTime() + newClipDuration);
-        }
-
-        Map<String, Object> parameters = new HashMap<>();
-        parameters.put("time", System.currentTimeMillis());
-        parameters.put("segmentId", segmentId);
-        if (positionX != null) parameters.put("positionX", positionX);
-        if (positionY != null) parameters.put("positionY", positionY);
-        if (scale != null) parameters.put("scale", scale);
-        if (timelineStartTime != null) parameters.put("timelineStartTime", timelineStartTime);
-        if (layer != null) parameters.put("layer", layer);
-        if (timelineEndTime != null) parameters.put("timelineEndTime", timelineEndTime);
-        if (startTime != null) parameters.put("startTime", startTime);
-        if (endTime != null) parameters.put("endTime", endTime);
         session.setLastAccessTime(System.currentTimeMillis());
-
         System.out.println("Successfully updated video segment");
     }
 
@@ -543,57 +515,54 @@ public class VideoEditingService {
     public void updateTextSegment(String sessionId, String segmentId, String text,
                                   String fontFamily, Integer fontSize, String fontColor,
                                   String backgroundColor, Integer positionX, Integer positionY,
-                                  Double timelineStartTime, Double timelineEndTime, Integer layer) {
-        // Log the incoming request parameters
+                                  Double timelineStartTime, Double timelineEndTime, Integer layer,
+                                  Map<String, List<Keyframe>> keyframes) {
         System.out.println("updateTextSegment called with sessionId: " + sessionId);
         System.out.println("Segment ID: " + segmentId);
         System.out.println("Text: " + text + ", Font Family: " + fontFamily + ", Font Size: " + fontSize);
         System.out.println("Font Color: " + fontColor + ", Background Color: " + backgroundColor);
         System.out.println("Position X: " + positionX + ", Position Y: " + positionY);
         System.out.println("Timeline Start Time: " + timelineStartTime + ", Timeline End Time: " + timelineEndTime + ", Layer: " + layer);
+        System.out.println("Keyframes: " + (keyframes != null ? keyframes.size() : "none"));
 
         EditSession session = getSession(sessionId);
-
         if (session == null) {
             System.err.println("No active session found for sessionId: " + sessionId);
             throw new RuntimeException("No active session found for sessionId: " + sessionId);
         }
 
-        System.out.println("Session found, project ID: " + session.getProjectId());
-
-        // Find the text segment with the given ID
         TextSegment textSegment = session.getTimelineState().getTextSegments().stream()
                 .filter(segment -> segment.getId().equals(segmentId))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Text segment not found with ID: " + segmentId));
 
-        // Update the text segment properties if provided
-        if (text != null) textSegment.setText(text);
-        if (fontFamily != null) textSegment.setFontFamily(fontFamily);
-        if (fontSize != null) textSegment.setFontSize(fontSize);
-        if (fontColor != null) textSegment.setFontColor(fontColor);
-        if (backgroundColor != null) textSegment.setBackgroundColor(backgroundColor);
-        if (positionX != null) textSegment.setPositionX(positionX);
-        if (positionY != null) textSegment.setPositionY(positionY);
-        if (timelineStartTime != null) textSegment.setTimelineStartTime(timelineStartTime);
-        if (timelineEndTime != null) textSegment.setTimelineEndTime(timelineEndTime);
-        if (layer != null) textSegment.setLayer(layer);
+        // Handle keyframes if provided
+        if (keyframes != null && !keyframes.isEmpty()) {
+            for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
+                String property = entry.getKey();
+                List<Keyframe> kfs = entry.getValue();
+                for (Keyframe kf : kfs) {
+                    if (kf.getTime() < 0 || kf.getTime() > (textSegment.getTimelineEndTime() - textSegment.getTimelineStartTime())) {
+                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                    }
+                    textSegment.addKeyframe(property, kf);
+                }
+            }
+        } else {
+            // Update static properties if no keyframes
+            if (text != null) textSegment.setText(text);
+            if (fontFamily != null) textSegment.setFontFamily(fontFamily);
+            if (fontSize != null) textSegment.setFontSize(fontSize);
+            if (fontColor != null) textSegment.setFontColor(fontColor);
+            if (backgroundColor != null) textSegment.setBackgroundColor(backgroundColor);
+            if (positionX != null) textSegment.setPositionX(positionX);
+            if (positionY != null) textSegment.setPositionY(positionY);
+            if (timelineStartTime != null) textSegment.setTimelineStartTime(timelineStartTime);
+            if (timelineEndTime != null) textSegment.setTimelineEndTime(timelineEndTime);
+            if (layer != null) textSegment.setLayer(layer);
+        }
 
-        Map<String, Object> parameters = new HashMap<>();
-        parameters.put("time", System.currentTimeMillis());
-        parameters.put("segmentId", segmentId);
-        if (text != null) parameters.put("text", text);
-        if (fontFamily != null) parameters.put("fontFamily", fontFamily);
-        if (fontSize != null) parameters.put("fontSize", fontSize);
-        if (fontColor != null) parameters.put("fontColor", fontColor);
-        if (backgroundColor != null) parameters.put("backgroundColor", backgroundColor);
-        if (positionX != null) parameters.put("positionX", positionX);
-        if (positionY != null) parameters.put("positionY", positionY);
-        if (timelineStartTime != null) parameters.put("timelineStartTime", timelineStartTime);
-        if (timelineEndTime != null) parameters.put("timelineEndTime", timelineEndTime);
-        if (layer != null) parameters.put("layer", layer);
         session.setLastAccessTime(System.currentTimeMillis());
-
         System.out.println("Successfully updated text segment");
     }
 
@@ -740,135 +709,122 @@ public class VideoEditingService {
             Double timelineStartTime,
             Double timelineEndTime,
             Double volume,
-            Integer layer) throws IOException, InterruptedException {
+            Integer layer,
+            Map<String, List<Keyframe>> keyframes) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
         TimelineState timelineState = session.getTimelineState();
 
-        // Find the audio segment
         AudioSegment targetSegment = timelineState.getAudioSegments().stream()
                 .filter(segment -> segment.getId().equals(audioSegmentId))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Audio segment not found: " + audioSegmentId));
 
-        // Store original values
         double originalStartTime = targetSegment.getStartTime();
         double originalEndTime = targetSegment.getEndTime();
         double originalTimelineStartTime = targetSegment.getTimelineStartTime();
         double originalTimelineEndTime = targetSegment.getTimelineEndTime();
         int originalLayer = targetSegment.getLayer();
 
-        // Get audio duration
         double audioDuration = getAudioDuration(targetSegment.getAudioPath());
 
-        // Update provided parameters
-        boolean timelineChanged = false;
-        if (timelineStartTime != null) {
-            targetSegment.setTimelineStartTime(timelineStartTime);
-            timelineChanged = true;
-        }
-        if (timelineEndTime != null) {
-            targetSegment.setTimelineEndTime(timelineEndTime);
-            timelineChanged = true;
-        }
-        if (layer != null) {
-            if (layer >= 0) {
-                throw new RuntimeException("Audio layers must be negative (e.g., -1, -2, -3)");
-            }
-            targetSegment.setLayer(layer);
-        }
-        if (volume != null) {
-            if (volume < 0 || volume > 1) {
-                throw new RuntimeException("Volume must be between 0.0 and 1.0");
-            }
-            targetSegment.setVolume(volume);
-        }
-
-        // Handle adjustments based on provided parameters
-        if (startTime != null || endTime != null || timelineChanged) {
-            // Update startTime and endTime if provided
-            if (startTime != null) {
-                if (startTime < 0 || startTime >= audioDuration) {
-                    throw new RuntimeException("Start time must be between 0 and " + audioDuration);
-                }
-                targetSegment.setStartTime(startTime);
-            }
-            if (endTime != null) {
-                if (endTime <= targetSegment.getStartTime() || endTime > audioDuration) {
-                    throw new RuntimeException("End time must be greater than start time and less than or equal to " + audioDuration);
-                }
-                targetSegment.setEndTime(endTime);
-            }
-
-            // Case 1: Only startTime or endTime changed (no timeline changes)
-            if (!timelineChanged) {
-                double newStartTime = startTime != null ? startTime : originalStartTime;
-                double newEndTime = endTime != null ? endTime : originalEndTime;
-
-                if (startTime != null && timelineStartTime == null) {
-                    // Adjust timelineStartTime based on startTime change
-                    double startTimeShift = newStartTime - originalStartTime;
-                    targetSegment.setTimelineStartTime(originalTimelineStartTime + startTimeShift);
-                }
-                if (endTime != null && timelineEndTime == null) {
-                    // Adjust timelineEndTime based on endTime change
-                    double audioDurationUsed = newEndTime - targetSegment.getStartTime();
-                    targetSegment.setTimelineEndTime(targetSegment.getTimelineStartTime() + audioDurationUsed);
-                }
-            }
-            // Case 2: Timeline changed, but startTime and endTime not provided
-            else if (startTime == null && endTime == null) {
-                double newTimelineDuration = targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime();
-                double originalTimelineDuration = originalTimelineEndTime - originalTimelineStartTime;
-                double originalAudioDuration = originalEndTime - originalStartTime;
-
-                if (newTimelineDuration != originalTimelineDuration) {
-                    // Adjust based on timeline shift
-                    double timelineShift = targetSegment.getTimelineStartTime() - originalTimelineStartTime;
-                    double newStartTime = originalStartTime + timelineShift;
-
-                    // Ensure newStartTime is within bounds
-                    if (newStartTime < 0) {
-                        newStartTime = 0;
+        // Handle keyframes if provided
+        if (keyframes != null && !keyframes.isEmpty()) {
+            for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
+                String property = entry.getKey();
+                List<Keyframe> kfs = entry.getValue();
+                for (Keyframe kf : kfs) {
+                    if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
+                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
+                    targetSegment.addKeyframe(property, kf);
+                }
+            }
+        } else {
+            // Update static properties if no keyframes
+            boolean timelineChanged = false;
+            if (timelineStartTime != null) {
+                targetSegment.setTimelineStartTime(timelineStartTime);
+                timelineChanged = true;
+            }
+            if (timelineEndTime != null) {
+                targetSegment.setTimelineEndTime(timelineEndTime);
+                timelineChanged = true;
+            }
+            if (layer != null) {
+                if (layer >= 0) throw new RuntimeException("Audio layers must be negative");
+                targetSegment.setLayer(layer);
+            }
+            if (volume != null) {
+                if (volume < 0 || volume > 1) throw new RuntimeException("Volume must be between 0.0 and 1.0");
+                targetSegment.setVolume(volume);
+            }
 
-                    double newEndTime = newStartTime + Math.min(newTimelineDuration, originalAudioDuration);
-
-                    // Ensure newEndTime doesn't exceed audio duration
-                    if (newEndTime > audioDuration) {
-                        newEndTime = audioDuration;
-                        newStartTime = Math.max(0, newEndTime - newTimelineDuration);
+            if (startTime != null || endTime != null || timelineChanged) {
+                if (startTime != null) {
+                    if (startTime < 0 || startTime >= audioDuration) {
+                        throw new RuntimeException("Start time must be between 0 and " + audioDuration);
                     }
+                    targetSegment.setStartTime(startTime);
+                }
+                if (endTime != null) {
+                    if (endTime <= targetSegment.getStartTime() || endTime > audioDuration) {
+                        throw new RuntimeException("End time must be greater than start time and less than or equal to " + audioDuration);
+                    }
+                    targetSegment.setEndTime(endTime);
+                }
 
-                    targetSegment.setStartTime(newStartTime);
-                    targetSegment.setEndTime(newEndTime);
+                if (!timelineChanged) {
+                    double newStartTime = startTime != null ? startTime : originalStartTime;
+                    double newEndTime = endTime != null ? endTime : originalEndTime;
+
+                    if (startTime != null && timelineStartTime == null) {
+                        double startTimeShift = newStartTime - originalStartTime;
+                        targetSegment.setTimelineStartTime(originalTimelineStartTime + startTimeShift);
+                    }
+                    if (endTime != null && timelineEndTime == null) {
+                        double audioDurationUsed = newEndTime - targetSegment.getStartTime();
+                        targetSegment.setTimelineEndTime(targetSegment.getTimelineStartTime() + audioDurationUsed);
+                    }
+                } else if (startTime == null && endTime == null) {
+                    double newTimelineDuration = targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime();
+                    double originalTimelineDuration = originalTimelineEndTime - originalTimelineStartTime;
+                    double originalAudioDuration = originalEndTime - originalStartTime;
+
+                    if (newTimelineDuration != originalTimelineDuration) {
+                        double timelineShift = targetSegment.getTimelineStartTime() - originalTimelineStartTime;
+                        double newStartTime = originalStartTime + timelineShift;
+                        if (newStartTime < 0) newStartTime = 0;
+                        double newEndTime = newStartTime + Math.min(newTimelineDuration, originalAudioDuration);
+                        if (newEndTime > audioDuration) {
+                            newEndTime = audioDuration;
+                            newStartTime = Math.max(0, newEndTime - newTimelineDuration);
+                        }
+                        targetSegment.setStartTime(newStartTime);
+                        targetSegment.setEndTime(newEndTime);
+                    }
+                } else {
+                    if (timelineEndTime == null) {
+                        double audioDurationUsed = targetSegment.getEndTime() - targetSegment.getStartTime();
+                        targetSegment.setTimelineEndTime(targetSegment.getTimelineStartTime() + audioDurationUsed);
+                    }
                 }
             }
-            // Case 3: Both timeline and startTime/endTime provided
-            else {
-                // Use provided startTime and endTime, adjust timelineEndTime if not provided
-                if (timelineEndTime == null) {
-                    double audioDurationUsed = targetSegment.getEndTime() - targetSegment.getStartTime();
-                    targetSegment.setTimelineEndTime(targetSegment.getTimelineStartTime() + audioDurationUsed);
-                }
+
+            timelineState.getAudioSegments().remove(targetSegment);
+            boolean positionAvailable = timelineState.isTimelinePositionAvailable(
+                    targetSegment.getTimelineStartTime(),
+                    targetSegment.getTimelineEndTime(),
+                    targetSegment.getLayer());
+            timelineState.getAudioSegments().add(targetSegment);
+
+            if (!positionAvailable) {
+                targetSegment.setStartTime(originalStartTime);
+                targetSegment.setEndTime(originalEndTime);
+                targetSegment.setTimelineStartTime(originalTimelineStartTime);
+                targetSegment.setTimelineEndTime(originalTimelineEndTime);
+                targetSegment.setLayer(originalLayer);
+                throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + targetSegment.getLayer());
             }
-        }
-
-        // Validate timeline position
-        timelineState.getAudioSegments().remove(targetSegment);
-        boolean positionAvailable = timelineState.isTimelinePositionAvailable(
-                targetSegment.getTimelineStartTime(),
-                targetSegment.getTimelineEndTime(),
-                targetSegment.getLayer());
-        timelineState.getAudioSegments().add(targetSegment);
-
-        if (!positionAvailable) {
-            // Revert changes if position is not available
-            targetSegment.setStartTime(originalStartTime);
-            targetSegment.setEndTime(originalEndTime);
-            targetSegment.setTimelineStartTime(originalTimelineStartTime);
-            targetSegment.setTimelineEndTime(originalTimelineEndTime);
-            targetSegment.setLayer(originalLayer);
-            throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + targetSegment.getLayer());
         }
 
         session.setLastAccessTime(System.currentTimeMillis());
@@ -1154,8 +1110,8 @@ public class VideoEditingService {
             Map<String, String> filters,
             List<String> filtersToRemove,
             Double timelineStartTime,
-            Double timelineEndTime
-    ) {
+            Double timelineEndTime,
+            Map<String, List<Keyframe>> keyframes) {
         TimelineState timelineState = getTimelineState(sessionId);
 
         ImageSegment targetSegment = null;
@@ -1170,26 +1126,39 @@ public class VideoEditingService {
             throw new RuntimeException("Image segment not found: " + imageSegmentId);
         }
 
-        if (positionX != null) targetSegment.setPositionX(positionX);
-        if (positionY != null) targetSegment.setPositionY(positionY);
-        if (scale != null) targetSegment.setScale(scale);
-        if (opacity != null) targetSegment.setOpacity(opacity);
-        if (layer != null) targetSegment.setLayer(layer);
-        if (customWidth != null) targetSegment.setCustomWidth(customWidth);
-        if (customHeight != null) targetSegment.setCustomHeight(customHeight);
-        if (maintainAspectRatio != null) targetSegment.setMaintainAspectRatio(maintainAspectRatio);
-        if (timelineStartTime != null) targetSegment.setTimelineStartTime(timelineStartTime);
-        if (timelineEndTime != null) targetSegment.setTimelineEndTime(timelineEndTime);
-
-        if (filters != null && !filters.isEmpty()) {
-            for (Map.Entry<String, String> filter : filters.entrySet()) {
-                targetSegment.addFilter(filter.getKey(), filter.getValue());
+        // Handle keyframes if provided
+        if (keyframes != null && !keyframes.isEmpty()) {
+            for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
+                String property = entry.getKey();
+                List<Keyframe> kfs = entry.getValue();
+                for (Keyframe kf : kfs) {
+                    if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
+                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                    }
+                    targetSegment.addKeyframe(property, kf);
+                }
             }
-        }
-
-        if (filtersToRemove != null && !filtersToRemove.isEmpty()) {
-            for (String filterToRemove : filtersToRemove) {
-                targetSegment.removeFilter(filterToRemove);
+        } else {
+            // Update static properties if no keyframes
+            if (positionX != null) targetSegment.setPositionX(positionX);
+            if (positionY != null) targetSegment.setPositionY(positionY);
+            if (scale != null) targetSegment.setScale(scale);
+            if (opacity != null) targetSegment.setOpacity(opacity);
+            if (layer != null) targetSegment.setLayer(layer);
+            if (customWidth != null) targetSegment.setCustomWidth(customWidth);
+            if (customHeight != null) targetSegment.setCustomHeight(customHeight);
+            if (maintainAspectRatio != null) targetSegment.setMaintainAspectRatio(maintainAspectRatio);
+            if (timelineStartTime != null) targetSegment.setTimelineStartTime(timelineStartTime);
+            if (timelineEndTime != null) targetSegment.setTimelineEndTime(timelineEndTime);
+            if (filters != null && !filters.isEmpty()) {
+                for (Map.Entry<String, String> filter : filters.entrySet()) {
+                    targetSegment.addFilter(filter.getKey(), filter.getValue());
+                }
+            }
+            if (filtersToRemove != null && !filtersToRemove.isEmpty()) {
+                for (String filterToRemove : filtersToRemove) {
+                    targetSegment.removeFilter(filterToRemove);
+                }
             }
         }
 
@@ -1226,6 +1195,84 @@ public class VideoEditingService {
         }
         session.setLastAccessTime(System.currentTimeMillis());
         return session.getTimelineState();
+    }
+
+    public void addKeyframeToSegment(String sessionId, String segmentId, String segmentType, String property, Keyframe keyframe) {
+        EditSession session = getSession(sessionId);
+        if (session == null) throw new RuntimeException("No active session found for sessionId: " + sessionId);
+
+        switch (segmentType.toLowerCase()) {
+            case "video":
+                VideoSegment video = session.getTimelineState().getSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Video segment not found: " + segmentId));
+                video.addKeyframe(property, keyframe);
+                break;
+            case "image":
+                ImageSegment image = session.getTimelineState().getImageSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Image segment not found: " + segmentId));
+                image.addKeyframe(property, keyframe);
+                break;
+            case "text":
+                TextSegment text = session.getTimelineState().getTextSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Text segment not found: " + segmentId));
+                text.addKeyframe(property, keyframe);
+                break;
+            case "audio":
+                AudioSegment audio = session.getTimelineState().getAudioSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Audio segment not found: " + segmentId));
+                audio.addKeyframe(property, keyframe);
+                break;
+            default:
+                throw new IllegalArgumentException("Invalid segment type: " + segmentType);
+        }
+        session.setLastAccessTime(System.currentTimeMillis());
+    }
+
+    public void removeKeyframeFromSegment(String sessionId, String segmentId, String segmentType, String property, double time) {
+        EditSession session = getSession(sessionId);
+        if (session == null) throw new RuntimeException("No active session found for sessionId: " + sessionId);
+
+        switch (segmentType.toLowerCase()) {
+            case "video":
+                VideoSegment video = session.getTimelineState().getSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Video segment not found: " + segmentId));
+                video.removeKeyframe(property, time);
+                break;
+            case "image":
+                ImageSegment image = session.getTimelineState().getImageSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Image segment not found: " + segmentId));
+                image.removeKeyframe(property, time);
+                break;
+            case "text":
+                TextSegment text = session.getTimelineState().getTextSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Text segment not found: " + segmentId));
+                text.removeKeyframe(property, time);
+                break;
+            case "audio":
+                AudioSegment audio = session.getTimelineState().getAudioSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Audio segment not found: " + segmentId));
+                audio.removeKeyframe(property, time);
+                break;
+            default:
+                throw new IllegalArgumentException("Invalid segment type: " + segmentType);
+        }
+        session.setLastAccessTime(System.currentTimeMillis());
     }
 
     public File exportProject(String sessionId) throws IOException, InterruptedException {
@@ -1276,20 +1323,13 @@ public class VideoEditingService {
 
     private String renderFinalVideo(TimelineState timelineState, String outputPath, int canvasWidth, int canvasHeight)
             throws IOException, InterruptedException {
-
         System.out.println("Rendering final video to: " + outputPath);
 
-        if (timelineState.getCanvasWidth() != null) {
-            canvasWidth = timelineState.getCanvasWidth();
-        }
-        if (timelineState.getCanvasHeight() != null) {
-            canvasHeight = timelineState.getCanvasHeight();
-        }
+        if (timelineState.getCanvasWidth() != null) canvasWidth = timelineState.getCanvasWidth();
+        if (timelineState.getCanvasHeight() != null) canvasHeight = timelineState.getCanvasHeight();
 
         File tempDir = new File("temp");
-        if (!tempDir.exists()) {
-            tempDir.mkdirs();
-        }
+        if (!tempDir.exists()) tempDir.mkdirs();
 
         Set<Double> timePoints = new TreeSet<>();
         timePoints.add(0.0);
@@ -1298,24 +1338,28 @@ public class VideoEditingService {
             for (VideoSegment segment : timelineState.getSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
+                segment.getKeyframes().values().forEach(kfs -> kfs.forEach(kf -> timePoints.add(segment.getTimelineStartTime() + kf.getTime())));
             }
         }
         if (timelineState.getImageSegments() != null) {
             for (ImageSegment segment : timelineState.getImageSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
+                segment.getKeyframes().values().forEach(kfs -> kfs.forEach(kf -> timePoints.add(segment.getTimelineStartTime() + kf.getTime())));
             }
         }
         if (timelineState.getTextSegments() != null) {
             for (TextSegment segment : timelineState.getTextSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
+                segment.getKeyframes().values().forEach(kfs -> kfs.forEach(kf -> timePoints.add(segment.getTimelineStartTime() + kf.getTime())));
             }
         }
         if (timelineState.getAudioSegments() != null) {
             for (AudioSegment segment : timelineState.getAudioSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
+                segment.getKeyframes().values().forEach(kfs -> kfs.forEach(kf -> timePoints.add(segment.getTimelineStartTime() + kf.getTime())));
             }
         }
 
@@ -1421,23 +1465,94 @@ public class VideoEditingService {
 
                 double sourceStart = segment.getStartTime() + (segmentStart - segment.getTimelineStartTime());
                 double sourceEnd = sourceStart + segmentDuration;
-                if (sourceStart < segment.getStartTime()) {
-                    sourceStart = segment.getStartTime();
-                }
-                if (sourceEnd > segment.getEndTime()) {
-                    sourceEnd = segment.getEndTime();
-                }
+                if (sourceStart < segment.getStartTime()) sourceStart = segment.getStartTime();
+                if (sourceEnd > segment.getEndTime()) sourceEnd = segment.getEndTime();
 
                 filterComplex.append("[").append(inputIdx).append(":v]");
                 filterComplex.append("trim=").append(sourceStart).append(":").append(sourceEnd).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS,");
-                filterComplex.append("scale=iw*").append(segment.getScale()).append(":ih*").append(segment.getScale());
+
+                List<Keyframe> scaleKeyframes = segment.getKeyframes().getOrDefault("scale", new ArrayList<>());
+                if (!scaleKeyframes.isEmpty()) {
+                    StringBuilder scaleExpr = new StringBuilder();
+                    for (int j = 0; j < scaleKeyframes.size(); j++) {
+                        Keyframe kf = scaleKeyframes.get(j);
+                        double t = kf.getTime();
+                        double val = ((Number) kf.getValue()).doubleValue();
+                        if (j == 0 && t > 0) {
+                            scaleExpr.append("if(lt(t,").append(t).append("),").append(segment.getScale());
+                        } else if (j > 0) {
+                            Keyframe prevKf = scaleKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            double prevVal = ((Number) prevKf.getValue()).doubleValue();
+                            scaleExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == scaleKeyframes.size() - 1) {
+                            scaleExpr.append(",").append(val).append(")");
+                        }
+                    }
+                    filterComplex.append("scale='").append(scaleExpr).append("*iw':'").append(scaleExpr).append("*ih'");
+                } else {
+                    filterComplex.append("scale=iw*").append(segment.getScale()).append(":ih*").append(segment.getScale());
+                }
                 filterComplex.append("[scaled").append(videoOutput).append("];");
 
-                filterComplex.append("[").append(lastOutput).append("][scaled").append(videoOutput).append("]");
-                filterComplex.append("overlay=(W-w)/2+").append(segment.getPositionX()).append(":")
-                        .append("(H-h)/2+").append(segment.getPositionY()).append("[ov").append(videoOutput).append("];");
+                StringBuilder xExpr = new StringBuilder("(W-w)/2");
+                List<Keyframe> posXKeyframes = segment.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+                if (!posXKeyframes.isEmpty()) {
+                    xExpr.append("+");
+                    for (int j = 0; j < posXKeyframes.size(); j++) {
+                        Keyframe kf = posXKeyframes.get(j);
+                        double t = kf.getTime();
+                        int val = ((Number) kf.getValue()).intValue();
+                        if (j == 0 && t > 0) {
+                            xExpr.append("if(lt(t,").append(t).append("),").append(segment.getPositionX());
+                        } else if (j > 0) {
+                            Keyframe prevKf = posXKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            int prevVal = ((Number) prevKf.getValue()).intValue();
+                            xExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == posXKeyframes.size() - 1) {
+                            xExpr.append(",").append(val).append(")");
+                        }
+                    }
+                } else {
+                    xExpr.append("+").append(segment.getPositionX());
+                }
 
+                StringBuilder yExpr = new StringBuilder("(H-h)/2");
+                List<Keyframe> posYKeyframes = segment.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+                if (!posYKeyframes.isEmpty()) {
+                    yExpr.append("+");
+                    for (int j = 0; j < posYKeyframes.size(); j++) {
+                        Keyframe kf = posYKeyframes.get(j);
+                        double t = kf.getTime();
+                        int val = ((Number) kf.getValue()).intValue();
+                        if (j == 0 && t > 0) {
+                            yExpr.append("if(lt(t,").append(t).append("),").append(segment.getPositionY());
+                        } else if (j > 0) {
+                            Keyframe prevKf = posYKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            int prevVal = ((Number) prevKf.getValue()).intValue();
+                            yExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == posYKeyframes.size() - 1) {
+                            yExpr.append(",").append(val).append(")");
+                        }
+                    }
+                } else {
+                    yExpr.append("+").append(segment.getPositionY());
+                }
+
+                filterComplex.append("[").append(lastOutput).append("][scaled").append(videoOutput).append("]");
+                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("'[ov").append(videoOutput).append("];");
                 lastOutput = "ov" + videoOutput;
             }
 
@@ -1451,13 +1566,90 @@ public class VideoEditingService {
                 filterComplex.append("[").append(inputIdx).append(":v]");
                 filterComplex.append("trim=0:").append(displayDuration).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS,");
-                filterComplex.append(generateImageFilters(segment));
+
+                List<Keyframe> scaleKeyframes = segment.getKeyframes().getOrDefault("scale", new ArrayList<>());
+                if (!scaleKeyframes.isEmpty()) {
+                    StringBuilder scaleExpr = new StringBuilder();
+                    for (int j = 0; j < scaleKeyframes.size(); j++) {
+                        Keyframe kf = scaleKeyframes.get(j);
+                        double t = kf.getTime();
+                        double val = ((Number) kf.getValue()).doubleValue();
+                        if (j == 0 && t > 0) {
+                            scaleExpr.append("if(lt(t,").append(t).append("),").append(segment.getScale());
+                        } else if (j > 0) {
+                            Keyframe prevKf = scaleKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            double prevVal = ((Number) prevKf.getValue()).doubleValue();
+                            scaleExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == scaleKeyframes.size() - 1) {
+                            scaleExpr.append(",").append(val).append(")");
+                        }
+                    }
+                    filterComplex.append("scale='").append(scaleExpr).append("*").append(segment.getWidth()).append("':'")
+                            .append(scaleExpr).append("*").append(segment.getHeight()).append("'");
+                } else {
+                    filterComplex.append(generateImageFilters(segment));
+                }
+
                 filterComplex.append("[scaled").append(imageOutput).append("];");
 
-                filterComplex.append("[").append(lastOutput).append("][scaled").append(imageOutput).append("]");
-                filterComplex.append("overlay=(W-w)/2+").append(segment.getPositionX()).append(":")
-                        .append("(H-h)/2+").append(segment.getPositionY()).append("[ov").append(imageOutput).append("];");
+                StringBuilder xExpr = new StringBuilder("(W-w)/2");
+                List<Keyframe> posXKeyframes = segment.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+                if (!posXKeyframes.isEmpty()) {
+                    xExpr.append("+");
+                    for (int j = 0; j < posXKeyframes.size(); j++) {
+                        Keyframe kf = posXKeyframes.get(j);
+                        double t = kf.getTime();
+                        int val = ((Number) kf.getValue()).intValue();
+                        if (j == 0 && t > 0) {
+                            xExpr.append("if(lt(t,").append(t).append("),").append(segment.getPositionX());
+                        } else if (j > 0) {
+                            Keyframe prevKf = posXKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            int prevVal = ((Number) prevKf.getValue()).intValue();
+                            xExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == posXKeyframes.size() - 1) {
+                            xExpr.append(",").append(val).append(")");
+                        }
+                    }
+                } else {
+                    xExpr.append("+").append(segment.getPositionX());
+                }
 
+                StringBuilder yExpr = new StringBuilder("(H-h)/2");
+                List<Keyframe> posYKeyframes = segment.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+                if (!posYKeyframes.isEmpty()) {
+                    yExpr.append("+");
+                    for (int j = 0; j < posYKeyframes.size(); j++) {
+                        Keyframe kf = posYKeyframes.get(j);
+                        double t = kf.getTime();
+                        int val = ((Number) kf.getValue()).intValue();
+                        if (j == 0 && t > 0) {
+                            yExpr.append("if(lt(t,").append(t).append("),").append(segment.getPositionY());
+                        } else if (j > 0) {
+                            Keyframe prevKf = posYKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            int prevVal = ((Number) prevKf.getValue()).intValue();
+                            yExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == posYKeyframes.size() - 1) {
+                            yExpr.append(",").append(val).append(")");
+                        }
+                    }
+                } else {
+                    yExpr.append("+").append(segment.getPositionY());
+                }
+
+                filterComplex.append("[").append(lastOutput).append("][scaled").append(imageOutput).append("]");
+                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("'[ov").append(imageOutput).append("];");
                 lastOutput = "ov" + imageOutput;
             }
 
@@ -1474,10 +1666,61 @@ public class VideoEditingService {
                 if (segment.getBackgroundColor() != null) {
                     filterComplex.append("box=1:boxcolor=").append(segment.getBackgroundColor()).append("@0.5:");
                 }
-                filterComplex.append("x=(w-tw)/2+").append(segment.getPositionX()).append(":");
-                filterComplex.append("y=(h-th)/2+").append(segment.getPositionY());
-                filterComplex.append("[ov").append(textOutput).append("];");
 
+                StringBuilder xExpr = new StringBuilder("(w-tw)/2");
+                List<Keyframe> posXKeyframes = segment.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+                if (!posXKeyframes.isEmpty()) {
+                    xExpr.append("+");
+                    for (int j = 0; j < posXKeyframes.size(); j++) {
+                        Keyframe kf = posXKeyframes.get(j);
+                        double t = kf.getTime();
+                        int val = ((Number) kf.getValue()).intValue();
+                        if (j == 0 && t > 0) {
+                            xExpr.append("if(lt(t,").append(t).append("),").append(segment.getPositionX());
+                        } else if (j > 0) {
+                            Keyframe prevKf = posXKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            int prevVal = ((Number) prevKf.getValue()).intValue();
+                            xExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == posXKeyframes.size() - 1) {
+                            xExpr.append(",").append(val).append(")");
+                        }
+                    }
+                } else {
+                    xExpr.append("+").append(segment.getPositionX());
+                }
+
+                StringBuilder yExpr = new StringBuilder("(h-th)/2");
+                List<Keyframe> posYKeyframes = segment.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+                if (!posYKeyframes.isEmpty()) {
+                    yExpr.append("+");
+                    for (int j = 0; j < posYKeyframes.size(); j++) {
+                        Keyframe kf = posYKeyframes.get(j);
+                        double t = kf.getTime();
+                        int val = ((Number) kf.getValue()).intValue();
+                        if (j == 0 && t > 0) {
+                            yExpr.append("if(lt(t,").append(t).append("),").append(segment.getPositionY());
+                        } else if (j > 0) {
+                            Keyframe prevKf = posYKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            int prevVal = ((Number) prevKf.getValue()).intValue();
+                            yExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == posYKeyframes.size() - 1) {
+                            yExpr.append(",").append(val).append(")");
+                        }
+                    }
+                } else {
+                    yExpr.append("+").append(segment.getPositionY());
+                }
+
+                filterComplex.append("x='").append(xExpr).append("':y='").append(yExpr).append("'");
+                filterComplex.append("[ov").append(textOutput).append("];");
                 lastOutput = "ov" + textOutput;
             }
 
@@ -1490,12 +1733,8 @@ public class VideoEditingService {
 
                 double sourceStart = segment.getStartTime() + (segmentStart - segment.getTimelineStartTime());
                 double sourceEnd = sourceStart + segmentDuration;
-                if (sourceStart < segment.getStartTime()) {
-                    sourceStart = segment.getStartTime();
-                }
-                if (sourceEnd > segment.getEndTime()) {
-                    sourceEnd = segment.getEndTime();
-                }
+                if (sourceStart < segment.getStartTime()) sourceStart = segment.getStartTime();
+                if (sourceEnd > segment.getEndTime()) sourceEnd = segment.getEndTime();
 
                 filterComplex.append("[").append(inputIdx).append(":a]");
                 filterComplex.append("atrim=").append(sourceStart).append(":").append(sourceEnd).append(",");
@@ -1508,25 +1747,42 @@ public class VideoEditingService {
                 String inputIdx = audioInputIndices.get(segment.getLayer());
                 String audioOutput = "aa" + audioCount++;
 
-                // Calculate precise audio position in the timeline
                 double relativePosition = segmentStart - segment.getTimelineStartTime();
                 double sourceStart = segment.getStartTime() + relativePosition;
                 double sourceEnd = sourceStart + segmentDuration;
 
-                // Ensure we don't exceed audio bounds
-                if (sourceStart < segment.getStartTime()) {
-                    sourceStart = segment.getStartTime();
-                }
-                if (sourceEnd > segment.getEndTime()) {
-                    sourceEnd = segment.getEndTime();
-                }
+                if (sourceStart < segment.getStartTime()) sourceStart = segment.getStartTime();
+                if (sourceEnd > segment.getEndTime()) sourceEnd = segment.getEndTime();
 
-                // Properly handle audio timing without affecting pitch or speed
                 filterComplex.append("[").append(inputIdx).append(":a]");
                 filterComplex.append("atrim=").append(sourceStart).append(":").append(sourceEnd).append(",");
                 filterComplex.append("asetpts=PTS-STARTPTS,");
-                // Just apply volume control, no other filters that might affect pitch
-                filterComplex.append("volume=").append(segment.getVolume());
+
+                List<Keyframe> volumeKeyframes = segment.getKeyframes().getOrDefault("volume", new ArrayList<>());
+                if (!volumeKeyframes.isEmpty()) {
+                    StringBuilder volumeExpr = new StringBuilder();
+                    for (int j = 0; j < volumeKeyframes.size(); j++) {
+                        Keyframe kf = volumeKeyframes.get(j);
+                        double t = kf.getTime();
+                        double val = ((Number) kf.getValue()).doubleValue();
+                        if (j == 0 && t > 0) {
+                            volumeExpr.append("if(lt(t,").append(t).append("),").append(segment.getVolume());
+                        } else if (j > 0) {
+                            Keyframe prevKf = volumeKeyframes.get(j - 1);
+                            double prevT = prevKf.getTime();
+                            double prevVal = ((Number) prevKf.getValue()).doubleValue();
+                            volumeExpr.append(",if(between(t,").append(prevT).append(",").append(t).append("),")
+                                    .append(prevVal).append("+((t-").append(prevT).append(")/(").append(t).append("-").append(prevT)
+                                    .append("))*(").append(val).append("-").append(prevVal).append(")");
+                        }
+                        if (j == volumeKeyframes.size() - 1) {
+                            volumeExpr.append(",").append(val).append(")");
+                        }
+                    }
+                    filterComplex.append("volume=").append(volumeExpr);
+                } else {
+                    filterComplex.append("volume=").append(segment.getVolume());
+                }
                 filterComplex.append("[").append(audioOutput).append("];");
                 audioOutputs.add(audioOutput);
             }
@@ -1554,7 +1810,6 @@ public class VideoEditingService {
             command.add("libx264");
             command.add("-c:a");
             command.add("aac");
-            // Ensure audio quality is preserved
             command.add("-b:a");
             command.add("320k");
             command.add("-ar");
@@ -1589,12 +1844,10 @@ public class VideoEditingService {
         concatCommand.add("libx264");
         concatCommand.add("-c:a");
         concatCommand.add("aac");
-        // Ensure audio quality settings for final output
         concatCommand.add("-b:a");
         concatCommand.add("320k");
         concatCommand.add("-ar");
         concatCommand.add("48000");
-        // Ensure full duration is respected
         concatCommand.add("-t");
         concatCommand.add(String.valueOf(totalDuration));
         concatCommand.add("-y");
@@ -1685,4 +1938,3 @@ public class VideoEditingService {
         return defaultFontPath;
     }
 }
-

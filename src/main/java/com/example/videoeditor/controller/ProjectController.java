@@ -1,6 +1,7 @@
 package com.example.videoeditor.controller;
 
 import com.example.videoeditor.dto.ImageSegment;
+import com.example.videoeditor.dto.Keyframe;
 import com.example.videoeditor.dto.TimelineState;
 import com.example.videoeditor.dto.VideoSegment;
 import com.example.videoeditor.entity.Project;
@@ -22,6 +23,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -169,25 +171,34 @@ public class ProjectController {
             User user = getUserFromToken(token);
 
             String segmentId = (String) request.get("segmentId");
-            Integer positionX = request.containsKey("positionX") ?
-                    Integer.valueOf(request.get("positionX").toString()) : null;
-            Integer positionY = request.containsKey("positionY") ?
-                    Integer.valueOf(request.get("positionY").toString()) : null;
-            Double scale = request.containsKey("scale") ?
-                    Double.valueOf(request.get("scale").toString()) : null;
-            Double timelineStartTime = request.containsKey("timelineStartTime") ?
-                    Double.valueOf(request.get("timelineStartTime").toString()) : null;
-            Double timelineEndTime = request.containsKey("timelineEndTime") ?
-                    Double.valueOf(request.get("timelineEndTime").toString()) : null;
-            Integer layer = request.containsKey("layer") ?
-                    Integer.valueOf(request.get("layer").toString()) : null;
-            Double startTime = request.containsKey("startTime") ?
-                    Double.valueOf(request.get("startTime").toString()) : null;
-            Double endTime = request.containsKey("endTime") ?
-                    Double.valueOf(request.get("endTime").toString()) : null;
+            Integer positionX = request.containsKey("positionX") ? Integer.valueOf(request.get("positionX").toString()) : null;
+            Integer positionY = request.containsKey("positionY") ? Integer.valueOf(request.get("positionY").toString()) : null;
+            Double scale = request.containsKey("scale") ? Double.valueOf(request.get("scale").toString()) : null;
+            Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
+            Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
+            Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
+            Double startTime = request.containsKey("startTime") ? Double.valueOf(request.get("startTime").toString()) : null;
+            Double endTime = request.containsKey("endTime") ? Double.valueOf(request.get("endTime").toString()) : null;
+            @SuppressWarnings("unchecked")
+            Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
+
+            Map<String, List<Keyframe>> parsedKeyframes = null;
+            if (keyframes != null) {
+                parsedKeyframes = new HashMap<>();
+                for (Map.Entry<String, List<Map<String, Object>>> entry : keyframes.entrySet()) {
+                    List<Keyframe> kfList = new ArrayList<>();
+                    for (Map<String, Object> kfData : entry.getValue()) {
+                        double time = Double.valueOf(kfData.get("time").toString());
+                        Object value = kfData.get("value");
+                        String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        kfList.add(new Keyframe(time, value, interpolation));
+                    }
+                    parsedKeyframes.put(entry.getKey(), kfList);
+                }
+            }
 
             videoEditingService.updateVideoSegment(sessionId, segmentId, positionX, positionY, scale,
-                    timelineStartTime, layer, timelineEndTime, startTime, endTime);
+                    timelineStartTime, layer, timelineEndTime, startTime, endTime, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -254,23 +265,34 @@ public class ProjectController {
             String segmentId = (String) request.get("segmentId");
             String text = (String) request.get("text");
             String fontFamily = (String) request.get("fontFamily");
-            Integer fontSize = request.containsKey("fontSize") ?
-                    Integer.valueOf(request.get("fontSize").toString()) : null;
+            Integer fontSize = request.containsKey("fontSize") ? Integer.valueOf(request.get("fontSize").toString()) : null;
             String fontColor = (String) request.get("fontColor");
             String backgroundColor = (String) request.get("backgroundColor");
-            Integer positionX = request.containsKey("positionX") ?
-                    Integer.valueOf(request.get("positionX").toString()) : null;
-            Integer positionY = request.containsKey("positionY") ?
-                    Integer.valueOf(request.get("positionY").toString()) : null;
-            Double timelineStartTime = request.containsKey("timelineStartTime") ?
-                    Double.valueOf(request.get("timelineStartTime").toString()) : null;
-            Double timelineEndTime = request.containsKey("timelineEndTime") ?
-                    Double.valueOf(request.get("timelineEndTime").toString()) : null;
-            Integer layer = request.containsKey("layer") ?
-                    Integer.valueOf(request.get("layer").toString()) : null;
+            Integer positionX = request.containsKey("positionX") ? Integer.valueOf(request.get("positionX").toString()) : null;
+            Integer positionY = request.containsKey("positionY") ? Integer.valueOf(request.get("positionY").toString()) : null;
+            Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
+            Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
+            Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
+            @SuppressWarnings("unchecked")
+            Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
+
+            Map<String, List<Keyframe>> parsedKeyframes = null;
+            if (keyframes != null) {
+                parsedKeyframes = new HashMap<>();
+                for (Map.Entry<String, List<Map<String, Object>>> entry : keyframes.entrySet()) {
+                    List<Keyframe> kfList = new ArrayList<>();
+                    for (Map<String, Object> kfData : entry.getValue()) {
+                        double time = Double.valueOf(kfData.get("time").toString());
+                        Object value = kfData.get("value");
+                        String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        kfList.add(new Keyframe(time, value, interpolation));
+                    }
+                    parsedKeyframes.put(entry.getKey(), kfList);
+                }
+            }
 
             videoEditingService.updateTextSegment(sessionId, segmentId, text, fontFamily, fontSize,
-                    fontColor, backgroundColor, positionX, positionY, timelineStartTime, timelineEndTime, layer);
+                    fontColor, backgroundColor, positionX, positionY, timelineStartTime, timelineEndTime, layer, parsedKeyframes);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -349,18 +371,29 @@ public class ProjectController {
             User user = getUserFromToken(token);
 
             String audioSegmentId = (String) request.get("audioSegmentId");
-            Double startTime = request.containsKey("startTime") ?
-                    Double.valueOf(request.get("startTime").toString()) : null;
-            Double endTime = request.containsKey("endTime") ?
-                    Double.valueOf(request.get("endTime").toString()) : null;
-            Double timelineStartTime = request.containsKey("timelineStartTime") ?
-                    Double.valueOf(request.get("timelineStartTime").toString()) : null;
-            Double timelineEndTime = request.containsKey("timelineEndTime") ?
-                    Double.valueOf(request.get("timelineEndTime").toString()) : null;
-            Double volume = request.containsKey("volume") ?
-                    Double.valueOf(request.get("volume").toString()) : null;
-            Integer layer = request.containsKey("layer") ?
-                    Integer.valueOf(request.get("layer").toString()) : null;
+            Double startTime = request.containsKey("startTime") ? Double.valueOf(request.get("startTime").toString()) : null;
+            Double endTime = request.containsKey("endTime") ? Double.valueOf(request.get("endTime").toString()) : null;
+            Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
+            Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
+            Double volume = request.containsKey("volume") ? Double.valueOf(request.get("volume").toString()) : null;
+            Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
+            @SuppressWarnings("unchecked")
+            Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
+
+            Map<String, List<Keyframe>> parsedKeyframes = null;
+            if (keyframes != null) {
+                parsedKeyframes = new HashMap<>();
+                for (Map.Entry<String, List<Map<String, Object>>> entry : keyframes.entrySet()) {
+                    List<Keyframe> kfList = new ArrayList<>();
+                    for (Map<String, Object> kfData : entry.getValue()) {
+                        double time = Double.valueOf(kfData.get("time").toString());
+                        Object value = kfData.get("value");
+                        String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        kfList.add(new Keyframe(time, value, interpolation));
+                    }
+                    parsedKeyframes.put(entry.getKey(), kfList);
+                }
+            }
 
             if (audioSegmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: audioSegmentId");
@@ -379,7 +412,7 @@ public class ProjectController {
             }
 
             videoEditingService.updateAudioSegment(
-                    sessionId, audioSegmentId, startTime, endTime, timelineStartTime, timelineEndTime, volume, layer);
+                    sessionId, audioSegmentId, startTime, endTime, timelineStartTime, timelineEndTime, volume, layer, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -480,32 +513,37 @@ public class ProjectController {
         try {
             User user = getUserFromToken(token);
             String segmentId = (String) request.get("segmentId");
-            Integer positionX = request.containsKey("positionX") ?
-                    Integer.valueOf(request.get("positionX").toString()) : null;
-            Integer positionY = request.containsKey("positionY") ?
-                    Integer.valueOf(request.get("positionY").toString()) : null;
-            Double scale = request.containsKey("scale") ?
-                    Double.valueOf(request.get("scale").toString()) : null;
-            Double opacity = request.containsKey("opacity") ?
-                    Double.valueOf(request.get("opacity").toString()) : null;
-            Integer layer = request.containsKey("layer") ?
-                    Integer.valueOf(request.get("layer").toString()) : null;
-            Integer customWidth = request.containsKey("customWidth") ?
-                    Integer.valueOf(request.get("customWidth").toString()) : null;
-            Integer customHeight = request.containsKey("customHeight") ?
-                    Integer.valueOf(request.get("customHeight").toString()) : null;
-            Boolean maintainAspectRatio = request.containsKey("maintainAspectRatio") ?
-                    Boolean.valueOf(request.get("maintainAspectRatio").toString()) : null;
-            Double timelineStartTime = request.containsKey("timelineStartTime") ?
-                    Double.valueOf(request.get("timelineStartTime").toString()) : null;
-            Double timelineEndTime = request.containsKey("timelineEndTime") ?
-                    Double.valueOf(request.get("timelineEndTime").toString()) : null;
+            Integer positionX = request.containsKey("positionX") ? Integer.valueOf(request.get("positionX").toString()) : null;
+            Integer positionY = request.containsKey("positionY") ? Integer.valueOf(request.get("positionY").toString()) : null;
+            Double scale = request.containsKey("scale") ? Double.valueOf(request.get("scale").toString()) : null;
+            Double opacity = request.containsKey("opacity") ? Double.valueOf(request.get("opacity").toString()) : null;
+            Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
+            Integer customWidth = request.containsKey("customWidth") ? Integer.valueOf(request.get("customWidth").toString()) : null;
+            Integer customHeight = request.containsKey("customHeight") ? Integer.valueOf(request.get("customHeight").toString()) : null;
+            Boolean maintainAspectRatio = request.containsKey("maintainAspectRatio") ? Boolean.valueOf(request.get("maintainAspectRatio").toString()) : null;
+            Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
+            Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
             @SuppressWarnings("unchecked")
-            Map<String, String> filters = request.containsKey("filters") ?
-                    (Map<String, String>) request.get("filters") : null;
+            Map<String, String> filters = request.containsKey("filters") ? (Map<String, String>) request.get("filters") : null;
             @SuppressWarnings("unchecked")
-            List<String> filtersToRemove = request.containsKey("filtersToRemove") ?
-                    (List<String>) request.get("filtersToRemove") : null;
+            List<String> filtersToRemove = request.containsKey("filtersToRemove") ? (List<String>) request.get("filtersToRemove") : null;
+            @SuppressWarnings("unchecked")
+            Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
+
+            Map<String, List<Keyframe>> parsedKeyframes = null;
+            if (keyframes != null) {
+                parsedKeyframes = new HashMap<>();
+                for (Map.Entry<String, List<Map<String, Object>>> entry : keyframes.entrySet()) {
+                    List<Keyframe> kfList = new ArrayList<>();
+                    for (Map<String, Object> kfData : entry.getValue()) {
+                        double time = Double.valueOf(kfData.get("time").toString());
+                        Object value = kfData.get("value");
+                        String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        kfList.add(new Keyframe(time, value, interpolation));
+                    }
+                    parsedKeyframes.put(entry.getKey(), kfList);
+                }
+            }
 
             if (segmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: segmentId");
@@ -522,7 +560,7 @@ public class ProjectController {
 
             videoEditingService.updateImageSegment(
                     sessionId, segmentId, positionX, positionY, scale, opacity, layer,
-                    customWidth, customHeight, maintainAspectRatio, filters, filtersToRemove, timelineStartTime, timelineEndTime);
+                    customWidth, customHeight, maintainAspectRatio, filters, filtersToRemove, timelineStartTime, timelineEndTime, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -639,6 +677,65 @@ public class ProjectController {
         }
     }
 
+    @PostMapping("/{projectId}/add-keyframe")
+    public ResponseEntity<?> addKeyframe(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestBody Map<String, Object> request) {
+        try {
+            User user = getUserFromToken(token);
+
+            String segmentId = (String) request.get("segmentId");
+            String segmentType = (String) request.get("segmentType");
+            String property = (String) request.get("property");
+            Double time = request.containsKey("time") ? Double.valueOf(request.get("time").toString()) : null;
+            Object value = request.get("value");
+            String interpolationType = (String) request.getOrDefault("interpolationType", "linear");
+
+            if (segmentId == null || segmentType == null || property == null || time == null || value == null) {
+                return ResponseEntity.badRequest().body("Missing required parameters: segmentId, segmentType, property, time, or value");
+            }
+            if (time < 0) {
+                return ResponseEntity.badRequest().body("Time must be non-negative");
+            }
+
+            Keyframe keyframe = new Keyframe(time, value, interpolationType);
+            videoEditingService.addKeyframeToSegment(sessionId, segmentId, segmentType, property, keyframe);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error adding keyframe: " + e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/{projectId}/remove-keyframe")
+    public ResponseEntity<?> removeKeyframe(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestParam String segmentId,
+            @RequestParam String segmentType,
+            @RequestParam String property,
+            @RequestParam Double time) {
+        try {
+            User user = getUserFromToken(token);
+
+            if (segmentId == null || segmentType == null || property == null || time == null) {
+                return ResponseEntity.badRequest().body("Missing required parameters: segmentId, segmentType, property, or time");
+            }
+            if (time < 0) {
+                return ResponseEntity.badRequest().body("Time must be non-negative");
+            }
+
+            videoEditingService.removeKeyframeFromSegment(sessionId, segmentId, segmentType, property, time);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error removing keyframe: " + e.getMessage());
+        }
+    }
+
     // Helper method to determine content type
     private String determineContentType(String filename) {
         filename = filename.toLowerCase();
@@ -649,4 +746,3 @@ public class ProjectController {
         return "application/octet-stream"; // Default fallback
     }
 }
-

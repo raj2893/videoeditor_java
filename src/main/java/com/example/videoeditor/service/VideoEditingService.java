@@ -1279,7 +1279,6 @@ public class VideoEditingService {
 
         System.out.println("Rendering final video to: " + outputPath);
 
-        // Use canvas dimensions from timelineState if available
         if (timelineState.getCanvasWidth() != null) {
             canvasWidth = timelineState.getCanvasWidth();
         }
@@ -1287,41 +1286,32 @@ public class VideoEditingService {
             canvasHeight = timelineState.getCanvasHeight();
         }
 
-        // Create a temporary directory for intermediate files
         File tempDir = new File("temp");
         if (!tempDir.exists()) {
             tempDir.mkdirs();
         }
 
-        // Collect all unique time points from all segment types
         Set<Double> timePoints = new TreeSet<>();
-        timePoints.add(0.0); // Always start at 0
+        timePoints.add(0.0);
 
-        // Video segments
         if (timelineState.getSegments() != null) {
             for (VideoSegment segment : timelineState.getSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
             }
         }
-
-        // Image segments
         if (timelineState.getImageSegments() != null) {
             for (ImageSegment segment : timelineState.getImageSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
             }
         }
-
-        // Text segments
         if (timelineState.getTextSegments() != null) {
             for (TextSegment segment : timelineState.getTextSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
                 timePoints.add(segment.getTimelineEndTime());
             }
         }
-
-        // Audio segments
         if (timelineState.getAudioSegments() != null) {
             for (AudioSegment segment : timelineState.getAudioSegments()) {
                 timePoints.add(segment.getTimelineStartTime());
@@ -1332,13 +1322,11 @@ public class VideoEditingService {
         List<Double> sortedTimePoints = new ArrayList<>(timePoints);
         Collections.sort(sortedTimePoints);
 
-        // Total duration is the last time point
         double totalDuration = sortedTimePoints.get(sortedTimePoints.size() - 1);
         System.out.println("Total video duration: " + totalDuration + " seconds");
 
         List<File> intermediateFiles = new ArrayList<>();
 
-        // Process each time segment
         for (int i = 0; i < sortedTimePoints.size() - 1; i++) {
             double segmentStart = sortedTimePoints.get(i);
             double segmentEnd = sortedTimePoints.get(i + 1);
@@ -1348,7 +1336,6 @@ public class VideoEditingService {
 
             System.out.println("Processing segment: " + segmentStart + " to " + segmentEnd);
 
-            // Collect all visible segments in this time range, sorted by layer
             List<VideoSegment> visibleVideoSegments = new ArrayList<>();
             List<ImageSegment> visibleImageSegments = new ArrayList<>();
             List<TextSegment> visibleTextSegments = new ArrayList<>();
@@ -1361,7 +1348,6 @@ public class VideoEditingService {
                     }
                 }
             }
-
             if (timelineState.getImageSegments() != null) {
                 for (ImageSegment segment : timelineState.getImageSegments()) {
                     if (segment.getTimelineStartTime() < segmentEnd && segment.getTimelineEndTime() > segmentStart) {
@@ -1369,7 +1355,6 @@ public class VideoEditingService {
                     }
                 }
             }
-
             if (timelineState.getTextSegments() != null) {
                 for (TextSegment segment : timelineState.getTextSegments()) {
                     if (segment.getTimelineStartTime() < segmentEnd && segment.getTimelineEndTime() > segmentStart) {
@@ -1377,7 +1362,6 @@ public class VideoEditingService {
                     }
                 }
             }
-
             if (timelineState.getAudioSegments() != null) {
                 for (AudioSegment segment : timelineState.getAudioSegments()) {
                     if (segment.getTimelineStartTime() < segmentEnd && segment.getTimelineEndTime() > segmentStart) {
@@ -1386,13 +1370,11 @@ public class VideoEditingService {
                 }
             }
 
-            // Sort by layer (lower to higher)
             visibleVideoSegments.sort(Comparator.comparingInt(VideoSegment::getLayer));
             visibleImageSegments.sort(Comparator.comparingInt(ImageSegment::getLayer));
             visibleTextSegments.sort(Comparator.comparingInt(TextSegment::getLayer));
             visibleAudioSegments.sort(Comparator.comparingInt(AudioSegment::getLayer));
 
-            // Create temporary file for this segment
             String tempFilename = "temp_" + UUID.randomUUID().toString() + ".mp4";
             File tempFile = new File(tempDir, tempFilename);
             intermediateFiles.add(tempFile);
@@ -1401,14 +1383,16 @@ public class VideoEditingService {
             command.add(ffmpegPath);
 
             StringBuilder filterComplex = new StringBuilder();
-            Map<Integer, String> inputIndices = new HashMap<>();
+            Map<Integer, String> videoInputIndices = new HashMap<>();
+            Map<Integer, String> audioInputIndices = new HashMap<>();
             int inputCount = 0;
 
-            // Add inputs
             for (VideoSegment segment : visibleVideoSegments) {
                 command.add("-i");
                 command.add(baseDir + "\\videos\\" + segment.getSourceVideoPath());
-                inputIndices.put(segment.getLayer(), String.valueOf(inputCount++));
+                videoInputIndices.put(segment.getLayer(), String.valueOf(inputCount));
+                audioInputIndices.put(segment.getLayer(), String.valueOf(inputCount));
+                inputCount++;
             }
 
             for (ImageSegment segment : visibleImageSegments) {
@@ -1416,33 +1400,36 @@ public class VideoEditingService {
                 command.add("1");
                 command.add("-i");
                 command.add(baseDir + "\\" + segment.getImagePath());
-                inputIndices.put(segment.getLayer(), String.valueOf(inputCount++));
+                videoInputIndices.put(segment.getLayer(), String.valueOf(inputCount++));
             }
 
             for (AudioSegment segment : visibleAudioSegments) {
                 command.add("-i");
                 command.add(baseDir + "\\" + segment.getAudioPath());
-                inputIndices.put(segment.getLayer(), String.valueOf(inputCount++));
+                audioInputIndices.put(segment.getLayer(), String.valueOf(inputCount++));
             }
 
-            // Base layer: black background
             filterComplex.append("color=c=black:s=").append(canvasWidth).append("x").append(canvasHeight)
                     .append(":d=").append(segmentDuration).append("[base];");
 
             String lastOutput = "base";
             int overlayCount = 0;
 
-            // Process video segments
             for (VideoSegment segment : visibleVideoSegments) {
-                String inputIdx = inputIndices.get(segment.getLayer());
+                String inputIdx = videoInputIndices.get(segment.getLayer());
                 String videoOutput = "v" + overlayCount++;
 
-                double relativeStart = Math.max(segment.getStartTime(), segment.getTimelineStartTime() - segmentStart);
-                double relativeEnd = Math.min(segment.getEndTime(), segment.getTimelineEndTime() - segmentStart + segment.getStartTime());
-                double trimDuration = relativeEnd - relativeStart;
+                double sourceStart = segment.getStartTime() + (segmentStart - segment.getTimelineStartTime());
+                double sourceEnd = sourceStart + segmentDuration;
+                if (sourceStart < segment.getStartTime()) {
+                    sourceStart = segment.getStartTime();
+                }
+                if (sourceEnd > segment.getEndTime()) {
+                    sourceEnd = segment.getEndTime();
+                }
 
                 filterComplex.append("[").append(inputIdx).append(":v]");
-                filterComplex.append("trim=").append(relativeStart).append(":").append(relativeEnd).append(",");
+                filterComplex.append("trim=").append(sourceStart).append(":").append(sourceEnd).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS,");
                 filterComplex.append("scale=iw*").append(segment.getScale()).append(":ih*").append(segment.getScale());
                 filterComplex.append("[scaled").append(videoOutput).append("];");
@@ -1454,9 +1441,8 @@ public class VideoEditingService {
                 lastOutput = "ov" + videoOutput;
             }
 
-            // Process image segments
             for (ImageSegment segment : visibleImageSegments) {
-                String inputIdx = inputIndices.get(segment.getLayer());
+                String inputIdx = videoInputIndices.get(segment.getLayer());
                 String imageOutput = "img" + overlayCount++;
 
                 double displayDuration = Math.min(segment.getTimelineEndTime(), segmentEnd) -
@@ -1468,7 +1454,6 @@ public class VideoEditingService {
                 filterComplex.append(generateImageFilters(segment));
                 filterComplex.append("[scaled").append(imageOutput).append("];");
 
-                // Center the image and apply positionX and positionY offsets
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(imageOutput).append("]");
                 filterComplex.append("overlay=(W-w)/2+").append(segment.getPositionX()).append(":")
                         .append("(H-h)/2+").append(segment.getPositionY()).append("[ov").append(imageOutput).append("];");
@@ -1476,7 +1461,6 @@ public class VideoEditingService {
                 lastOutput = "ov" + imageOutput;
             }
 
-            // Process text segments
             for (TextSegment segment : visibleTextSegments) {
                 String textOutput = "text" + overlayCount++;
                 double textStartOffset = Math.max(0, segment.getTimelineStartTime() - segmentStart);
@@ -1490,7 +1474,6 @@ public class VideoEditingService {
                 if (segment.getBackgroundColor() != null) {
                     filterComplex.append("box=1:boxcolor=").append(segment.getBackgroundColor()).append("@0.5:");
                 }
-                // Center the text and apply positionX and positionY offsets
                 filterComplex.append("x=(w-tw)/2+").append(segment.getPositionX()).append(":");
                 filterComplex.append("y=(h-th)/2+").append(segment.getPositionY());
                 filterComplex.append("[ov").append(textOutput).append("];");
@@ -1498,28 +1481,61 @@ public class VideoEditingService {
                 lastOutput = "ov" + textOutput;
             }
 
-            // Handle audio
-            if (!visibleAudioSegments.isEmpty()) {
-                for (int j = 0; j < visibleAudioSegments.size(); j++) {
-                    AudioSegment segment = visibleAudioSegments.get(j);
-                    String inputIdx = inputIndices.get(segment.getLayer());
-                    String audioOutput = "a" + j;
+            List<String> audioOutputs = new ArrayList<>();
+            int audioCount = 0;
 
-                    double relativeStart = Math.max(segment.getStartTime(), segment.getTimelineStartTime() - segmentStart);
-                    double relativeEnd = Math.min(segment.getEndTime(), segment.getTimelineEndTime() - segmentStart + segment.getStartTime());
-                    double trimDuration = relativeEnd - relativeStart;
+            for (VideoSegment segment : visibleVideoSegments) {
+                String inputIdx = audioInputIndices.get(segment.getLayer());
+                String audioOutput = "va" + audioCount++;
 
-                    filterComplex.append("[").append(inputIdx).append(":a]");
-                    filterComplex.append("atrim=").append(relativeStart).append(":").append(relativeEnd).append(",");
-                    filterComplex.append("asetpts=PTS-STARTPTS");
-                    filterComplex.append(",volume=").append(segment.getVolume());
-                    filterComplex.append("[aout").append(j).append("];");
+                double sourceStart = segment.getStartTime() + (segmentStart - segment.getTimelineStartTime());
+                double sourceEnd = sourceStart + segmentDuration;
+                if (sourceStart < segment.getStartTime()) {
+                    sourceStart = segment.getStartTime();
+                }
+                if (sourceEnd > segment.getEndTime()) {
+                    sourceEnd = segment.getEndTime();
                 }
 
-                for (int j = 0; j < visibleAudioSegments.size(); j++) {
-                    filterComplex.append("[aout").append(j).append("]");
+                filterComplex.append("[").append(inputIdx).append(":a]");
+                filterComplex.append("atrim=").append(sourceStart).append(":").append(sourceEnd).append(",");
+                filterComplex.append("asetpts=PTS-STARTPTS");
+                filterComplex.append("[").append(audioOutput).append("];");
+                audioOutputs.add(audioOutput);
+            }
+
+            for (AudioSegment segment : visibleAudioSegments) {
+                String inputIdx = audioInputIndices.get(segment.getLayer());
+                String audioOutput = "aa" + audioCount++;
+
+                // Calculate precise audio position in the timeline
+                double relativePosition = segmentStart - segment.getTimelineStartTime();
+                double sourceStart = segment.getStartTime() + relativePosition;
+                double sourceEnd = sourceStart + segmentDuration;
+
+                // Ensure we don't exceed audio bounds
+                if (sourceStart < segment.getStartTime()) {
+                    sourceStart = segment.getStartTime();
                 }
-                filterComplex.append("amix=inputs=").append(visibleAudioSegments.size()).append("[aout];");
+                if (sourceEnd > segment.getEndTime()) {
+                    sourceEnd = segment.getEndTime();
+                }
+
+                // Properly handle audio timing without affecting pitch or speed
+                filterComplex.append("[").append(inputIdx).append(":a]");
+                filterComplex.append("atrim=").append(sourceStart).append(":").append(sourceEnd).append(",");
+                filterComplex.append("asetpts=PTS-STARTPTS,");
+                // Just apply volume control, no other filters that might affect pitch
+                filterComplex.append("volume=").append(segment.getVolume());
+                filterComplex.append("[").append(audioOutput).append("];");
+                audioOutputs.add(audioOutput);
+            }
+
+            if (!audioOutputs.isEmpty()) {
+                for (String audioOutput : audioOutputs) {
+                    filterComplex.append("[").append(audioOutput).append("]");
+                }
+                filterComplex.append("amix=inputs=").append(audioOutputs.size()).append(":duration=longest[aout];");
             }
 
             filterComplex.append("[").append(lastOutput).append("]setpts=PTS-STARTPTS[vout]");
@@ -1529,7 +1545,7 @@ public class VideoEditingService {
 
             command.add("-map");
             command.add("[vout]");
-            if (!visibleAudioSegments.isEmpty()) {
+            if (!audioOutputs.isEmpty()) {
                 command.add("-map");
                 command.add("[aout]");
             }
@@ -1538,7 +1554,12 @@ public class VideoEditingService {
             command.add("libx264");
             command.add("-c:a");
             command.add("aac");
-            command.add("-t"); // Explicitly set duration for this segment
+            // Ensure audio quality is preserved
+            command.add("-b:a");
+            command.add("320k");
+            command.add("-ar");
+            command.add("48000");
+            command.add("-t");
             command.add(String.valueOf(segmentDuration));
             command.add("-y");
             command.add(tempFile.getAbsolutePath());
@@ -1547,7 +1568,6 @@ public class VideoEditingService {
             executeFFmpegCommand(command);
         }
 
-        // Concatenate all intermediate files
         File concatFile = File.createTempFile("ffmpeg-concat-", ".txt");
         try (PrintWriter writer = new PrintWriter(new FileWriter(concatFile))) {
             for (File file : intermediateFiles) {
@@ -1569,7 +1589,13 @@ public class VideoEditingService {
         concatCommand.add("libx264");
         concatCommand.add("-c:a");
         concatCommand.add("aac");
-        concatCommand.add("-t"); // Explicitly set total duration
+        // Ensure audio quality settings for final output
+        concatCommand.add("-b:a");
+        concatCommand.add("320k");
+        concatCommand.add("-ar");
+        concatCommand.add("48000");
+        // Ensure full duration is respected
+        concatCommand.add("-t");
         concatCommand.add(String.valueOf(totalDuration));
         concatCommand.add("-y");
         concatCommand.add(outputPath);
@@ -1577,7 +1603,6 @@ public class VideoEditingService {
         System.out.println("FFmpeg concat command: " + String.join(" ", concatCommand));
         executeFFmpegCommand(concatCommand);
 
-        // Cleanup
         concatFile.delete();
         for (File file : intermediateFiles) {
             file.delete();

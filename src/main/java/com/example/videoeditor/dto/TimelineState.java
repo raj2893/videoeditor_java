@@ -8,34 +8,36 @@ import java.util.Map;
 public class TimelineState {
     private List<VideoSegment> segments;
     private List<TextSegment> textSegments;
-//    private List<EditOperation> operations;
     private Map<String, Object> metadata;
     private Long lastModified;
-
     private List<AudioSegment> audioSegments = new ArrayList<>();
     private List<ImageSegment> imageSegments = new ArrayList<>();
-
+    private List<Filter> filters = new ArrayList<>();
     public Map<String, Object> getMetadata() {
         return metadata;
     }
-
     public List<ImageSegment> getImageSegments() {
         return imageSegments;
     }
+    private Integer canvasWidth;
+    private Integer canvasHeight;
 
     public void setImageSegments(List<ImageSegment> imageSegments) {
         this.imageSegments = imageSegments;
     }
 
-    // Assuming this is in a file like TimelineState.java
-    private Integer canvasWidth;
-    private Integer canvasHeight;
-
     public TimelineState() {
         this.segments = new ArrayList<>();
-//        this.operations = new ArrayList<>();
         this.metadata = new HashMap<>();
         this.textSegments = new ArrayList<>();
+    }
+
+    public List<Filter> getFilters() {
+        return filters;
+    }
+
+    public void setFilters(List<Filter> filters) {
+        this.filters = filters;
     }
 
     public Integer getCanvasWidth() {
@@ -76,21 +78,6 @@ public class TimelineState {
     public void setSegments(List<VideoSegment> segments) {
         this.segments = segments;
     }
-
-//    public List<EditOperation> getOperations() {
-//        if (operations == null) {
-//            operations = new ArrayList<>();
-//        }
-//        return operations;
-//    }
-//
-//    public void setOperations(List<EditOperation> operations) {
-//        this.operations = operations;
-//    }
-//
-//    public Map<String, Object> getMetadata() {
-//        return metadata;
-//    }
 
     public void setMetadata(Map<String, Object> metadata) {
         this.metadata = metadata;
@@ -167,5 +154,39 @@ public class TimelineState {
 
     public void setAudioSegments(List<AudioSegment> audioSegments) {
         this.audioSegments = audioSegments;
+    }
+
+    // ADDED: Method to sync legacyFilters for all segments
+    public void syncLegacyFilters() {
+        // Clear existing legacyFilters
+        for (VideoSegment segment : getSegments()) {
+            if (segment.getFiltersAsMap() == null) {
+                segment.setFiltersAsMap(new HashMap<>());
+            } else {
+                segment.getFiltersAsMap().clear();
+            }
+        }
+        for (ImageSegment segment : getImageSegments()) {
+            if (segment.getFiltersAsMap() == null) {
+                segment.setFiltersAsMap(new HashMap<>());
+            } else {
+                segment.getFiltersAsMap().clear();
+            }
+        }
+
+        // Populate legacyFilters from top-level filters
+        for (Filter filter : getFilters()) {
+            String filterValue = filter.getFilterValue() != null ? filter.getFilterValue() : "";
+            for (VideoSegment segment : getSegments()) {
+                if (segment.getId().equals(filter.getSegmentId())) {
+                    segment.getFiltersAsMap().put(filter.getFilterName(), filterValue);
+                }
+            }
+            for (ImageSegment segment : getImageSegments()) {
+                if (segment.getId().equals(filter.getSegmentId())) {
+                    segment.getFiltersAsMap().put(filter.getFilterName(), filterValue);
+                }
+            }
+        }
     }
 }

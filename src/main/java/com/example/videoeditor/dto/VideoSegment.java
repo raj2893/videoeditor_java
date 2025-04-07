@@ -35,18 +35,21 @@ public class VideoSegment {
     }
 
     public void addKeyframe(String property, Keyframe keyframe) {
-        keyframes.computeIfAbsent(property, k -> new ArrayList<>()).add(keyframe);
-        keyframes.get(property).sort(Comparator.comparingDouble(Keyframe::getTime));
+        List<Keyframe> propertyKeyframes = keyframes.computeIfAbsent(property, k -> new ArrayList<>());
+        // Check if a keyframe already exists at this time
+        propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - keyframe.getTime()) < 0.0001); // Use epsilon for floating-point comparison
+        propertyKeyframes.add(keyframe);
+        propertyKeyframes.sort(Comparator.comparingDouble(Keyframe::getTime));
     }
 
     public void removeKeyframe(String property, double time) {
         List<Keyframe> propertyKeyframes = keyframes.get(property);
         if (propertyKeyframes != null) {
-            propertyKeyframes.removeIf(kf -> kf.getTime() == time);
+            propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - time) < 0.0001); // Use epsilon for floating-point comparison
         }
     }
 
-    // Existing getters and setters remain unchanged...
+    // Existing getters and setters remain unchanged
     public String getSourceVideoPath() { return sourceVideoPath; }
     public void setSourceVideoPath(String sourceVideoPath) { this.sourceVideoPath = sourceVideoPath; }
     public double getStartTime() { return startTime; }

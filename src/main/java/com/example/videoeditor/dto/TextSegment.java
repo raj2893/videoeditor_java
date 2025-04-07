@@ -12,8 +12,8 @@ public class TextSegment {
     private int fontSize = 24;
     private String fontColor = "white";
     private String backgroundColor = "transparent";
-    private int positionX = 0;
-    private int positionY = 0;
+    private Integer positionX = 0; // Changed to Integer for nullable static value
+    private Integer positionY = 0; // Changed to Integer for nullable static value
     private double timelineStartTime;
     private double timelineEndTime;
     private int layer = 0;
@@ -30,18 +30,21 @@ public class TextSegment {
     }
 
     public void addKeyframe(String property, Keyframe keyframe) {
-        keyframes.computeIfAbsent(property, k -> new ArrayList<>()).add(keyframe);
-        keyframes.get(property).sort(Comparator.comparingDouble(Keyframe::getTime));
+        List<Keyframe> propertyKeyframes = keyframes.computeIfAbsent(property, k -> new ArrayList<>());
+        // Remove existing keyframe at the same time (override behavior)
+        propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - keyframe.getTime()) < 0.0001);
+        propertyKeyframes.add(keyframe);
+        propertyKeyframes.sort(Comparator.comparingDouble(Keyframe::getTime));
     }
 
     public void removeKeyframe(String property, double time) {
         List<Keyframe> propertyKeyframes = keyframes.get(property);
         if (propertyKeyframes != null) {
-            propertyKeyframes.removeIf(kf -> kf.getTime() == time);
+            propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - time) < 0.0001);
         }
     }
 
-    // Existing getters and setters remain unchanged...
+    // Getters and setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getText() { return text; }
@@ -54,10 +57,10 @@ public class TextSegment {
     public void setFontColor(String fontColor) { this.fontColor = fontColor; }
     public String getBackgroundColor() { return backgroundColor; }
     public void setBackgroundColor(String backgroundColor) { this.backgroundColor = backgroundColor; }
-    public int getPositionX() { return positionX; }
-    public void setPositionX(int positionX) { this.positionX = positionX; }
-    public int getPositionY() { return positionY; }
-    public void setPositionY(int positionY) { this.positionY = positionY; }
+    public Integer getPositionX() { return positionX; }
+    public void setPositionX(Integer positionX) { this.positionX = positionX; }
+    public Integer getPositionY() { return positionY; }
+    public void setPositionY(Integer positionY) { this.positionY = positionY; }
     public double getTimelineStartTime() { return timelineStartTime; }
     public void setTimelineStartTime(double timelineStartTime) { this.timelineStartTime = timelineStartTime; }
     public double getTimelineEndTime() { return timelineEndTime; }

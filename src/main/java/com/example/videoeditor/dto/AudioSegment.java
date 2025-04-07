@@ -13,7 +13,7 @@ public class AudioSegment {
     private double endTime;
     private double timelineStartTime;
     private double timelineEndTime;
-    private double volume = 1.0;
+    private Double volume = 1.0; // Changed to Double for nullable static value
 
     // Keyframes for animatable properties
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
@@ -27,18 +27,21 @@ public class AudioSegment {
     }
 
     public void addKeyframe(String property, Keyframe keyframe) {
-        keyframes.computeIfAbsent(property, k -> new ArrayList<>()).add(keyframe);
-        keyframes.get(property).sort(Comparator.comparingDouble(Keyframe::getTime));
+        List<Keyframe> propertyKeyframes = keyframes.computeIfAbsent(property, k -> new ArrayList<>());
+        // Remove existing keyframe at the same time (override behavior)
+        propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - keyframe.getTime()) < 0.0001);
+        propertyKeyframes.add(keyframe);
+        propertyKeyframes.sort(Comparator.comparingDouble(Keyframe::getTime));
     }
 
     public void removeKeyframe(String property, double time) {
         List<Keyframe> propertyKeyframes = keyframes.get(property);
         if (propertyKeyframes != null) {
-            propertyKeyframes.removeIf(kf -> kf.getTime() == time);
+            propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - time) < 0.0001);
         }
     }
 
-    // Existing getters and setters remain unchanged...
+    // Getters and setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getAudioPath() { return audioPath; }
@@ -53,6 +56,6 @@ public class AudioSegment {
     public void setTimelineStartTime(double timelineStartTime) { this.timelineStartTime = timelineStartTime; }
     public double getTimelineEndTime() { return timelineEndTime; }
     public void setTimelineEndTime(double timelineEndTime) { this.timelineEndTime = timelineEndTime; }
-    public double getVolume() { return volume; }
-    public void setVolume(double volume) { this.volume = volume; }
+    public Double getVolume() { return volume; }
+    public void setVolume(Double volume) { this.volume = volume; }
 }

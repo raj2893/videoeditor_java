@@ -410,7 +410,7 @@ public class VideoEditingService {
                     if (kf.getTime() < 0 || kf.getTime() > (segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime())) {
                         throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
-                    segmentToUpdate.addKeyframe(property, kf);
+                    segmentToUpdate.addKeyframe(property, kf); // This now overrides existing keyframes at the same time
                 }
             }
         } else {
@@ -472,10 +472,9 @@ public class VideoEditingService {
         throw new RuntimeException("No segment found with ID: " + segmentId);
     }
 
-    // Add this method to handle adding text to the timeline
     public void addTextToTimeline(String sessionId, String text, int layer, double timelineStartTime, double timelineEndTime,
                                   String fontFamily, int fontSize, String fontColor, String backgroundColor,
-                                  int positionX, int positionY) {
+                                  Integer positionX, Integer positionY) {
         EditSession session = getSession(sessionId);
 
         // Check if the position is available first
@@ -488,30 +487,17 @@ public class VideoEditingService {
         textSegment.setLayer(layer);
         textSegment.setTimelineStartTime(timelineStartTime);
         textSegment.setTimelineEndTime(timelineEndTime);
-        textSegment.setFontFamily(fontFamily);
+        textSegment.setFontFamily(fontFamily != null ? fontFamily : "ARIAL");
         textSegment.setFontSize(fontSize);
-        textSegment.setFontColor(fontColor);
-        textSegment.setBackgroundColor(backgroundColor);
-        textSegment.setPositionX(positionX);
-        textSegment.setPositionY(positionY);
+        textSegment.setFontColor(fontColor != null ? fontColor : "white");
+        textSegment.setBackgroundColor(backgroundColor != null ? backgroundColor : "transparent");
+        textSegment.setPositionX(positionX != null ? positionX : 0);
+        textSegment.setPositionY(positionY != null ? positionY : 0);
 
         session.getTimelineState().getTextSegments().add(textSegment);
-
-        // Create an ADD operation for tracking
-//        EditOperation addOperation = new EditOperation();
-//        addOperation.setOperationType("ADD_TEXT");
-//        addOperation.setParameters(Map.of(
-//                "time", System.currentTimeMillis(),
-//                "layer", layer,
-//                "timelineStartTime", timelineStartTime,
-//                "timelineEndTime", timelineEndTime
-//        ));
-
-//        session.getTimelineState().getOperations().add(addOperation);
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
-    // Add this method to handle updating text segments
     public void updateTextSegment(String sessionId, String segmentId, String text,
                                   String fontFamily, Integer fontSize, String fontColor,
                                   String backgroundColor, Integer positionX, Integer positionY,
@@ -545,7 +531,12 @@ public class VideoEditingService {
                     if (kf.getTime() < 0 || kf.getTime() > (textSegment.getTimelineEndTime() - textSegment.getTimelineStartTime())) {
                         throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
-                    textSegment.addKeyframe(property, kf);
+                    textSegment.addKeyframe(property, kf); // Overrides existing keyframe at the same time
+                }
+                // Set static value to null if keyframes are provided for that property
+                switch (property) {
+                    case "positionX": textSegment.setPositionX(null); break;
+                    case "positionY": textSegment.setPositionY(null); break;
                 }
             }
         } else {
@@ -653,10 +644,9 @@ public class VideoEditingService {
             String audioPath,
             int layer,
             double startTime,
-            double endTime,  // Changed to double since it will always have a value
+            double endTime,
             double timelineStartTime,
             Double timelineEndTime) throws IOException, InterruptedException {
-
         if (layer >= 0) {
             throw new RuntimeException("Audio layers must be negative (e.g., -1, -2, -3)");
         }
@@ -696,6 +686,7 @@ public class VideoEditingService {
         audioSegment.setEndTime(endTime);
         audioSegment.setTimelineStartTime(timelineStartTime);
         audioSegment.setTimelineEndTime(timelineEndTime);
+        audioSegment.setVolume(1.0); // Default volume
 
         timelineState.getAudioSegments().add(audioSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -736,7 +727,11 @@ public class VideoEditingService {
                     if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
                         throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
-                    targetSegment.addKeyframe(property, kf);
+                    targetSegment.addKeyframe(property, kf); // Overrides existing keyframe at the same time
+                }
+                // Set static value to null if keyframes are provided for that property
+                if ("volume".equals(property)) {
+                    targetSegment.setVolume(null);
                 }
             }
         } else {
@@ -1059,9 +1054,9 @@ public class VideoEditingService {
             int layer,
             double timelineStartTime,
             Double timelineEndTime,
-            int positionX,
-            int positionY,
-            double scale,
+            Integer positionX,
+            Integer positionY,
+            Double scale,
             Map<String, String> filters // Optional filters
     ) {
         TimelineState timelineState = getTimelineState(sessionId);
@@ -1070,9 +1065,9 @@ public class VideoEditingService {
         imageSegment.setId(UUID.randomUUID().toString());
         imageSegment.setImagePath(imagePath);
         imageSegment.setLayer(layer);
-        imageSegment.setPositionX(positionX);
-        imageSegment.setPositionY(positionY);
-        imageSegment.setScale(scale);
+        imageSegment.setPositionX(positionX != null ? positionX : 0);
+        imageSegment.setPositionY(positionY != null ? positionY : 0);
+        imageSegment.setScale(scale != null ? scale : 1.0);
         imageSegment.setTimelineStartTime(timelineStartTime);
         imageSegment.setTimelineEndTime(timelineEndTime == null ? timelineStartTime + 5.0 : timelineEndTime);
 
@@ -1135,7 +1130,13 @@ public class VideoEditingService {
                     if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
                         throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
-                    targetSegment.addKeyframe(property, kf);
+                    targetSegment.addKeyframe(property, kf); // Overrides existing keyframe at the same time
+                }
+                // Set static value to null if keyframes are provided for that property
+                switch (property) {
+                    case "positionX": targetSegment.setPositionX(null); break;
+                    case "positionY": targetSegment.setPositionY(null); break;
+                    case "scale": targetSegment.setScale(null); break;
                 }
             }
         } else {
@@ -1207,28 +1208,28 @@ public class VideoEditingService {
                         .filter(s -> s.getId().equals(segmentId))
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Video segment not found: " + segmentId));
-                video.addKeyframe(property, keyframe);
+                video.addKeyframe(property, keyframe); // This now overrides existing keyframes at the same time
                 break;
             case "image":
                 ImageSegment image = session.getTimelineState().getImageSegments().stream()
                         .filter(s -> s.getId().equals(segmentId))
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Image segment not found: " + segmentId));
-                image.addKeyframe(property, keyframe);
+                image.addKeyframe(property, keyframe); // Assuming ImageSegment has a similar method
                 break;
             case "text":
                 TextSegment text = session.getTimelineState().getTextSegments().stream()
                         .filter(s -> s.getId().equals(segmentId))
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Text segment not found: " + segmentId));
-                text.addKeyframe(property, keyframe);
+                text.addKeyframe(property, keyframe); // Assuming TextSegment has a similar method
                 break;
             case "audio":
                 AudioSegment audio = session.getTimelineState().getAudioSegments().stream()
                         .filter(s -> s.getId().equals(segmentId))
                         .findFirst()
                         .orElseThrow(() -> new RuntimeException("Audio segment not found: " + segmentId));
-                audio.addKeyframe(property, keyframe);
+                audio.addKeyframe(property, keyframe); // Assuming AudioSegment has a similar method
                 break;
             default:
                 throw new IllegalArgumentException("Invalid segment type: " + segmentType);

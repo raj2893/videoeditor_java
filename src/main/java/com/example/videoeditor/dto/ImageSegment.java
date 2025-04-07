@@ -9,9 +9,9 @@ public class ImageSegment {
     private String id = UUID.randomUUID().toString();
     private String imagePath;
     private int layer;
-    private int positionX;
-    private int positionY;
-    private double scale;
+    private Integer positionX = 0; // Changed to Integer for nullable static value
+    private Integer positionY = 0; // Changed to Integer for nullable static value
+    private Double scale = 1.0;    // Changed to Double for nullable static value
     private double opacity = 1.0;
     private double timelineStartTime;
     private double timelineEndTime;
@@ -34,30 +34,33 @@ public class ImageSegment {
     }
 
     public void addKeyframe(String property, Keyframe keyframe) {
-        keyframes.computeIfAbsent(property, k -> new ArrayList<>()).add(keyframe);
-        keyframes.get(property).sort(Comparator.comparingDouble(Keyframe::getTime));
+        List<Keyframe> propertyKeyframes = keyframes.computeIfAbsent(property, k -> new ArrayList<>());
+        // Remove existing keyframe at the same time (override behavior)
+        propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - keyframe.getTime()) < 0.0001);
+        propertyKeyframes.add(keyframe);
+        propertyKeyframes.sort(Comparator.comparingDouble(Keyframe::getTime));
     }
 
     public void removeKeyframe(String property, double time) {
         List<Keyframe> propertyKeyframes = keyframes.get(property);
         if (propertyKeyframes != null) {
-            propertyKeyframes.removeIf(kf -> kf.getTime() == time);
+            propertyKeyframes.removeIf(kf -> Math.abs(kf.getTime() - time) < 0.0001);
         }
     }
 
-    // Existing methods remain unchanged...
+    // Getters and setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getImagePath() { return imagePath; }
     public void setImagePath(String imagePath) { this.imagePath = imagePath; }
     public int getLayer() { return layer; }
     public void setLayer(int layer) { this.layer = layer; }
-    public int getPositionX() { return positionX; }
-    public void setPositionX(int positionX) { this.positionX = positionX; }
-    public int getPositionY() { return positionY; }
-    public void setPositionY(int positionY) { this.positionY = positionY; }
-    public double getScale() { return scale; }
-    public void setScale(double scale) { this.scale = scale; }
+    public Integer getPositionX() { return positionX; }
+    public void setPositionX(Integer positionX) { this.positionX = positionX; }
+    public Integer getPositionY() { return positionY; }
+    public void setPositionY(Integer positionY) { this.positionY = positionY; }
+    public Double getScale() { return scale; }
+    public void setScale(Double scale) { this.scale = scale; }
     public double getOpacity() { return opacity; }
     public void setOpacity(double opacity) { this.opacity = opacity; }
     public double getTimelineStartTime() { return timelineStartTime; }
@@ -78,6 +81,6 @@ public class ImageSegment {
     public void setFilters(Map<String, String> filters) { this.filters = filters; }
     public void addFilter(String filterType, String filterValue) { this.filters.put(filterType, filterValue); }
     public void removeFilter(String filterType) { this.filters.remove(filterType); }
-    public int getEffectiveWidth() { return customWidth > 0 ? customWidth : (int) (width * scale); }
-    public int getEffectiveHeight() { return customHeight > 0 ? customHeight : (int) (height * scale); }
+    public int getEffectiveWidth() { return customWidth > 0 ? customWidth : (int) (width * (scale != null ? scale : 1.0)); }
+    public int getEffectiveHeight() { return customHeight > 0 ? customHeight : (int) (height * (scale != null ? scale : 1.0)); }
 }

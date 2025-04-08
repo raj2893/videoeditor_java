@@ -1011,7 +1011,6 @@ public class VideoEditingService {
         }
 
         timelineState.getImageSegments().add(imageSegment);
-        timelineState.syncLegacyFilters();
         saveTimelineState(sessionId, timelineState);
     }
 
@@ -1094,7 +1093,6 @@ public class VideoEditingService {
                 timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(segmentId) && filtersToRemoveFinal.contains(f.getFilterId()));
             }
 
-            timelineState.syncLegacyFilters();
             session.setLastAccessTime(System.currentTimeMillis());
         }
 
@@ -1114,7 +1112,6 @@ public class VideoEditingService {
         }
 
         timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(segmentId));
-        timelineState.syncLegacyFilters();
         session.setLastAccessTime(System.currentTimeMillis());
 
         saveTimelineState(sessionId, timelineState);
@@ -1909,7 +1906,6 @@ public class VideoEditingService {
         timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(segmentId) && f.getFilterName().equals(filterName));
         timelineState.getFilters().add(filter);
 
-        timelineState.syncLegacyFilters();
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
@@ -1922,7 +1918,6 @@ public class VideoEditingService {
             throw new RuntimeException("Filter not found with ID: " + filterId + " for segment: " + segmentId);
         }
 
-        timelineState.syncLegacyFilters();
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
@@ -2232,7 +2227,6 @@ public class VideoEditingService {
 
         // Remove associated filters
         timelineState.getFilters().removeIf(filter -> filter.getSegmentId().equals(segmentId));
-        timelineState.syncLegacyFilters();
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
@@ -2248,7 +2242,6 @@ public class VideoEditingService {
 
         // Remove associated filters
         timelineState.getFilters().removeIf(filter -> filter.getSegmentId().equals(imageId));
-        timelineState.syncLegacyFilters();
         session.setLastAccessTime(System.currentTimeMillis());
     }
 

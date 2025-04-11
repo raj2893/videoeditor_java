@@ -31,7 +31,7 @@ public class AuthController {
     }
 }
 
-    class GoogleAuthRequest {
+class GoogleAuthRequest {
     private String token;
 
     public String getToken() {

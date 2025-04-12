@@ -1263,6 +1263,40 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
+    public void deleteProjectFiles(Long projectId) throws IOException {
+        // Define directories
+        File videoDir = new File(baseDir, "videos/projects/" + projectId);
+        File imageDir = new File(baseDir, "images/projects/" + projectId);
+        File audioDir = new File(baseDir, "audio/projects/" + projectId);
+
+        // Delete directories if they exist
+        if (videoDir.exists()) {
+            deleteDirectory(videoDir);
+        }
+        if (imageDir.exists()) {
+            deleteDirectory(imageDir);
+        }
+        if (audioDir.exists()) {
+            deleteDirectory(audioDir);
+        }
+    }
+
+    private void deleteDirectory(File directory) throws IOException {
+        if (directory.isDirectory()) {
+            File[] files = directory.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    if (file.isDirectory()) {
+                        deleteDirectory(file);
+                    } else {
+                        file.delete();
+                    }
+                }
+            }
+        }
+        directory.delete();
+    }
+
     public File exportProject(String sessionId) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
 

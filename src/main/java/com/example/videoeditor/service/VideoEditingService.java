@@ -1428,17 +1428,20 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
+                            // Adjust times to timeline
+                            double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = vs.getTimelineStartTime() + kfTime;
                             scaleExpr.insert(0, "lerp(").append(",").append(kfValue)
-                                    .append(",min(1,max(0,(t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))))");
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
                 } else {
                     scaleExpr.append(defaultScale);
                 }
-                filterComplex.append("scale=iw*").append(scaleExpr).append(":ih*").append(scaleExpr);
 
-                filterComplex.append("[scaled").append(outputLabel).append("];");
+// Apply scale using scale filter with eval=frame for keyframe support
+                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("],");
 
                 // Handle position X with keyframes
                 StringBuilder xExpr = new StringBuilder();
@@ -1501,7 +1504,6 @@ public class VideoEditingService {
                 filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
                 // Enable the overlay only between timelineStartTime and timelineEndTime
                 filterComplex.append(":enable='between(t,").append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime()).append(")'");
-
                 filterComplex.append("[ov").append(outputLabel).append("];");
                 lastOutput = "ov" + outputLabel;
             } else if (segment instanceof ImageSegment) {
@@ -1750,19 +1752,36 @@ public class VideoEditingService {
             double audioEnd = as.getEndTime();
             double timelineStart = as.getTimelineStartTime();
             double timelineEnd = as.getTimelineEndTime();
+            double sourceDuration = audioEnd - audioStart;
+            double timelineDuration = timelineEnd - timelineStart;
+
+            // Validate timing
+            if (audioStart < 0 || audioEnd <= audioStart || timelineStart < 0 || timelineEnd <= timelineStart) {
+                System.err.println("Invalid timing for audio segment " + as.getId() + ": startTime=" + audioStart +
+                        ", endTime=" + audioEnd + ", timelineStartTime=" + timelineStart + ", timelineEndTime=" + timelineEnd);
+                continue;
+            }
+            if (Math.abs(timelineDuration - sourceDuration) > 0.01) {
+                System.err.println("Warning: Audio segment " + as.getId() + " timeline duration (" + timelineDuration +
+                        ") does not match source duration (" + sourceDuration + ")");
+            }
 
             filterComplex.append("[").append(inputIdx).append(":a]");
+            // Trim the audio from startTime to endTime
             filterComplex.append("atrim=").append(audioStart).append(":").append(audioEnd).append(",");
+            // Reset timestamps to start at 0
             filterComplex.append("asetpts=PTS-STARTPTS,");
 
+            // Apply volume keyframes or static volume
             List<Keyframe> volumeKeyframes = as.getKeyframes().getOrDefault("volume", new ArrayList<>());
             if (!volumeKeyframes.isEmpty()) {
                 StringBuilder volumeExpr = new StringBuilder();
                 double defaultVolume = as.getVolume() != null ? as.getVolume() : 1.0;
 
                 Collections.sort(volumeKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfTime = volumeKeyframes.get(0).getTime();
                 double firstKfValue = ((Number) volumeKeyframes.get(0).getValue()).doubleValue();
-                volumeExpr.append("if(lt(t,").append(volumeKeyframes.get(0).getTime()).append("),").append(defaultVolume);
+                volumeExpr.append("if(lt(t,").append(firstKfTime).append("),").append(defaultVolume);
 
                 for (int j = 1; j < volumeKeyframes.size(); j++) {
                     Keyframe prevKf = volumeKeyframes.get(j - 1);
@@ -1780,15 +1799,27 @@ public class VideoEditingService {
                     }
                 }
                 volumeExpr.append(",").append(((Number) volumeKeyframes.get(volumeKeyframes.size() - 1).getValue()).doubleValue());
-                for (int j = 0; j < volumeKeyframes.size(); j++) volumeExpr.append(")");
+                for (int j = 0; j < volumeKeyframes.size(); j++) {
+                    volumeExpr.append(")");
+                }
 
-                filterComplex.append("volume=").append(volumeExpr);
-            } else {
-                filterComplex.append("volume=").append(as.getVolume() != null ? as.getVolume() : 1.0);
+                filterComplex.append("volume=").append(volumeExpr).append(",");
+            } else if (as.getVolume() != null && as.getVolume() != 1.0) {
+                filterComplex.append("volume=").append(as.getVolume()).append(",");
             }
 
-            filterComplex.append(",adelay=").append((int)(timelineStart * 1000)).append("|").append((int)(timelineStart * 1000));
-            filterComplex.append(",apad=pad_dur=").append(totalDuration - timelineEnd);
+            // Delay the audio to start at timelineStartTime
+            filterComplex.append("adelay=").append((int)(timelineStart * 1000)).append("|").append((int)(timelineStart * 1000)).append(",");
+            // Ensure the audio duration matches the timeline duration, padding if necessary
+            if (sourceDuration < timelineDuration) {
+                filterComplex.append("apad=pad_dur=").append(timelineDuration - sourceDuration).append(",");
+            } else if (sourceDuration > timelineDuration) {
+                filterComplex.append("atrim=0:").append(timelineDuration).append(",");
+            }
+            // Pad to totalDuration to ensure compatibility with amix
+            filterComplex.append("apad=pad_dur=").append(totalDuration - timelineEnd).append(",");
+            filterComplex.append("asetpts=PTS-STARTPTS");
+
             filterComplex.append("[").append(audioOutput).append("];");
             audioOutputs.add(audioOutput);
         }

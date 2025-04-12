@@ -1440,8 +1440,7 @@ public class VideoEditingService {
                     scaleExpr.append(defaultScale);
                 }
 
-// Apply scale using scale filter with eval=frame for keyframe support
-                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("],");
+                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
 
                 // Handle position X with keyframes
                 StringBuilder xExpr = new StringBuilder();
@@ -1462,13 +1461,16 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
+                            double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = vs.getTimelineStartTime() + kfTime;
                             xExpr.insert(0, "lerp(").append(",").append(kfValue)
-                                    .append(",min(1,max(0,(t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))))");
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
+                    xExpr.insert(0, "(").append("+(W-w)/2-w/2*(").append(scaleExpr).append("-1))");
                 } else {
-                    xExpr.append("(W-w)/2+").append(baseX);
+                    xExpr.append("(W-w)/2+").append(baseX).append("-w/2*(").append(scaleExpr).append("-1)");
                 }
 
                 // Handle position Y with keyframes
@@ -1490,19 +1492,21 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
+                            double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = vs.getTimelineStartTime() + kfTime;
                             yExpr.insert(0, "lerp(").append(",").append(kfValue)
-                                    .append(",min(1,max(0,(t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))))");
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
+                    yExpr.insert(0, "(").append("+(H-h)/2-h/2*(").append(scaleExpr).append("-1))");
                 } else {
-                    yExpr.append("(H-h)/2+").append(baseY);
+                    yExpr.append("(H-h)/2+").append(baseY).append("-h/2*(").append(scaleExpr).append("-1)");
                 }
 
                 // Overlay the scaled video onto the previous output
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
                 filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
-                // Enable the overlay only between timelineStartTime and timelineEndTime
                 filterComplex.append(":enable='between(t,").append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime()).append(")'");
                 filterComplex.append("[ov").append(outputLabel).append("];");
                 lastOutput = "ov" + outputLabel;
@@ -1532,17 +1536,15 @@ public class VideoEditingService {
                     }
                 }
 
-                StringBuilder scaleWExpr = new StringBuilder(String.valueOf(is.getWidth()));
-                StringBuilder scaleHExpr = new StringBuilder(String.valueOf(is.getHeight()));
+                // Handle scaling with keyframes
+                StringBuilder scaleExpr = new StringBuilder();
                 List<Keyframe> scaleKeyframes = is.getKeyframes().getOrDefault("scale", new ArrayList<>());
                 double defaultScale = is.getScale() != null ? is.getScale() : 1.0;
 
                 if (!scaleKeyframes.isEmpty()) {
                     Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
-                    scaleWExpr = new StringBuilder("if(lt(t,").append(scaleKeyframes.get(0).getTime()).append("),").append(is.getWidth() * firstKfValue);
-                    scaleHExpr = new StringBuilder("if(lt(t,").append(scaleKeyframes.get(0).getTime()).append("),").append(is.getHeight() * firstKfValue);
-
+                    scaleExpr.append(firstKfValue);
                     for (int j = 1; j < scaleKeyframes.size(); j++) {
                         Keyframe prevKf = scaleKeyframes.get(j - 1);
                         Keyframe kf = scaleKeyframes.get(j);
@@ -1552,31 +1554,22 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
-                            scaleWExpr.append(",if(between(t,").append(prevTime).append(",").append(kfTime).append("),");
-                            scaleWExpr.append(is.getWidth() * prevValue).append("+((t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))*(")
-                                    .append(is.getWidth() * kfValue).append("-").append(is.getWidth() * prevValue).append(")");
-
-                            scaleHExpr.append(",if(between(t,").append(prevTime).append(",").append(kfTime).append("),");
-                            scaleHExpr.append(is.getHeight() * prevValue).append("+((t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))*(")
-                                    .append(is.getHeight() * kfValue).append("-").append(is.getHeight() * prevValue).append(")");
+                            // Adjust times to timeline
+                            double timelinePrevTime = is.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = is.getTimelineStartTime() + kfTime;
+                            scaleExpr.insert(0, "lerp(").append(",").append(kfValue)
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    scaleWExpr.append(",").append(is.getWidth() * ((Number) scaleKeyframes.get(scaleKeyframes.size() - 1).getValue()).doubleValue());
-                    scaleHExpr.append(",").append(is.getHeight() * ((Number) scaleKeyframes.get(scaleKeyframes.size() - 1).getValue()).doubleValue());
-                    for (int j = 0; j < scaleKeyframes.size(); j++) {
-                        scaleWExpr.append(")");
-                        scaleHExpr.append(")");
-                    }
                 } else {
-                    scaleWExpr.append("*").append(defaultScale);
-                    scaleHExpr.append("*").append(defaultScale);
+                    scaleExpr.append(defaultScale);
                 }
-                filterComplex.append("scale=").append(scaleWExpr).append(":").append(scaleHExpr);
-                filterComplex.append("[scaled").append(outputLabel).append("];");
 
-                StringBuilder xExpr = new StringBuilder("(W-w)/2");
+                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
+
+                // Handle position X with keyframes
+                StringBuilder xExpr = new StringBuilder();
                 List<Keyframe> posXKeyframes = is.getKeyframes().getOrDefault("positionX", new ArrayList<>());
                 Integer defaultPosX = is.getPositionX();
                 double baseX = defaultPosX != null ? defaultPosX : 0;
@@ -1584,8 +1577,7 @@ public class VideoEditingService {
                 if (!posXKeyframes.isEmpty()) {
                     Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
-                    xExpr = new StringBuilder("if(lt(t,").append(posXKeyframes.get(0).getTime()).append("),").append(firstKfValue);
-
+                    xExpr.append(firstKfValue);
                     for (int j = 1; j < posXKeyframes.size(); j++) {
                         Keyframe prevKf = posXKeyframes.get(j - 1);
                         Keyframe kf = posXKeyframes.get(j);
@@ -1595,19 +1587,22 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
-                            xExpr.append(",if(between(t,").append(prevTime).append(",").append(kfTime).append("),");
-                            xExpr.append(prevValue).append("+((t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))*(")
-                                    .append(kfValue).append("-").append(prevValue).append(")");
+                            double timelinePrevTime = is.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = is.getTimelineStartTime() + kfTime;
+                            xExpr.insert(0, "lerp(").append(",").append(kfValue)
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    xExpr.append(",").append(((Number) posXKeyframes.get(posXKeyframes.size() - 1).getValue()).doubleValue());
-                    for (int j = 0; j < posXKeyframes.size(); j++) xExpr.append(")");
+                    // Center the image and adjust for scaling
+                    xExpr.insert(0, "(").append("+(W-w)/2-w/2*(").append(scaleExpr).append("-1))");
                 } else {
-                    xExpr.append("+").append(baseX);
+                    // Center the image with offset and adjust for scaling
+                    xExpr.append("(W-w)/2+").append(baseX).append("-w/2*(").append(scaleExpr).append("-1)");
                 }
 
-                StringBuilder yExpr = new StringBuilder("(H-h)/2");
+                // Handle position Y with keyframes
+                StringBuilder yExpr = new StringBuilder();
                 List<Keyframe> posYKeyframes = is.getKeyframes().getOrDefault("positionY", new ArrayList<>());
                 Integer defaultPosY = is.getPositionY();
                 double baseY = defaultPosY != null ? defaultPosY : 0;
@@ -1615,8 +1610,7 @@ public class VideoEditingService {
                 if (!posYKeyframes.isEmpty()) {
                     Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
-                    yExpr = new StringBuilder("if(lt(t,").append(posYKeyframes.get(0).getTime()).append("),").append(firstKfValue);
-
+                    yExpr.append(firstKfValue);
                     for (int j = 1; j < posYKeyframes.size(); j++) {
                         Keyframe prevKf = posYKeyframes.get(j - 1);
                         Keyframe kf = posYKeyframes.get(j);
@@ -1626,20 +1620,22 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
-                            yExpr.append(",if(between(t,").append(prevTime).append(",").append(kfTime).append("),");
-                            yExpr.append(prevValue).append("+((t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))*(")
-                                    .append(kfValue).append("-").append(prevValue).append(")");
+                            double timelinePrevTime = is.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = is.getTimelineStartTime() + kfTime;
+                            yExpr.insert(0, "lerp(").append(",").append(kfValue)
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    yExpr.append(",").append(((Number) posYKeyframes.get(posYKeyframes.size() - 1).getValue()).doubleValue());
-                    for (int j = 0; j < posYKeyframes.size(); j++) yExpr.append(")");
+                    // Center the image and adjust for scaling
+                    yExpr.insert(0, "(").append("+(H-h)/2-h/2*(").append(scaleExpr).append("-1))");
                 } else {
-                    yExpr.append("+").append(baseY);
+                    // Center the image with offset and adjust for scaling
+                    yExpr.append("(H-h)/2+").append(baseY).append("-h/2*(").append(scaleExpr).append("-1)");
                 }
 
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("'");
+                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
                 filterComplex.append(":enable='between(t,").append(is.getTimelineStartTime()).append(",").append(is.getTimelineEndTime()).append(")'");
                 filterComplex.append("[ov").append(outputLabel).append("];");
                 lastOutput = "ov" + outputLabel;
@@ -1657,7 +1653,8 @@ public class VideoEditingService {
                     filterComplex.append("box=1:boxcolor=").append(ts.getBackgroundColor()).append("@0.5:");
                 }
 
-                StringBuilder xExpr = new StringBuilder("(w-tw)/2");
+                // Handle position X with keyframes
+                StringBuilder xExpr = new StringBuilder();
                 List<Keyframe> posXKeyframes = ts.getKeyframes().getOrDefault("positionX", new ArrayList<>());
                 Integer defaultPosX = ts.getPositionX();
                 double baseX = defaultPosX != null ? defaultPosX : 0;
@@ -1665,8 +1662,7 @@ public class VideoEditingService {
                 if (!posXKeyframes.isEmpty()) {
                     Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
-                    xExpr = new StringBuilder("if(lt(t,").append(posXKeyframes.get(0).getTime()).append("),").append(firstKfValue);
-
+                    xExpr.append(firstKfValue);
                     for (int j = 1; j < posXKeyframes.size(); j++) {
                         Keyframe prevKf = posXKeyframes.get(j - 1);
                         Keyframe kf = posXKeyframes.get(j);
@@ -1676,19 +1672,20 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
-                            xExpr.append(",if(between(t,").append(prevTime).append(",").append(kfTime).append("),");
-                            xExpr.append(prevValue).append("+((t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))*(")
-                                    .append(kfValue).append("-").append(prevValue).append(")");
+                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                            xExpr.insert(0, "lerp(").append(",").append(kfValue)
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    xExpr.append(",").append(((Number) posXKeyframes.get(posXKeyframes.size() - 1).getValue()).doubleValue());
-                    for (int j = 0; j < posXKeyframes.size(); j++) xExpr.append(")");
+                    xExpr.insert(0, "(").append("+(w-tw)/2)");
                 } else {
-                    xExpr.append("+").append(baseX);
+                    xExpr.append("(w-tw)/2+").append(baseX);
                 }
 
-                StringBuilder yExpr = new StringBuilder("(h-th)/2");
+                // Handle position Y with keyframes
+                StringBuilder yExpr = new StringBuilder();
                 List<Keyframe> posYKeyframes = ts.getKeyframes().getOrDefault("positionY", new ArrayList<>());
                 Integer defaultPosY = ts.getPositionY();
                 double baseY = defaultPosY != null ? defaultPosY : 0;
@@ -1696,8 +1693,7 @@ public class VideoEditingService {
                 if (!posYKeyframes.isEmpty()) {
                     Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
-                    yExpr = new StringBuilder("if(lt(t,").append(posYKeyframes.get(0).getTime()).append("),").append(firstKfValue);
-
+                    yExpr.append(firstKfValue);
                     for (int j = 1; j < posYKeyframes.size(); j++) {
                         Keyframe prevKf = posYKeyframes.get(j - 1);
                         Keyframe kf = posYKeyframes.get(j);
@@ -1707,16 +1703,16 @@ public class VideoEditingService {
                         double kfValue = ((Number) kf.getValue()).doubleValue();
 
                         if (kfTime > prevTime) {
-                            yExpr.append(",if(between(t,").append(prevTime).append(",").append(kfTime).append("),");
-                            yExpr.append(prevValue).append("+((t-").append(prevTime).append(")/(")
-                                    .append(kfTime).append("-").append(prevTime).append("))*(")
-                                    .append(kfValue).append("-").append(prevValue).append(")");
+                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                            yExpr.insert(0, "lerp(").append(",").append(kfValue)
+                                    .append(",min(1,max(0,(t-").append(timelinePrevTime).append(")/(")
+                                    .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    yExpr.append(",").append(((Number) posYKeyframes.get(posYKeyframes.size() - 1).getValue()).doubleValue());
-                    for (int j = 0; j < posYKeyframes.size(); j++) yExpr.append(")");
+                    yExpr.insert(0, "(").append("+(h-th)/2)");
                 } else {
-                    yExpr.append("+").append(baseY);
+                    yExpr.append("(h-th)/2+").append(baseY);
                 }
 
                 filterComplex.append("x='").append(xExpr).append("':y='").append(yExpr).append("'");

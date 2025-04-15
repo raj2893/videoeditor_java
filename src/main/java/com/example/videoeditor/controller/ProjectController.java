@@ -62,7 +62,10 @@ public class ProjectController {
         Integer height = request.get("height") != null ?
                 ((Number) request.get("height")).intValue() : 1080;
 
-        Project project = videoEditingService.createProject(user, name, width, height);
+        Float fps = request.get("fps") != null ?
+                ((Number) request.get("fps")).floatValue() : null;
+
+        Project project = videoEditingService.createProject(user, name, width, height, fps);
         return ResponseEntity.ok(project);
     }
 

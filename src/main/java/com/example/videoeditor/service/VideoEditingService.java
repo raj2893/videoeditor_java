@@ -155,7 +155,7 @@ public class VideoEditingService {
         project.setAudioJson(objectMapper.writeValueAsString(audioFiles));
     }
 
-    public Project createProject(User user, String name, Integer width, Integer height) throws JsonProcessingException {
+    public Project createProject(User user, String name, Integer width, Integer height, Float fps) throws JsonProcessingException {
         Project project = new Project();
         project.setUser(user);
         project.setName(name);
@@ -163,6 +163,7 @@ public class VideoEditingService {
         project.setLastModified(LocalDateTime.now());
         project.setWidth(width != null ? width : 1920); // Default: 1920
         project.setHeight(height != null ? height : 1080); // Default: 1080
+        project.setFps(fps != null ? fps : 25.0f);
         project.setTimelineState(objectMapper.writeValueAsString(new TimelineState()));
         return projectRepository.save(project);
     }
@@ -1346,7 +1347,7 @@ public class VideoEditingService {
         }
 
         // Render the final video
-        String exportedVideoPath = renderFinalVideo(session.getTimelineState(), outputPath, project.getWidth(), project.getHeight());
+        String exportedVideoPath = renderFinalVideo(session.getTimelineState(), outputPath, project.getWidth(), project.getHeight(), project.getFps());
 
         // Update project status to exported
         project.setStatus("EXPORTED");
@@ -1368,7 +1369,7 @@ public class VideoEditingService {
         return new File(exportedVideoPath);
     }
 
-    private String renderFinalVideo(TimelineState timelineState, String outputPath, int canvasWidth, int canvasHeight)
+    private String renderFinalVideo(TimelineState timelineState, String outputPath, int canvasWidth, int canvasHeight, Float fps)
             throws IOException, InterruptedException {
         System.out.println("Rendering final video to: " + outputPath);
 
@@ -1908,6 +1909,8 @@ public class VideoEditingService {
         command.add("48000");
         command.add("-t");
         command.add(String.valueOf(totalDuration));
+        command.add("-r");
+        command.add(String.valueOf(fps));
         command.add("-y");
         command.add(outputPath);
 

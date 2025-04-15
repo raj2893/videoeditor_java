@@ -31,6 +31,9 @@ public class Project {
     private Integer width;
     private Integer height;
 
+    @Column(nullable = false, columnDefinition = "FLOAT DEFAULT 25.0")
+    private Float fps = 25.0f; // New field for FPS with default 25
+
     private String exportedVideoPath;
 
     public String getExportedVideoPath() {
@@ -140,5 +143,13 @@ public class Project {
 
     public void setAudioJson(String audioJson) {
         this.audioJson = audioJson;
+    }
+
+    public Float getFps() {
+        return fps;
+    }
+
+    public void setFps(Float fps) {
+        this.fps = fps;
     }
 }

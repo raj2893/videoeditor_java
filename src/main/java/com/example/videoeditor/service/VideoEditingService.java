@@ -1474,147 +1474,112 @@ public class VideoEditingService {
                         .filter(f -> f.getSegmentId().equals(vs.getId()))
                         .collect(Collectors.toList());
                 for (Filter filter : segmentFilters) {
-                    // Skip invalid filters
                     if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
                         System.err.println("Skipping invalid filter for segment " + vs.getId() + ": null or empty filter name");
                         continue;
                     }
                     String filterName = filter.getFilterName().toLowerCase().trim();
                     String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
-                    // Skip if filterValue is null or empty for non-toggle filters
-                    if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "vintage", "invert", "emboss").contains(filterName)) {
+                    if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "invert").contains(filterName)) {
                         System.err.println("Skipping filter " + filterName + " for segment " + vs.getId() + ": empty filter value");
                         continue;
                     }
-                    switch (filterName) {
-                        case "brightness":
-                            filterComplex.append("eq=brightness=").append(filterValue).append(",");
-                            break;
-                        case "contrast":
-                            filterComplex.append("eq=contrast=").append(filterValue).append(",");
-                            break;
-                        case "saturation":
-                            filterComplex.append("eq=saturation=").append(filterValue).append(",");
-                            break;
-                        case "hue":
-                            filterComplex.append("hue=h=").append(filterValue).append(",");
-                            break;
-                        case "gamma":
-                            filterComplex.append("eq=gamma=").append(filterValue).append(",");
-                            break;
-                        case "colorbalance":
-                            // Expect filterValue as "r,g,b"
-                            String[] rgb = filterValue.split(",");
-                            if (rgb.length == 3) {
-                                filterComplex.append("colorbalance=rs=").append(rgb[0])
-                                        .append(":gs=").append(rgb[1])
-                                        .append(":bs=").append(rgb[2]).append(",");
-                            }
-                            break;
-                        case "blur":
-                            filterComplex.append("gblur=sigma=").append(filterValue).append(",");
-                            break;
-                        case "sharpen":
-                            // Map sharpen to unsharp filter
-                            double sharpenValue = Double.parseDouble(filterValue);
-                            String amount = sharpenValue >= 0 ? String.valueOf(sharpenValue) : String.valueOf(-sharpenValue);
-                            filterComplex.append("unsharp=lx=5:ly=5:la=").append(amount).append(",");
-                            break;
-                        case "edge":
-                            filterComplex.append("edgedetect=low=").append(filterValue)
-                                    .append(":high=").append(Double.parseDouble(filterValue) * 2).append(",");
-                            break;
-                        case "grayscale":
-                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                filterComplex.append("hue=s=0,");
-                            }
-                            break;
-                        case "sepia":
-                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                filterComplex.append("colorchannelmixer=.393:.769:.189:.349:.686:.168:.272:.534:.131,");
-                            }
-                            break;
-                        case "vintage":
-                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                filterComplex.append("curves=preset=vintage,");
-                            }
-                            break;
-                        case "posterize":
-                            // Simulate posterization by quantizing colors
-                            int levels = Integer.parseInt(filterValue);
-                            // Map levels (2-32) to quantization steps
-                            double step = 255.0 / (levels - 1);
-                            filterComplex.append("eq=r='floor(r*").append(levels).append("/256)*").append(step)
-                                    .append(":g=floor(g*").append(levels).append("/256)*").append(step)
-                                    .append(":b=floor(b*").append(levels).append("/256)*").append(step).append("',");
-                            break;
-                        case "solarize":
-                            // Simulate solarization using lutrgb
-                            double threshold = Double.parseDouble(filterValue) * 255;
-                            filterComplex.append("lutrgb=r='if(gt(val,").append(threshold).append("),255-val,val)':")
-                                    .append("g='if(gt(val,").append(threshold).append("),255-val,val)':")
-                                    .append("b='if(gt(val,").append(threshold).append("),255-val,val)',");
-                            break;
-                        case "invert":
-                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                filterComplex.append("negate,");
-                            }
-                            break;
-                        case "noise":
-                            filterComplex.append("noise=alls=").append(filterValue).append(":allf=t+u,");
-                            break;
-                        case "vignette":
-                            filterComplex.append("vignette=angle=PI/").append(filterValue).append(",");
-                            break;
-                        case "pixelize":
-                            int blockSize = Integer.parseInt(filterValue);
-                            filterComplex.append("pixelize=pw=").append(blockSize)
-                                    .append(":ph=").append(blockSize).append(":mode=average,");
-                            break;
-                        case "rotate":
-                            double angleRad = Math.toRadians(Double.parseDouble(filterValue));
-                            filterComplex.append("rotate=").append(angleRad).append(":c=black,");
-                            break;
-                        case "flip":
-                            if (filterValue.equals("horizontal")) {
-                                filterComplex.append("hflip,");
-                            } else if (filterValue.equals("vertical")) {
-                                filterComplex.append("vflip,");
-                            }
-                            break;
-                        case "opacity":
-                            filterComplex.append("format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='a(X,Y)*").append(filterValue).append("',");
-                            break;
-                        case "emboss":
-                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                filterComplex.append("convolution='0 -1 0 -1 5 -1 0 -1 0':normalize=0,");
-                            }
-                            break;
-                        case "glow":
-                            // Simulate glow using boxblur and blend
-                            double glowRadius = Double.parseDouble(filterValue);
-                            if (glowRadius > 0) {
-                                filterComplex.append("[tmp];[tmp]boxblur=").append(glowRadius / 2).append(":1[tmpblur];")
-                                        .append("[tmp][tmpblur]blend=all_mode=screen:all_opacity=0.5[tmp],");
-                            }
-                            break;
-                        case "overlay":
-                            // Expect filterValue as "color@opacity"
-                            String[] overlayParts = filterValue.split("@");
-                            if (overlayParts.length == 2) {
-                                String color = overlayParts[0];
-                                String opacity = overlayParts[1];
-                                filterComplex.append("[tmp];color=c=").append(color)
-                                        .append(":s=").append(canvasWidth).append("x").append(canvasHeight)
-                                        .append(":d=").append(totalDuration).append("[ovcolor];")
-                                        .append("[tmp][ovcolor]overlay=0:0:format=auto:alpha=blend:enable='between(t,")
-                                        .append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime())
-                                        .append(")'[tmp],");
-                            }
-                            break;
-                        default:
-                            System.err.println("Unsupported filter: " + filterName + " for segment " + vs.getId());
-                            break;
+                    try {
+                        switch (filterName) {
+                            case "brightness":
+                                double brightness = Double.parseDouble(filterValue);
+                                if (brightness >= -1 && brightness <= 1) {
+                                    double cssBrightnessMultiplier = 1 + brightness;
+                                    if (cssBrightnessMultiplier <= 0) {
+                                        filterComplex.append("lutrgb=r=0:g=0:b=0,");
+                                        break;
+                                    }
+                                    if (cssBrightnessMultiplier == 1.0) {
+                                        break;
+                                    }
+                                    filterComplex.append("format=rgb24,");
+                                    String lut = String.format(
+                                            "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
+                                            cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
+                                    );
+                                    filterComplex.append(lut);
+                                    filterComplex.append("format=yuv420p,");
+                                }
+                                break;
+                            case "contrast":
+                                double contrast = Double.parseDouble(filterValue);
+                                if (contrast >= 0 && contrast <= 2) {
+                                    if (contrast == 1.0) {
+                                        break; // No change needed for contrast = 1
+                                    }
+                                    filterComplex.append("format=rgb24,");
+                                    double offset = 128 * (1 - contrast); // CSS contrast offset
+                                    String lut = String.format(
+                                            "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
+                                            contrast, offset, contrast, offset, contrast, offset
+                                    );
+                                    filterComplex.append(lut);
+                                    filterComplex.append("format=yuv420p,");
+                                }
+                                break;
+                            case "saturation":
+                                double saturation;
+                                try {
+                                    saturation = Double.parseDouble(filterValue);
+                                } catch (NumberFormatException e) {
+                                    System.err.println("Invalid saturation value: " + filterValue + " for segment " + vs.getId());
+                                    break;
+                                }
+                                if (saturation >= 0 && saturation <= 2) {
+                                    if (Math.abs(saturation - 1.0) < 0.01) {
+                                        System.out.println("Skipping saturation filter for segment " + vs.getId() + ": value ≈ 1 (" + saturation + ")");
+                                        break; // No change needed for saturation ≈ 1
+                                    }
+                                    System.out.println("Applying saturation filter for segment " + vs.getId() + ": frontend=" + saturation);
+                                    filterComplex.append("eq=saturation=").append(String.format("%.2f", saturation)).append(",");
+                                } else {
+                                    System.err.println("Saturation value out of range [0, 2]: " + saturation + " for segment " + vs.getId());
+                                }
+                                break;
+                            case "hue":
+                                double hue = Double.parseDouble(filterValue);
+                                if (hue >= -180 && hue <= 180) {
+                                    if (hue == 0.0) {
+                                        break; // No change needed for hue = 0
+                                    }
+                                    filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
+                                }
+                                break;
+                            case "grayscale":
+                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                    filterComplex.append("hue=s=0,");
+                                }
+                                break;
+                            case "invert":
+                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                    filterComplex.append("negate,");
+                                }
+                                break;
+                            case "rotate":
+                                double rotate = Double.parseDouble(filterValue);
+                                if (rotate >= -180 && rotate <= 180) {
+                                    double angleRad = Math.toRadians(rotate);
+                                    filterComplex.append("rotate=").append(angleRad).append(":c=black,");
+                                }
+                                break;
+                            case "flip":
+                                if (filterValue.equals("horizontal")) {
+                                    filterComplex.append("hflip,");
+                                } else if (filterValue.equals("vertical")) {
+                                    filterComplex.append("vflip,");
+                                }
+                                break;
+                            default:
+                                System.err.println("Unsupported filter: " + filterName + " for segment " + vs.getId());
+                                break;
+                        }
+                    } catch (NumberFormatException e) {
+                        System.err.println("Invalid filter value for " + filterName + " in segment " + vs.getId() + ": " + filterValue);
                     }
                 }
 
@@ -1726,154 +1691,119 @@ public class VideoEditingService {
             filterComplex.append("trim=0:").append(segmentDuration).append(",");
             filterComplex.append("setpts=PTS-STARTPTS,");
 
-            // Apply all filters
-            List<Filter> segmentFilters = timelineState.getFilters().stream()
-                    .filter(f -> f.getSegmentId().equals(is.getId()))
-                    .collect(Collectors.toList());
-            for (Filter filter : segmentFilters) {
-                // Skip invalid filters
-                if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
-                    System.err.println("Skipping invalid filter for segment " + is.getId() + ": null or empty filter name");
-                    continue;
+                // Apply all filters
+                List<Filter> segmentFilters = timelineState.getFilters().stream()
+                        .filter(f -> f.getSegmentId().equals(is.getId()))
+                        .collect(Collectors.toList());
+                for (Filter filter : segmentFilters) {
+                    if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
+                        System.err.println("Skipping invalid filter for segment " + is.getId() + ": null or empty filter name");
+                        continue;
+                    }
+                    String filterName = filter.getFilterName().toLowerCase().trim();
+                    String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
+                    if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "invert").contains(filterName)) {
+                        System.err.println("Skipping filter " + filterName + " for segment " + is.getId() + ": empty filter value");
+                        continue;
+                    }
+                    try {
+                        switch (filterName) {
+                            case "brightness":
+                                double brightness = Double.parseDouble(filterValue);
+                                if (brightness >= -1 && brightness <= 1) {
+                                    double cssBrightnessMultiplier = 1 + brightness;
+                                    if (cssBrightnessMultiplier <= 0) {
+                                        filterComplex.append("lutrgb=r=0:g=0:b=0,");
+                                        break;
+                                    }
+                                    if (cssBrightnessMultiplier == 1.0) {
+                                        break;
+                                    }
+                                    filterComplex.append("format=rgb24,");
+                                    String lut = String.format(
+                                            "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
+                                            cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
+                                    );
+                                    filterComplex.append(lut);
+                                    filterComplex.append("format=yuv420p,");
+                                }
+                                break;
+                            case "contrast":
+                                double contrast = Double.parseDouble(filterValue);
+                                if (contrast >= 0 && contrast <= 2) {
+                                    if (contrast == 1.0) {
+                                        break; // No change needed for contrast = 1
+                                    }
+                                    filterComplex.append("format=rgb24,");
+                                    double offset = 128 * (1 - contrast); // CSS contrast offset
+                                    String lut = String.format(
+                                            "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
+                                            contrast, offset, contrast, offset, contrast, offset
+                                    );
+                                    filterComplex.append(lut);
+                                    filterComplex.append("format=yuv420p,");
+                                }
+                                break;
+                            case "saturation":
+                                double saturation;
+                                try {
+                                    saturation = Double.parseDouble(filterValue);
+                                } catch (NumberFormatException e) {
+                                    System.err.println("Invalid saturation value: " + filterValue + " for segment " + is.getId());
+                                    break;
+                                }
+                                if (saturation >= 0 && saturation <= 2) {
+                                    if (Math.abs(saturation - 1.0) < 0.01) {
+                                        System.out.println("Skipping saturation filter for segment " + is.getId() + ": value ≈ 1 (" + saturation + ")");
+                                        break; // No change needed for saturation ≈ 1
+                                    }
+                                    System.out.println("Applying saturation filter for segment " + is.getId() + ": frontend=" + saturation);
+                                    filterComplex.append("eq=saturation=").append(String.format("%.2f", saturation)).append(",");
+                                } else {
+                                    System.err.println("Saturation value out of range [0, 2]: " + saturation + " for segment " + is.getId());
+                                }
+                                break;
+                            case "hue":
+                                double hue = Double.parseDouble(filterValue);
+                                if (hue >= -180 && hue <= 180) {
+                                    if (hue == 0.0) {
+                                        break; // No change needed for hue = 0
+                                    }
+                                    filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
+                                }
+                                break;
+                            case "grayscale":
+                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                    filterComplex.append("hue=s=0,");
+                                }
+                                break;
+                            case "invert":
+                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                    filterComplex.append("negate,");
+                                }
+                                break;
+                            case "rotate":
+                                double rotate = Double.parseDouble(filterValue);
+                                if (rotate >= -180 && rotate <= 180) {
+                                    double angleRad = Math.toRadians(rotate);
+                                    filterComplex.append("rotate=").append(angleRad).append(":c=black,");
+                                }
+                                break;
+                            case "flip":
+                                if (filterValue.equals("horizontal")) {
+                                    filterComplex.append("hflip,");
+                                } else if (filterValue.equals("vertical")) {
+                                    filterComplex.append("vflip,");
+                                }
+                                break;
+                            default:
+                                System.err.println("Unsupported filter: " + filterName + " for segment " + is.getId());
+                                break;
+                        }
+                    } catch (NumberFormatException e) {
+                        System.err.println("Invalid filter value for " + filterName + " in segment " + is.getId() + ": " + filterValue);
+                    }
                 }
-                String filterName = filter.getFilterName().toLowerCase().trim();
-                String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
-                // Skip if filterValue is empty for non-toggle filters
-                if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "vintage", "invert", "emboss").contains(filterName)) {
-                    System.err.println("Skipping filter " + filterName + " for segment " + is.getId() + ": empty filter value");
-                    continue;
-                }
-                switch (filterName) {
-                    case "brightness":
-                        filterComplex.append("eq=brightness=").append(filterValue).append(",");
-                        break;
-                    case "contrast":
-                        filterComplex.append("eq=contrast=").append(filterValue).append(",");
-                        break;
-                    case "saturation":
-                        filterComplex.append("eq=saturation=").append(filterValue).append(",");
-                        break;
-                    case "hue":
-                        filterComplex.append("hue=h=").append(filterValue).append(",");
-                        break;
-                    case "gamma":
-                        filterComplex.append("eq=gamma=").append(filterValue).append(",");
-                        break;
-                    case "colorbalance":
-                        // Expect filterValue as "r,g,b"
-                        String[] rgb = filterValue.split(",");
-                        if (rgb.length == 3) {
-                            filterComplex.append("colorbalance=rs=").append(rgb[0])
-                                    .append(":gs=").append(rgb[1])
-                                    .append(":bs=").append(rgb[2]).append(",");
-                        }
-                        break;
-                    case "blur":
-                        filterComplex.append("gblur=sigma=").append(filterValue).append(",");
-                        break;
-                    case "sharpen":
-                        // Map sharpen to unsharp filter
-                        double sharpenValue = Double.parseDouble(filterValue);
-                        String amount = sharpenValue >= 0 ? String.valueOf(sharpenValue) : String.valueOf(-sharpenValue);
-                        filterComplex.append("unsharp=lx=5:ly=5:la=").append(amount).append(",");
-                        break;
-                    case "edge":
-                        filterComplex.append("edgedetect=low=").append(filterValue)
-                                .append(":high=").append(Double.parseDouble(filterValue) * 2).append(",");
-                        break;
-                    case "grayscale":
-                        if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                            filterComplex.append("hue=s=0,");
-                        }
-                        break;
-                    case "sepia":
-                        if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                            filterComplex.append("colorchannelmixer=.393:.769:.189:.349:.686:.168:.272:.534:.131,");
-                        }
-                        break;
-                    case "vintage":
-                        if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                            filterComplex.append("curves=preset=vintage,");
-                        }
-                        break;
-                    case "posterize":
-                        // Simulate posterization by quantizing colors
-                        int levels = Integer.parseInt(filterValue);
-                        // Map levels (2-32) to quantization steps
-                        double step = 255.0 / (levels - 1);
-                        filterComplex.append("eq=r='floor(r*").append(levels).append("/256)*").append(step)
-                                .append(":g=floor(g*").append(levels).append("/256)*").append(step)
-                                .append(":b=floor(b*").append(levels).append("/256)*").append(step).append("',");
-                        break;
-                    case "solarize":
-                        // Simulate solarization using lutrgb
-                        double threshold = Double.parseDouble(filterValue) * 255;
-                        filterComplex.append("lutrgb=r='if(gt(val,").append(threshold).append("),255-val,val)':")
-                                .append("g='if(gt(val,").append(threshold).append("),255-val,val)':")
-                                .append("b='if(gt(val,").append(threshold).append("),255-val,val)',");
-                        break;
-                    case "invert":
-                        if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                            filterComplex.append("negate,");
-                        }
-                        break;
-                    case "noise":
-                        filterComplex.append("noise=alls=").append(filterValue).append(":allf=t+u,");
-                        break;
-                    case "vignette":
-                        filterComplex.append("vignette=angle=PI/").append(filterValue).append(",");
-                        break;
-                    case "pixelize":
-                        int blockSize = Integer.parseInt(filterValue);
-                        filterComplex.append("pixelize=pw=").append(blockSize)
-                                .append(":ph=").append(blockSize).append(":mode=average,");
-                        break;
-                    case "rotate":
-                        double angleRad = Math.toRadians(Double.parseDouble(filterValue));
-                        filterComplex.append("rotate=").append(angleRad).append(":c=black,");
-                        break;
-                    case "flip":
-                        if (filterValue.equals("horizontal")) {
-                            filterComplex.append("hflip,");
-                        } else if (filterValue.equals("vertical")) {
-                            filterComplex.append("vflip,");
-                        }
-                        break;
-                    case "opacity":
-                        filterComplex.append("format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='a(X,Y)*").append(filterValue).append("',");
-                        break;
-                    case "emboss":
-                        if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                            filterComplex.append("convolution='0 -1 0 -1 5 -1 0 -1 0':normalize=0,");
-                        }
-                        break;
-                    case "glow":
-                        // Simulate glow using boxblur and blend
-                        double glowRadius = Double.parseDouble(filterValue);
-                        if (glowRadius > 0) {
-                            filterComplex.append("[tmp];[tmp]boxblur=").append(glowRadius / 2).append(":1[tmpblur];")
-                                    .append("[tmp][tmpblur]blend=all_mode=screen:all_opacity=0.5[tmp],");
-                        }
-                        break;
-                    case "overlay":
-                        // Expect filterValue as "color@opacity"
-                        String[] overlayParts = filterValue.split("@");
-                        if (overlayParts.length == 2) {
-                            String color = overlayParts[0];
-                            String opacity = overlayParts[1];
-                            filterComplex.append("[tmp];color=c=").append(color)
-                                    .append(":s=").append(canvasWidth).append("x").append(canvasHeight)
-                                    .append(":d=").append(totalDuration).append("[ovcolor];")
-                                    .append("[tmp][ovcolor]overlay=0:0:format=auto:alpha=blend:enable='between(t,")
-                                    .append(is.getTimelineStartTime()).append(",").append(is.getTimelineEndTime())
-                                    .append(")'[tmp],");
-                        }
-                        break;
-                    default:
-                        System.err.println("Unsupported filter: " + filterName + " for segment " + is.getId());
-                        break;
-                }
-            }
 
             // Handle scaling with keyframes
             StringBuilder scaleExpr = new StringBuilder();
@@ -2311,300 +2241,6 @@ public class VideoEditingService {
         }
 
         session.setLastAccessTime(System.currentTimeMillis());
-    }
-
-    private String generateVideoFilters(VideoSegment segment, TimelineState timelineState) {
-        StringBuilder filterStr = new StringBuilder();
-        List<Filter> segmentFilters = timelineState.getFilters().stream()
-                .filter(f -> f.getSegmentId().equals(segment.getId()))
-                .toList();
-
-        for (Filter filter : segmentFilters) {
-            String filterName = filter.getFilterName().toLowerCase();
-            String filterValue = filter.getFilterValue();
-            switch (filterName) {
-                // Color Adjustments
-                case "brightness":
-                    filterStr.append("eq=brightness=").append(filterValue).append(",");
-                    break;
-                case "contrast":
-                    filterStr.append("eq=contrast=").append(filterValue).append(",");
-                    break;
-                case "saturation":
-                    filterStr.append("eq=saturation=").append(filterValue).append(",");
-                    break;
-                case "hue":
-                    filterStr.append("hue=h=").append(filterValue).append(",");
-                    break;
-                case "gamma":
-                    filterStr.append("eq=gamma=").append(filterValue).append(",");
-                    break;
-                case "colorbalance":
-                    // Format: "r,g,b" (e.g., "0.1,-0.2,0.3")
-                    String[] rgb = filterValue.split(",");
-                    if (rgb.length == 3) {
-                        filterStr.append("colorbalance=rs=").append(rgb[0])
-                                .append(":gs=").append(rgb[1])
-                                .append(":bs=").append(rgb[2]).append(",");
-                    }
-                    break;
-                case "levels":
-                    // Format: "in_min/in_max/out_min/out_max" (e.g., "0/255/16/235")
-                    String[] levels = filterValue.split("/");
-                    if (levels.length == 4) {
-                        filterStr.append("levels=rimin=").append(levels[0]).append(":rimax=").append(levels[1])
-                                .append(":romin=").append(levels[2]).append(":romax=").append(levels[3]).append(",");
-                    }
-                    break;
-                case "curves":
-                    // Format: "r='0/0 1/1':g='0/0 1/1':b='0/0 1/1'"
-                    filterStr.append("curves=").append(filterValue).append(",");
-                    break;
-
-                // Stylization
-                case "grayscale":
-                    filterStr.append("hue=s=0,");
-                    break;
-                case "sepia":
-                    filterStr.append("colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131:0,");
-                    break;
-                case "vintage":
-                    filterStr.append("curves=preset=vintage,");
-                    break;
-                case "posterize":
-                    filterStr.append("posterize=").append(filterValue).append(",");
-                    break;
-                case "solarize":
-                    filterStr.append("solarize=threshold=").append(filterValue).append(",");
-                    break;
-                case "invert":
-                    filterStr.append("negate,");
-                    break;
-
-                // Blur and Sharpen
-                case "blur":
-                    filterStr.append("gblur=sigma=").append(filterValue).append(",");
-                    break;
-                case "sharpen":
-                    filterStr.append("unsharp=5:5:").append(filterValue).append(":5:5:0,");
-                    break;
-                case "edge":
-                    filterStr.append("edgedetect=mode=colormix:high=").append(filterValue)
-                            .append(":low=").append(filterValue).append(",");
-                    break;
-
-                // Distortion and Noise
-                case "noise":
-                    filterStr.append("noise=alls=").append(filterValue).append(",");
-                    break;
-                case "vignette":
-                    filterStr.append("vignette=PI/").append(filterValue).append(",");
-                    break;
-                case "pixelize":
-                    // Format: "size" (e.g., "8" for 8x8 blocks)
-                    filterStr.append("pixelize=").append(filterValue).append(":").append(filterValue).append(",");
-                    break;
-
-                // Transformation
-                case "rotate":
-                    filterStr.append("rotate=").append(filterValue).append("*PI/180,");
-                    break;
-                case "flip":
-                    if ("horizontal".equals(filterValue)) {
-                        filterStr.append("hflip,");
-                    } else if ("vertical".equals(filterValue)) {
-                        filterStr.append("vflip,");
-                    }
-                    break;
-                case "crop":
-                    // Format: "width:height:x:y" (e.g., "720:480:0:0")
-                    filterStr.append("crop=").append(filterValue).append(",");
-                    break;
-                case "opacity":
-                    filterStr.append("format=rgba,colorchannelmixer=aa=").append(filterValue).append(",");
-                    break;
-
-                // Special Effects
-                case "emboss":
-                    filterStr.append("convolution='-2 -1 0 -1 1 1 0 1 2',");
-                    break;
-                case "glow":
-                    filterStr.append("gblur=sigma=").append(filterValue).append(":steps=3,");
-                    filterStr.append("blend=all_mode=glow:all_opacity=0.5,");
-                    break;
-                case "overlay":
-                    // Format: "color@opacity" (e.g., "red@0.5")
-                    String[] overlayParts = filterValue.split("@");
-                    if (overlayParts.length == 2) {
-                        filterStr.append("color=").append(overlayParts[0]).append(":s=iwxih[d];")
-                                .append("[v][d]overlay=0:0:enable='between(t,0,9999)':format=rgb,")
-                                .append("colorchannelmixer=aa=").append(overlayParts[1]).append(",");
-                    }
-                    break;
-
-                default:
-                    System.out.println("Unsupported filter: " + filterName);
-            }
-        }
-        if (filterStr.length() > 0 && filterStr.charAt(filterStr.length() - 1) == ',') {
-            filterStr.setLength(filterStr.length() - 1);
-        }
-        return filterStr.toString();
-    }
-
-    private String generateImageFilters(ImageSegment imgSegment, TimelineState timelineState) {
-        StringBuilder filterStr = new StringBuilder();
-
-        // Scaling logic (unchanged)
-        if (imgSegment.getCustomWidth() > 0 || imgSegment.getCustomHeight() > 0) {
-            if (imgSegment.isMaintainAspectRatio()) {
-                if (imgSegment.getCustomWidth() > 0 && imgSegment.getCustomHeight() > 0) {
-                    filterStr.append("scale=").append(imgSegment.getCustomWidth()).append(":")
-                            .append(imgSegment.getCustomHeight()).append(":force_original_aspect_ratio=decrease");
-                } else if (imgSegment.getCustomWidth() > 0) {
-                    filterStr.append("scale=").append(imgSegment.getCustomWidth()).append(":-1");
-                } else {
-                    filterStr.append("scale=-1:").append(imgSegment.getCustomHeight());
-                }
-            } else {
-                int width = imgSegment.getCustomWidth() > 0 ? imgSegment.getCustomWidth() : imgSegment.getWidth();
-                int height = imgSegment.getCustomHeight() > 0 ? imgSegment.getCustomHeight() : imgSegment.getHeight();
-                filterStr.append("scale=").append(width).append(":").append(height);
-            }
-        } else {
-            filterStr.append("scale=").append(imgSegment.getWidth()).append("*")
-                    .append(imgSegment.getScale()).append(":")
-                    .append(imgSegment.getHeight()).append("*")
-                    .append(imgSegment.getScale());
-        }
-
-        List<Filter> segmentFilters = timelineState.getFilters().stream()
-                .filter(f -> f.getSegmentId().equals(imgSegment.getId()))
-                .toList();
-
-        for (Filter filter : segmentFilters) {
-            String filterName = filter.getFilterName().toLowerCase();
-            String filterValue = filter.getFilterValue();
-            switch (filterName) {
-                // Color Adjustments
-                case "brightness":
-                    filterStr.append(",eq=brightness=").append(filterValue);
-                    break;
-                case "contrast":
-                    filterStr.append(",eq=contrast=").append(filterValue);
-                    break;
-                case "saturation":
-                    filterStr.append(",eq=saturation=").append(filterValue);
-                    break;
-                case "hue":
-                    filterStr.append(",hue=h=").append(filterValue);
-                    break;
-                case "gamma":
-                    filterStr.append(",eq=gamma=").append(filterValue);
-                    break;
-                case "colorbalance":
-                    String[] rgb = filterValue.split(",");
-                    if (rgb.length == 3) {
-                        filterStr.append(",colorbalance=rs=").append(rgb[0])
-                                .append(":gs=").append(rgb[1])
-                                .append(":bs=").append(rgb[2]);
-                    }
-                    break;
-                case "levels":
-                    String[] levels = filterValue.split("/");
-                    if (levels.length == 4) {
-                        filterStr.append(",levels=rimin=").append(levels[0]).append(":rimax=").append(levels[1])
-                                .append(":romin=").append(levels[2]).append(":romax=").append(levels[3]);
-                    }
-                    break;
-                case "curves":
-                    filterStr.append(",curves=").append(filterValue);
-                    break;
-
-                // Stylization
-                case "grayscale":
-                    filterStr.append(",hue=s=0");
-                    break;
-                case "sepia":
-                    filterStr.append(",colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131:0");
-                    break;
-                case "vintage":
-                    filterStr.append(",curves=preset=vintage");
-                    break;
-                case "posterize":
-                    filterStr.append(",posterize=").append(filterValue);
-                    break;
-                case "solarize":
-                    filterStr.append(",solarize=threshold=").append(filterValue);
-                    break;
-                case "invert":
-                    filterStr.append(",negate");
-                    break;
-
-                // Blur and Sharpen
-                case "blur":
-                    filterStr.append(",gblur=sigma=").append(filterValue);
-                    break;
-                case "sharpen":
-                    filterStr.append(",unsharp=5:5:").append(filterValue).append(":5:5:0");
-                    break;
-                case "edge":
-                    filterStr.append(",edgedetect=mode=colormix:high=").append(filterValue)
-                            .append(":low=").append(filterValue);
-                    break;
-
-                // Distortion and Noise
-                case "noise":
-                    filterStr.append(",noise=alls=").append(filterValue).append(":allf=t");
-                    break;
-                case "vignette":
-                    filterStr.append(",vignette=PI/").append(filterValue);
-                    break;
-                case "pixelize":
-                    filterStr.append(",pixelize=").append(filterValue).append(":").append(filterValue);
-                    break;
-
-                // Transformation
-                case "rotate":
-                    filterStr.append(",rotate=").append(filterValue).append("*PI/180");
-                    break;
-                case "flip":
-                    if ("horizontal".equals(filterValue)) {
-                        filterStr.append(",hflip");
-                    } else if ("vertical".equals(filterValue)) {
-                        filterStr.append(",vflip");
-                    }
-                    break;
-                case "crop":
-                    filterStr.append(",crop=").append(filterValue);
-                    break;
-                case "opacity":
-                    filterStr.append(",format=rgba,colorchannelmixer=aa=").append(filterValue);
-                    break;
-
-                // Special Effects
-                case "emboss":
-                    filterStr.append(",convolution='-2 -1 0 -1 1 1 0 1 2'");
-                    break;
-                case "glow":
-                    filterStr.append(",gblur=sigma=").append(filterValue).append(":steps=3");
-                    filterStr.append(",blend=all_mode=glow:all_opacity=0.5");
-                    break;
-                case "overlay":
-                    String[] overlayParts = filterValue.split("@");
-                    if (overlayParts.length == 2) {
-                        filterStr.append(",color=").append(overlayParts[0]).append(":s=iwxih[d];")
-                                .append("[v][d]overlay=0:0:enable='between(t,0,9999)':format=rgb,")
-                                .append("colorchannelmixer=aa=").append(overlayParts[1]);
-                    }
-                    break;
-
-                default:
-                    System.out.println("Unsupported filter: " + filterName);
-            }
-        }
-
-        return filterStr.toString();
     }
 
     public List<Filter> getFiltersForSegment(String sessionId, String segmentId) {

@@ -1640,9 +1640,9 @@ public class VideoEditingService {
                                     .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    xExpr.insert(0, "(").append("+(W-w)/2-w/2*(").append(scaleExpr).append("-1))");
+                    xExpr.insert(0, "(W/2)+").append("-(w/2)");
                 } else {
-                    xExpr.append("(W-w)/2+").append(baseX).append("-w/2*(").append(scaleExpr).append("-1)");
+                    xExpr.append("(W/2)+").append(baseX).append("-(w/2)");
                 }
 
                 // Handle position Y with keyframes
@@ -1671,9 +1671,9 @@ public class VideoEditingService {
                                     .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    yExpr.insert(0, "(").append("+(H-h)/2-h/2*(").append(scaleExpr).append("-1))");
+                    yExpr.insert(0, "(H/2)+").append("-(h/2)");
                 } else {
-                    yExpr.append("(H-h)/2+").append(baseY).append("-w/2*(").append(scaleExpr).append("-1)");
+                    yExpr.append("(H/2)+").append(baseY).append("-(h/2)");
                 }
 
                 // Overlay the scaled video onto the previous output
@@ -1862,9 +1862,11 @@ public class VideoEditingService {
                                 .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                     }
                 }
-                xExpr.insert(0, "(").append("+(W-w)/2-w/2*(").append(scaleExpr).append("-1))");
+                // Center-based X positioning with keyframes
+                xExpr.insert(0, "(W/2)+").append("-(w/2)");
             } else {
-                xExpr.append("(W-w)/2+").append(baseX).append("-w/2*(").append(scaleExpr).append("-1)");
+                // Center-based X positioning without keyframes
+                xExpr.append("(W/2)+").append(baseX).append("-(w/2)");
             }
 
             // Handle position Y with keyframes
@@ -1893,9 +1895,11 @@ public class VideoEditingService {
                                 .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                     }
                 }
-                xExpr.insert(0, "(").append("+(W-w)/2-w/2*(").append(scaleExpr).append("-1))");
+                // Center-based Y positioning with keyframes
+                yExpr.insert(0, "(H/2)+").append("-(h/2)");
             } else {
-                yExpr.append("(H-h)/2+").append(baseY).append("-h/2*(").append(scaleExpr).append("-1)");
+                // Center-based Y positioning without keyframes
+                yExpr.append("(H/2)+").append(baseY).append("-(h/2)");
             }
 
             filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
@@ -1943,9 +1947,11 @@ public class VideoEditingService {
                                     .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    xExpr.insert(0, "(").append("+(w-tw)/2)");
+                    // Center-based X positioning with keyframes for text
+                    xExpr.insert(0, "(W/2)+").append("-(tw/2)");
                 } else {
-                    xExpr.append("(w-tw)/2+").append(baseX);
+                    // Center-based X positioning without keyframes for text
+                    xExpr.append("(W/2)+").append(baseX).append("-(tw/2)");
                 }
 
                 // Handle position Y with keyframes
@@ -1974,9 +1980,11 @@ public class VideoEditingService {
                                     .append(timelineKfTime).append("-").append(timelinePrevTime).append("))))");
                         }
                     }
-                    yExpr.insert(0, "(").append("+(h-th)/2)");
+                    // Center-based Y positioning with keyframes for text
+                    yExpr.insert(0, "(H/2)+").append("-(th/2)");
                 } else {
-                    yExpr.append("(h-th)/2+").append(baseY);
+                    // Center-based Y positioning without keyframes for text
+                    yExpr.append("(H/2)+").append(baseY).append("-(th/2)");
                 }
 
                 filterComplex.append("x='").append(xExpr).append("':y='").append(yExpr).append("'");

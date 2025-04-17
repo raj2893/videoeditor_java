@@ -9,6 +9,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -432,12 +434,20 @@ public class VideoEditingService {
         return 300; // Default to 5 minutes
     }
 
-    public void updateVideoSegment(String sessionId, String segmentId,
-                                   Integer positionX, Integer positionY, Double scale,
-                                   Double opacity,
-                                   Double timelineStartTime, Integer layer, Double timelineEndTime,
-                                   Double startTime, Double endTime,
-                                   Map<String, List<Keyframe>> keyframes) throws IOException, InterruptedException {
+    public void updateVideoSegment(
+            String sessionId,
+            String segmentId,
+            Integer positionX,
+            Integer positionY,
+            Double scale,
+            Double opacity,
+            Double timelineStartTime,
+            Integer layer,
+            Double timelineEndTime,
+            Double startTime,
+            Double endTime,
+            Map<String, List<Keyframe>> keyframes
+    ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
         VideoSegment segmentToUpdate = null;
         for (VideoSegment segment : session.getTimelineState().getSegments()) {
@@ -456,6 +466,8 @@ public class VideoEditingService {
         double originalStartTime = segmentToUpdate.getStartTime();
         double originalEndTime = segmentToUpdate.getEndTime();
         int originalLayer = segmentToUpdate.getLayer();
+
+        boolean timelineOrLayerChanged = false;
 
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
@@ -488,15 +500,20 @@ public class VideoEditingService {
             if (positionY != null) segmentToUpdate.setPositionY(positionY);
             if (scale != null) segmentToUpdate.setScale(scale);
             if (opacity != null) segmentToUpdate.setOpacity(opacity);
-            if (layer != null) segmentToUpdate.setLayer(layer);
+            if (layer != null) {
+                segmentToUpdate.setLayer(layer);
+                timelineOrLayerChanged = true;
+            }
 
             if (timelineStartTime != null) {
                 timelineStartTime = roundToThreeDecimals(timelineStartTime);
                 segmentToUpdate.setTimelineStartTime(timelineStartTime);
+                timelineOrLayerChanged = true;
             }
             if (timelineEndTime != null) {
                 timelineEndTime = roundToThreeDecimals(timelineEndTime);
                 segmentToUpdate.setTimelineEndTime(timelineEndTime);
+                timelineOrLayerChanged = true;
             }
             if (startTime != null) {
                 startTime = roundToThreeDecimals(startTime);
@@ -518,7 +535,7 @@ public class VideoEditingService {
                 segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newClipDuration));
             }
 
-            // MODIFIED: Sync audio segment with rounded times
+            // Sync audio segment with rounded times
             if (segmentToUpdate.getAudioId() != null) {
                 AudioSegment audioSegment = null;
                 for (AudioSegment a : session.getTimelineState().getAudioSegments()) {
@@ -568,6 +585,17 @@ public class VideoEditingService {
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + segmentToUpdate.getLayer());
         }
 
+        // Update associated transitions if timelineStartTime or layer changed
+        if (timelineOrLayerChanged) {
+            updateAssociatedTransitions(
+                    sessionId,
+                    segmentId,
+                    segmentToUpdate.getLayer(),
+                    segmentToUpdate.getTimelineStartTime(),
+                    segmentToUpdate.getTimelineEndTime()
+            );
+        }
+
         session.setLastAccessTime(System.currentTimeMillis());
     }
     public VideoSegment getVideoSegment(String sessionId, String segmentId) {
@@ -609,17 +637,33 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
-    public void updateTextSegment(String sessionId, String segmentId, String text,
-                                  String fontFamily, Integer fontSize, String fontColor,
-                                  String backgroundColor, Integer positionX, Integer positionY,
-                                  Double opacity,
-                                  Double timelineStartTime, Double timelineEndTime, Integer layer,
-                                  Map<String, List<Keyframe>> keyframes) {
+    public void updateTextSegment(
+            String sessionId,
+            String segmentId,
+            String text,
+            String fontFamily,
+            Integer fontSize,
+            String fontColor,
+            String backgroundColor,
+            Integer positionX,
+            Integer positionY,
+            Double opacity,
+            Double timelineStartTime,
+            Double timelineEndTime,
+            Integer layer,
+            Map<String, List<Keyframe>> keyframes
+    ) throws IOException {
         EditSession session = getSession(sessionId);
         TextSegment textSegment = session.getTimelineState().getTextSegments().stream()
                 .filter(segment -> segment.getId().equals(segmentId))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Text segment not found with ID: " + segmentId));
+
+        double originalTimelineStartTime = textSegment.getTimelineStartTime();
+        double originalTimelineEndTime = textSegment.getTimelineEndTime();
+        int originalLayer = textSegment.getLayer();
+
+        boolean timelineOrLayerChanged = false;
 
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
@@ -629,7 +673,6 @@ public class VideoEditingService {
                     if (kf.getTime() < 0 || kf.getTime() > (textSegment.getTimelineEndTime() - textSegment.getTimelineStartTime())) {
                         throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
-                    // MODIFIED: Round keyframe time to three decimal places
                     kf.setTime(roundToThreeDecimals(kf.getTime()));
                     textSegment.addKeyframe(property, kf);
                 }
@@ -655,16 +698,46 @@ public class VideoEditingService {
             if (positionY != null) textSegment.setPositionY(positionY);
             if (opacity != null) textSegment.setOpacity(opacity);
             if (timelineStartTime != null) {
-                // MODIFIED: Round timelineStartTime to three decimal places
                 timelineStartTime = roundToThreeDecimals(timelineStartTime);
                 textSegment.setTimelineStartTime(timelineStartTime);
+                timelineOrLayerChanged = true;
             }
             if (timelineEndTime != null) {
-                // MODIFIED: Round timelineEndTime to three decimal places
                 timelineEndTime = roundToThreeDecimals(timelineEndTime);
                 textSegment.setTimelineEndTime(timelineEndTime);
+                timelineOrLayerChanged = true;
             }
-            if (layer != null) textSegment.setLayer(layer);
+            if (layer != null) {
+                textSegment.setLayer(layer);
+                timelineOrLayerChanged = true;
+            }
+        }
+
+        // Validate timeline position
+        TimelineState timelineState = session.getTimelineState();
+        timelineState.getTextSegments().remove(textSegment);
+        boolean positionAvailable = timelineState.isTimelinePositionAvailable(
+                textSegment.getTimelineStartTime(),
+                textSegment.getTimelineEndTime(),
+                textSegment.getLayer());
+        timelineState.getTextSegments().add(textSegment);
+
+        if (!positionAvailable) {
+            textSegment.setTimelineStartTime(originalTimelineStartTime);
+            textSegment.setTimelineEndTime(originalTimelineEndTime);
+            textSegment.setLayer(originalLayer);
+            throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + textSegment.getLayer());
+        }
+
+        // Update associated transitions if timelineStartTime or layer changed
+        if (timelineOrLayerChanged) {
+            updateAssociatedTransitions(
+                    sessionId,
+                    segmentId,
+                    textSegment.getLayer(),
+                    textSegment.getTimelineStartTime(),
+                    textSegment.getTimelineEndTime()
+            );
         }
 
         session.setLastAccessTime(System.currentTimeMillis());
@@ -1123,7 +1196,8 @@ public class VideoEditingService {
             List<String> filtersToRemove,
             Double timelineStartTime,
             Double timelineEndTime,
-            Map<String, List<Keyframe>> keyframes) {
+            Map<String, List<Keyframe>> keyframes
+    ) throws IOException {
         EditSession session = getSession(sessionId);
         TimelineState timelineState = getTimelineState(sessionId);
 
@@ -1131,6 +1205,12 @@ public class VideoEditingService {
                 .filter(segment -> segment.getId().equals(imageSegmentId))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Image segment not found: " + imageSegmentId));
+
+        double originalTimelineStartTime = targetSegment.getTimelineStartTime();
+        double originalTimelineEndTime = targetSegment.getTimelineEndTime();
+        int originalLayer = targetSegment.getLayer();
+
+        boolean timelineOrLayerChanged = false;
 
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
@@ -1140,7 +1220,6 @@ public class VideoEditingService {
                     if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
                         throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
                     }
-                    // MODIFIED: Round keyframe time to three decimal places
                     kf.setTime(roundToThreeDecimals(kf.getTime()));
                     targetSegment.addKeyframe(property, kf);
                 }
@@ -1164,19 +1243,22 @@ public class VideoEditingService {
             if (positionY != null) targetSegment.setPositionY(positionY);
             if (scale != null) targetSegment.setScale(scale);
             if (opacity != null) targetSegment.setOpacity(opacity);
-            if (layer != null) targetSegment.setLayer(layer);
+            if (layer != null) {
+                targetSegment.setLayer(layer);
+                timelineOrLayerChanged = true;
+            }
             if (customWidth != null) targetSegment.setCustomWidth(customWidth);
             if (customHeight != null) targetSegment.setCustomHeight(customHeight);
             if (maintainAspectRatio != null) targetSegment.setMaintainAspectRatio(maintainAspectRatio);
             if (timelineStartTime != null) {
-                // MODIFIED: Round timelineStartTime to three decimal places
                 timelineStartTime = roundToThreeDecimals(timelineStartTime);
                 targetSegment.setTimelineStartTime(timelineStartTime);
+                timelineOrLayerChanged = true;
             }
             if (timelineEndTime != null) {
-                // MODIFIED: Round timelineEndTime to three decimal places
                 timelineEndTime = roundToThreeDecimals(timelineEndTime);
                 targetSegment.setTimelineEndTime(timelineEndTime);
+                timelineOrLayerChanged = true;
             }
             if (filters != null && !filters.isEmpty()) {
                 for (Map.Entry<String, String> filter : filters.entrySet()) {
@@ -1191,6 +1273,32 @@ public class VideoEditingService {
             if (filtersToRemove != null && !filtersToRemove.isEmpty()) {
                 timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(targetSegment.getId()) && filtersToRemove.contains(f.getFilterId()));
             }
+        }
+
+        // Validate timeline position
+        timelineState.getImageSegments().remove(targetSegment);
+        boolean positionAvailable = timelineState.isTimelinePositionAvailable(
+                targetSegment.getTimelineStartTime(),
+                targetSegment.getTimelineEndTime(),
+                targetSegment.getLayer());
+        timelineState.getImageSegments().add(targetSegment);
+
+        if (!positionAvailable) {
+            targetSegment.setTimelineStartTime(originalTimelineStartTime);
+            targetSegment.setTimelineEndTime(originalTimelineEndTime);
+            targetSegment.setLayer(originalLayer);
+            throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + targetSegment.getLayer());
+        }
+
+        // Update associated transitions if timelineStartTime or layer changed
+        if (timelineOrLayerChanged) {
+            updateAssociatedTransitions(
+                    sessionId,
+                    imageSegmentId,
+                    targetSegment.getLayer(),
+                    targetSegment.getTimelineStartTime(),
+                    targetSegment.getTimelineEndTime()
+            );
         }
 
         session.setLastAccessTime(System.currentTimeMillis());
@@ -1339,6 +1447,280 @@ public class VideoEditingService {
         }
         directory.delete();
     }
+
+    public void addTransition(
+            String sessionId,
+            String type,
+            double duration,
+            String fromSegmentId,
+            String toSegmentId,
+            int layer,
+            Map<String, String> parameters
+    ) throws IOException {
+        EditSession session = getSession(sessionId);
+        TimelineState timelineState = session.getTimelineState();
+
+        // Validate toSegment
+        Segment toSegment = findSegment(timelineState, toSegmentId);
+        if (toSegment == null) {
+            throw new RuntimeException("To segment not found");
+        }
+        if (toSegment.getLayer() != layer) {
+            throw new RuntimeException("To segment must be on the same layer as the transition");
+        }
+
+        // Validate fromSegment if provided
+        Segment fromSegment = fromSegmentId != null ? findSegment(timelineState, fromSegmentId) : null;
+        if (fromSegmentId != null && fromSegment == null) {
+            throw new RuntimeException("From segment not found");
+        }
+        if (fromSegment != null) {
+            if (fromSegment.getLayer() != layer) {
+                throw new RuntimeException("From segment must be on the same layer as the transition");
+            }
+            if (Math.abs(fromSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) > 0.001) {
+                throw new RuntimeException("Segments must be adjacent on the timeline");
+            }
+        }
+
+        // Validate duration
+        if (duration <= 0) {
+            throw new RuntimeException("Invalid transition duration: Duration must be positive");
+        }
+        if (duration > toSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) {
+            throw new RuntimeException("Invalid transition duration: Duration exceeds toSegment duration");
+        }
+        if (fromSegment != null && duration > fromSegment.getTimelineEndTime() - fromSegment.getTimelineStartTime()) {
+            throw new RuntimeException("Invalid transition duration: Duration exceeds fromSegment duration");
+        }
+
+        // Calculate timeline start time
+        double timelineStartTime = fromSegment != null
+                ? roundToThreeDecimals(fromSegment.getTimelineEndTime() - duration)
+                : roundToThreeDecimals(toSegment.getTimelineStartTime());
+
+        // Check for overlapping transitions
+        for (Transition existingTransition : timelineState.getTransitions()) {
+            if (existingTransition.getLayer() == layer &&
+                    timelineStartTime < existingTransition.getTimelineStartTime() + existingTransition.getDuration() &&
+                    timelineStartTime + duration > existingTransition.getTimelineStartTime()) {
+                throw new RuntimeException("Transition overlaps with an existing transition on layer " + layer);
+            }
+        }
+
+        // Create and add transition
+        Transition transition = new Transition();
+        transition.setType(type);
+        transition.setDuration(roundToThreeDecimals(duration));
+        transition.setFromSegmentId(fromSegmentId);
+        transition.setToSegmentId(toSegmentId);
+        transition.setLayer(layer);
+        transition.setTimelineStartTime(timelineStartTime);
+        if (parameters != null) {
+            transition.setParameters(parameters);
+        }
+
+        timelineState.getTransitions().add(transition);
+        session.setLastAccessTime(System.currentTimeMillis());
+    }
+
+    public Transition updateTransition(
+            String sessionId,
+            String transitionId,
+            String type,
+            Double duration,
+            String fromSegmentId,
+            String toSegmentId,
+            Integer layer,
+            Map<String, String> parameters
+    ) throws IOException {
+        Logger log = LoggerFactory.getLogger(VideoEditingService.class);
+        log.info("Updating transition: sessionId={}, transitionId={}, type={}, duration={}, fromSegmentId={}, toSegmentId={}, layer={}",
+                sessionId, transitionId, type, duration, fromSegmentId, toSegmentId, layer);
+
+        EditSession session = getSession(sessionId);
+        TimelineState timelineState = session.getTimelineState();
+
+        Transition transition = timelineState.getTransitions().stream()
+                .filter(t -> t.getId().equals(transitionId))
+                .findFirst()
+                .orElseThrow(() -> {
+                    log.error("Transition not found: transitionId={}", transitionId);
+                    return new RuntimeException("Transition not found: " + transitionId);
+                });
+
+        // Store original values for rollback
+        String originalType = transition.getType();
+        double originalDuration = transition.getDuration();
+        String originalFromSegmentId = transition.getFromSegmentId();
+        String originalToSegmentId = transition.getToSegmentId();
+        int originalLayer = transition.getLayer();
+        double originalTimelineStartTime = transition.getTimelineStartTime();
+        Map<String, String> originalParameters = transition.getParameters();
+
+        // Update fields if provided
+        if (type != null) transition.setType(type);
+        if (duration != null) transition.setDuration(roundToThreeDecimals(duration));
+        if (fromSegmentId != null) transition.setFromSegmentId(fromSegmentId);
+        if (toSegmentId != null) transition.setToSegmentId(toSegmentId);
+        if (layer != null) transition.setLayer(layer);
+        if (parameters != null) transition.setParameters(parameters);
+
+        // Validate updated transition
+        Segment fromSegment = transition.getFromSegmentId() != null ? findSegment(timelineState, transition.getFromSegmentId()) : null;
+        Segment toSegment = transition.getToSegmentId() != null ? findSegment(timelineState, transition.getToSegmentId()) : null;
+
+        // Ensure at least one segment is present
+        if (fromSegment == null && toSegment == null) {
+            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("At least one segment (fromSegment or toSegment) must be present");
+        }
+
+        // Validate layer consistency
+        if (fromSegment != null && fromSegment.getLayer() != transition.getLayer()) {
+            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("fromSegment must be on the same layer as the transition");
+        }
+        if (toSegment != null && toSegment.getLayer() != transition.getLayer()) {
+            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("toSegment must be on the same layer as the transition");
+        }
+
+        // Validate adjacency if both segments are present
+        if (fromSegment != null && toSegment != null) {
+            if (Math.abs(fromSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) > 0.001) {
+                rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+                throw new RuntimeException("Segments must be adjacent on the timeline");
+            }
+        }
+
+        // Validate duration
+        if (transition.getDuration() <= 0) {
+            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Invalid transition duration: Duration must be positive");
+        }
+
+        // Validate duration against segment boundaries
+        double transitionEndTime = transition.getTimelineStartTime() + transition.getDuration();
+        if (fromSegment != null && transitionEndTime > fromSegment.getTimelineEndTime() + 0.001) {
+            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Invalid transition duration: Transition end time exceeds fromSegment end time");
+        }
+        if (toSegment != null && transitionEndTime > toSegment.getTimelineEndTime() + 0.001) {
+            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Invalid transition duration: Transition end time exceeds toSegment end time");
+        }
+
+        // Check for overlapping transitions
+        timelineState.getTransitions().remove(transition);
+        for (Transition existingTransition : timelineState.getTransitions()) {
+            if (existingTransition.getLayer() == transition.getLayer() &&
+                    transition.getTimelineStartTime() < existingTransition.getTimelineStartTime() + existingTransition.getDuration() &&
+                    transition.getTimelineStartTime() + transition.getDuration() > existingTransition.getTimelineStartTime()) {
+                timelineState.getTransitions().add(transition);
+                rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+                throw new RuntimeException("Transition overlaps with an existing transition on layer " + transition.getLayer());
+            }
+        }
+        timelineState.getTransitions().add(transition);
+
+        // Recalculate timelineStartTime only if segments or layer changed
+        if (fromSegmentId != null || toSegmentId != null || layer != null) {
+            if (toSegment != null) {
+                transition.setTimelineStartTime(roundToThreeDecimals(toSegment.getTimelineStartTime()));
+            } else if (fromSegment != null) {
+                transition.setTimelineStartTime(roundToThreeDecimals(fromSegment.getTimelineEndTime() - transition.getDuration()));
+            }
+        }
+
+        session.setLastAccessTime(System.currentTimeMillis());
+        log.info("Transition updated successfully: id={}", transition.getId());
+        return transition;
+    }
+
+    // Updated rollback method to include parameters
+    private void rollbackTransition(
+            Transition transition,
+            String type,
+            double duration,
+            String fromSegmentId,
+            String toSegmentId,
+            int layer,
+            double timelineStartTime,
+            Map<String, String> parameters
+    ) {
+        transition.setType(type);
+        transition.setDuration(duration);
+        transition.setFromSegmentId(fromSegmentId);
+        transition.setToSegmentId(toSegmentId);
+        transition.setLayer(layer);
+        transition.setTimelineStartTime(timelineStartTime);
+        transition.setParameters(parameters);
+    }
+
+    // NEW: Method to remove a transition
+    public void removeTransition(String sessionId, String transitionId) {
+        EditSession session = getSession(sessionId);
+        TimelineState timelineState = session.getTimelineState();
+
+        boolean removed = timelineState.getTransitions().removeIf(t -> t.getId().equals(transitionId));
+        if (!removed) {
+            throw new RuntimeException("Transition not found: " + transitionId);
+        }
+
+        session.setLastAccessTime(System.currentTimeMillis());
+    }
+
+    // NEW: Helper method to find a segment by ID
+    private Segment findSegment(TimelineState timelineState, String segmentId) {
+        for (VideoSegment segment : timelineState.getSegments()) {
+            if (segment.getId().equals(segmentId)) return segment;
+        }
+        for (ImageSegment segment : timelineState.getImageSegments()) {
+            if (segment.getId().equals(segmentId)) return segment;
+        }
+        for (TextSegment segment : timelineState.getTextSegments()) {
+            if (segment.getId().equals(segmentId)) return segment;
+        }
+        return null;
+    }
+
+    private void updateAssociatedTransitions(String sessionId, String segmentId, int newLayer, double newTimelineStartTime, double newTimelineEndTime) throws IOException {
+        EditSession session = getSession(sessionId);
+        TimelineState timelineState = session.getTimelineState();
+
+        // Find transitions involving this segment
+        List<Transition> transitionsToUpdate = timelineState.getTransitions().stream()
+                .filter(t -> segmentId.equals(t.getFromSegmentId()) || segmentId.equals(t.getToSegmentId()))
+                .collect(Collectors.toList());
+
+        for (Transition transition : transitionsToUpdate) {
+            // Update layer
+            transition.setLayer(newLayer);
+
+            // Recalculate timelineStartTime
+            Segment fromSegment = transition.getFromSegmentId() != null ? findSegment(timelineState, transition.getFromSegmentId()) : null;
+            Segment toSegment = findSegment(timelineState, transition.getToSegmentId());
+
+            if (toSegment == null) {
+                throw new RuntimeException("To segment not found for transition: " + transition.getId());
+            }
+
+            double timelineStartTime = fromSegment != null
+                    ? roundToThreeDecimals(fromSegment.getTimelineEndTime() - transition.getDuration())
+                    : roundToThreeDecimals(toSegment.getTimelineStartTime());
+
+            transition.setTimelineStartTime(timelineStartTime);
+
+            // Validate transition
+            if (fromSegment != null && Math.abs(fromSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) > 0.001) {
+                throw new RuntimeException("Segments must be adjacent after transition update for transition: " + transition.getId());
+            }
+        }
+
+        session.setLastAccessTime(System.currentTimeMillis());
+    }
+
 
     public File exportProject(String sessionId) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);

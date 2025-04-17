@@ -866,6 +866,129 @@ public class ProjectController {
         }
     }
 
+    @PostMapping("/{projectId}/add-transition")
+    public ResponseEntity<?> addTransition(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestBody Map<String, Object> request) {
+        try {
+            User user = getUserFromToken(token);
+
+            String type = (String) request.get("type");
+            Double duration = request.get("duration") != null ? Double.valueOf(request.get("duration").toString()) : null;
+            String fromSegmentId = (String) request.get("fromSegmentId"); // Can be null
+            String toSegmentId = (String) request.get("toSegmentId");
+            Integer layer = request.get("layer") != null ? Integer.valueOf(request.get("layer").toString()) : null;
+            @SuppressWarnings("unchecked")
+            Map<String, String> parameters = request.containsKey("parameters") ? (Map<String, String>) request.get("parameters") : null;
+
+            // Validate required parameters, allowing fromSegmentId to be null
+            if (type == null || duration == null || toSegmentId == null || layer == null) {
+                return ResponseEntity.badRequest().body("Missing required parameters: type, duration, toSegmentId, layer");
+            }
+            if (duration <= 0) {
+                return ResponseEntity.badRequest().body("Duration must be positive");
+            }
+
+            videoEditingService.addTransition(sessionId, type, duration, fromSegmentId, toSegmentId, layer, parameters);
+
+            // Retrieve the newly added transition
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            Transition addedTransition = timelineState.getTransitions().stream()
+                    .filter(t -> t.getToSegmentId().equals(toSegmentId) &&
+                            (fromSegmentId == null ? t.getFromSegmentId() == null : t.getFromSegmentId() != null && t.getFromSegmentId().equals(fromSegmentId)) &&
+                            t.getLayer() == layer)
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Failed to find added transition"));
+
+            return ResponseEntity.ok(Map.of(
+                    "transitionId", addedTransition.getId(),
+                    "type", addedTransition.getType(),
+                    "duration", addedTransition.getDuration(),
+                    "fromSegmentId", addedTransition.getFromSegmentId(),
+                    "toSegmentId", addedTransition.getToSegmentId(),
+                    "layer", addedTransition.getLayer(),
+                    "timelineStartTime", addedTransition.getTimelineStartTime()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error adding transition: " + e.getMessage());
+        }
+    }
+
+    // NEW: Endpoint to update a transition
+    @PutMapping("/{projectId}/update-transition")
+    public ResponseEntity<?> updateTransition(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestBody Map<String, Object> request) {
+        try {
+            User user = getUserFromToken(token);
+
+            String transitionId = (String) request.get("transitionId");
+            String type = (String) request.get("type");
+            Double duration = request.containsKey("duration") ? Double.valueOf(request.get("duration").toString()) : null;
+            String fromSegmentId = (String) request.get("fromSegmentId");
+            String toSegmentId = (String) request.get("toSegmentId");
+            Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
+            @SuppressWarnings("unchecked")
+            Map<String, String> parameters = request.containsKey("parameters") ? (Map<String, String>) request.get("parameters") : null;
+
+            if (transitionId == null) {
+                return ResponseEntity.badRequest().body("Missing required parameter: transitionId");
+            }
+            if (duration != null && duration <= 0) {
+                return ResponseEntity.badRequest().body("Duration must be positive");
+            }
+
+            videoEditingService.updateTransition(sessionId, transitionId, type, duration, fromSegmentId, toSegmentId, layer, parameters);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error updating transition: " + e.getMessage());
+        }
+    }
+
+    // NEW: Endpoint to remove a transition
+    @DeleteMapping("/{projectId}/remove-transition")
+    public ResponseEntity<?> removeTransition(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestParam String transitionId) {
+        try {
+            User user = getUserFromToken(token);
+
+            if (transitionId == null) {
+                return ResponseEntity.badRequest().body("Missing required parameter: transitionId");
+            }
+
+            videoEditingService.removeTransition(sessionId, transitionId);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error removing transition: " + e.getMessage());
+        }
+    }
+
+    // NEW: Endpoint to get all transitions
+    @GetMapping("/{projectId}/transitions")
+    public ResponseEntity<List<Transition>> getTransitions(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId) {
+        try {
+            User user = getUserFromToken(token);
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            return ResponseEntity.ok(timelineState.getTransitions());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(null);
+        }
+    }
+
     // Delete Video Segment from Timeline
     @DeleteMapping("/timeline/video/{sessionId}/{segmentId}")
     public ResponseEntity<String> deleteVideoFromTimeline(

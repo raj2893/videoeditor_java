@@ -157,6 +157,25 @@ public class VideoEditingService {
         project.setAudioJson(objectMapper.writeValueAsString(audioFiles));
     }
 
+    // Get extracted audio metadata from project
+    public List<Map<String, String>> getExtractedAudio(Project project) throws JsonProcessingException {
+        if (project.getExtractedAudioJson() == null || project.getExtractedAudioJson().isEmpty()) {
+            return new ArrayList<>();
+        }
+        return objectMapper.readValue(project.getExtractedAudioJson(), new TypeReference<List<Map<String, String>>>() {});
+    }
+
+    // Add extracted audio metadata to project
+    public void addExtractedAudio(Project project, String audioPath, String audioFileName, String sourceVideoPath) throws JsonProcessingException {
+        List<Map<String, String>> extractedAudio = getExtractedAudio(project);
+        Map<String, String> audioData = new HashMap<>();
+        audioData.put("audioPath", audioPath);
+        audioData.put("audioFileName", audioFileName);
+        audioData.put("sourceVideoPath", sourceVideoPath);
+        extractedAudio.add(audioData);
+        project.setExtractedAudioJson(objectMapper.writeValueAsString(extractedAudio));
+    }
+
     public Project createProject(User user, String name, Integer width, Integer height, Float fps) throws JsonProcessingException {
         Project project = new Project();
         project.setUser(user);
@@ -238,11 +257,9 @@ public class VideoEditingService {
             Double timelineStartTime,
             Double timelineEndTime,
             Double startTime,
-            Double endTime
+            Double endTime,
+            boolean createAudioSegment // New parameter
     ) throws IOException, InterruptedException {
-        System.out.println("addVideoToTimeline called with sessionId: " + sessionId);
-        System.out.println("Video path: " + videoPath);
-
         EditSession session = getSession(sessionId);
         if (session == null) {
             throw new RuntimeException("No active session found for sessionId: " + sessionId);
@@ -282,27 +299,31 @@ public class VideoEditingService {
             throw new RuntimeException("Invalid startTime or endTime for video segment");
         }
 
-        // --- Start of Audio Reuse Logic ---
         Project project = projectRepository.findById(session.getProjectId())
                 .orElseThrow(() -> new RuntimeException("Project not found"));
         String audioPath = null;
+        AudioSegment audioSegment = null;
 
-        // Check if the video already has an extracted audio file in videosJson
-        List<Map<String, String>> videos = getVideos(project);
-        for (Map<String, String> video : videos) {
-            if (video.get("videoPath").equals(videoPath) && video.containsKey("audioPath")) {
-                audioPath = video.get("audioPath");
-                System.out.println("Reusing existing audio file: " + audioPath);
-                break;
+        if (createAudioSegment) {
+            String videoFileName = new File(videoPath).getName();
+            String audioFileName = "extracted_" + videoFileName.replaceAll("[^a-zA-Z0-9.]", "_") + ".mp3";
+            File projectAudioDir = new File(baseDir, "audio/projects/" + session.getProjectId() + "/extracted");
+            File audioFile = new File(projectAudioDir, audioFileName);
+
+            List<Map<String, String>> extractedAudio = getExtractedAudio(project);
+            boolean audioExists = extractedAudio.stream()
+                    .anyMatch(audio -> audio.get("sourceVideoPath").equals(videoPath) && audio.get("audioFileName").equals(audioFileName));
+
+            if (audioExists && audioFile.exists()) {
+                System.out.println("Reusing existing audio file: " + audioFile.getAbsolutePath());
+                audioPath = "audio/projects/" + session.getProjectId() + "/extracted/" + audioFileName;
+            } else {
+                audioPath = extractAudioFromVideo(videoPath, session.getProjectId(), audioFileName);
+                System.out.println("Extracted new audio file: " + audioPath);
+                addExtractedAudio(project, audioPath, audioFileName, videoPath);
             }
-        }
 
-        // If no audio path exists, extract it and update videosJson
-        if (audioPath == null) {
-            audioPath = extractAudioFromVideo(videoPath, session.getProjectId());
-            System.out.println("Extracted new audio file: " + audioPath);
-
-            // Update or add the video entry with the audioPath
+            List<Map<String, String>> videos = getVideos(project);
             boolean videoExists = false;
             for (Map<String, String> video : videos) {
                 if (video.get("videoPath").equals(videoPath)) {
@@ -312,13 +333,22 @@ public class VideoEditingService {
                 }
             }
             if (!videoExists) {
-                addVideo(project, videoPath, new File(videoPath).getName(), audioPath);
+                addVideo(project, videoPath, videoFileName, audioPath);
             } else {
                 project.setVideosJson(objectMapper.writeValueAsString(videos));
             }
             projectRepository.save(project);
+
+            audioSegment = new AudioSegment();
+            audioSegment.setAudioPath(audioPath);
+            int audioLayer = findAvailableAudioLayer(session.getTimelineState(), timelineStartTime, timelineEndTime);
+            audioSegment.setLayer(audioLayer);
+            audioSegment.setStartTime(startTime);
+            audioSegment.setEndTime(endTime);
+            audioSegment.setTimelineStartTime(timelineStartTime);
+            audioSegment.setTimelineEndTime(timelineEndTime);
+            audioSegment.setVolume(1.0);
         }
-        // --- End of Audio Reuse Logic ---
 
         VideoSegment segment = new VideoSegment();
         segment.setSourceVideoPath(videoPath);
@@ -332,25 +362,16 @@ public class VideoEditingService {
         segment.setTimelineStartTime(timelineStartTime);
         segment.setTimelineEndTime(timelineEndTime);
 
-        AudioSegment audioSegment = new AudioSegment();
-        audioSegment.setAudioPath(audioPath);
-        // NEW: Assign an available audio layer
-        int audioLayer = findAvailableAudioLayer(session.getTimelineState(), timelineStartTime, timelineEndTime);
-        audioSegment.setLayer(audioLayer);
-        audioSegment.setStartTime(startTime);
-        audioSegment.setEndTime(endTime);
-        audioSegment.setTimelineStartTime(timelineStartTime);
-        audioSegment.setTimelineEndTime(timelineEndTime);
-        audioSegment.setVolume(1.0);
-
-        segment.setAudioId(audioSegment.getId());
+        if (audioSegment != null) {
+            segment.setAudioId(audioSegment.getId());
+            session.getTimelineState().getAudioSegments().add(audioSegment);
+        }
 
         if (session.getTimelineState() == null) {
             session.setTimelineState(new TimelineState());
         }
 
         session.getTimelineState().getSegments().add(segment);
-        session.getTimelineState().getAudioSegments().add(audioSegment);
         session.setLastAccessTime(System.currentTimeMillis());
     }
     // NEW: Helper method to find an available audio layer
@@ -372,18 +393,18 @@ public class VideoEditingService {
         }
     }
 
-    private String extractAudioFromVideo(String videoPath, Long projectId) throws IOException, InterruptedException {
+    private String extractAudioFromVideo(String videoPath, Long projectId, String audioFileName) throws IOException, InterruptedException {
         File videoFile = new File(baseDir, "videos/" + videoPath);
         if (!videoFile.exists()) {
             throw new IOException("Video file not found: " + videoFile.getAbsolutePath());
         }
 
-        File audioDir = new File(baseDir, "audio/projects/" + projectId);
+        // Store audio in project-specific extracted folder: audio/projects/{projectId}/extracted/
+        File audioDir = new File(baseDir, "audio/projects/" + projectId + "/extracted");
         if (!audioDir.exists()) {
-            audioDir.mkdirs();
+            audioDir.mkdirs(); // Create the project-specific extracted directory if it doesn't exist
         }
 
-        String audioFileName = "extracted_" + System.currentTimeMillis() + ".mp3";
         File audioFile = new File(audioDir, audioFileName);
 
         List<String> command = new ArrayList<>();
@@ -398,7 +419,8 @@ public class VideoEditingService {
 
         executeFFmpegCommand(command);
 
-        return "audio/projects/" + projectId + "/" + audioFileName;
+        // Return relative path to the project's extracted folder
+        return "audio/projects/" + projectId + "/extracted/" + audioFileName;
     }
 
     private double getVideoDuration(String videoPath) throws IOException, InterruptedException {
@@ -533,37 +555,6 @@ public class VideoEditingService {
             double newClipDuration = roundToThreeDecimals(segmentToUpdate.getEndTime() - segmentToUpdate.getStartTime());
             if (newTimelineDuration < newClipDuration) {
                 segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newClipDuration));
-            }
-
-            // Sync audio segment with rounded times
-            if (segmentToUpdate.getAudioId() != null) {
-                AudioSegment audioSegment = null;
-                for (AudioSegment a : session.getTimelineState().getAudioSegments()) {
-                    if (a.getId().equals(segmentToUpdate.getAudioId())) {
-                        audioSegment = a;
-                        break;
-                    }
-                }
-                if (audioSegment != null) {
-                    if (startTime != null) {
-                        audioSegment.setStartTime(roundToThreeDecimals(startTime));
-                    }
-                    if (endTime != null) {
-                        audioSegment.setEndTime(roundToThreeDecimals(endTime));
-                    }
-                    if (timelineStartTime != null) {
-                        audioSegment.setTimelineStartTime(roundToThreeDecimals(timelineStartTime));
-                    }
-                    if (timelineEndTime != null) {
-                        audioSegment.setTimelineEndTime(roundToThreeDecimals(timelineEndTime));
-                    }
-                    // Ensure audio timeline duration matches video
-                    double audioTimelineDuration = roundToThreeDecimals(audioSegment.getTimelineEndTime() - audioSegment.getTimelineStartTime());
-                    double audioClipDuration = roundToThreeDecimals(audioSegment.getEndTime() - audioSegment.getStartTime());
-                    if (audioTimelineDuration < audioClipDuration) {
-                        audioSegment.setTimelineEndTime(roundToThreeDecimals(audioSegment.getTimelineStartTime() + audioClipDuration));
-                    }
-                }
             }
         }
 
@@ -795,14 +786,36 @@ public class VideoEditingService {
             throw new RuntimeException("Unauthorized to modify this project");
         }
 
+        String audioPath = null;
+
+        // First, try to find the audio in audioJson
         List<Map<String, String>> audioFiles = getAudio(project);
         Map<String, String> targetAudio = audioFiles.stream()
-                .filter(audio -> audio.get("audioFileName").equals(audioFileName))
+                .filter(audio -> audio.get("audioFileName").equals(audioFileName) || audio.get("audioPath").equals(audioFileName))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("No audio found with filename: " + audioFileName));
+                .orElse(null);
 
-        String audioPath = targetAudio.get("audioPath");
-        // MODIFIED: Round time fields to three decimal places
+        if (targetAudio != null) {
+            audioPath = targetAudio.get("audioPath");
+        } else {
+            // If not found in audioJson, try extractedAudioJson
+            List<Map<String, String>> extractedAudios = getExtractedAudio(project);
+            Map<String, String> extractedAudio = extractedAudios.stream()
+                    .filter(audio -> {
+                        String basename = audioFileName.contains("/") ?
+                                audioFileName.substring(audioFileName.lastIndexOf("/") + 1) :
+                                audioFileName;
+                        return audio.get("audioFileName").equals(audioFileName) ||
+                                audio.get("audioPath").equals(audioFileName) ||
+                                audio.get("audioFileName").equals(basename) ||
+                                audio.get("audioPath").equals(basename);
+                    })
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("No audio found with filename: " + audioFileName));
+            audioPath = extractedAudio.get("audioPath");
+        }
+
+        // Round time fields to three decimal places
         startTime = roundToThreeDecimals(startTime);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
         double calculatedEndTime = endTime != null ? roundToThreeDecimals(endTime) :
@@ -810,7 +823,7 @@ public class VideoEditingService {
         double calculatedTimelineEndTime = timelineEndTime != null ? roundToThreeDecimals(timelineEndTime) :
                 roundToThreeDecimals(timelineStartTime + (calculatedEndTime - startTime));
 
-        addAudioToTimeline(sessionId, audioPath, layer, startTime, calculatedEndTime, timelineStartTime, timelineEndTime);
+        addAudioToTimeline(sessionId, audioPath, layer, startTime, calculatedEndTime, timelineStartTime, calculatedTimelineEndTime);
     }
 
     public void addAudioToTimeline(

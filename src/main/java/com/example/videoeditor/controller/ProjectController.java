@@ -8,6 +8,7 @@ import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
 import com.example.videoeditor.service.VideoEditingService;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpStatus;
@@ -139,6 +140,10 @@ public class ProjectController {
             Double startTime = request.get("startTime") != null ? ((Number) request.get("startTime")).doubleValue() : null;
             Double endTime = request.get("endTime") != null ? ((Number) request.get("endTime")).doubleValue() : null;
             Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null;
+            // Extract createAudioSegment, support both createAudioSegment and skipAudio for backward compatibility
+            Boolean createAudioSegment = request.get("createAudioSegment") != null ?
+                    Boolean.valueOf(request.get("createAudioSegment").toString()) :
+                    (request.get("skipAudio") != null ? !Boolean.valueOf(request.get("skipAudio").toString()) : true);
 
             // Validate required parameters
             if (videoPath == null) {
@@ -156,7 +161,8 @@ public class ProjectController {
                     timelineStartTime,
                     timelineEndTime,
                     startTime,
-                    endTime
+                    endTime,
+                    createAudioSegment
             );
 
             // Retrieve the newly added video and audio segments
@@ -173,14 +179,14 @@ public class ProjectController {
                     .orElse(null);
 
             // Prepare response
-            Map<String, Object> response = new HashMap<>(); // Changed to Map<String, Object> to support Integer
+            Map<String, Object> response = new HashMap<>();
             response.put("videoSegmentId", addedVideoSegment.getId());
             if (addedAudioSegment != null) {
                 response.put("audioSegmentId", addedAudioSegment.getId());
-                response.put("audioLayer", addedAudioSegment.getLayer()); // NEW: Include audio layer
+                response.put("audioLayer", addedAudioSegment.getLayer());
             }
 
-            return ResponseEntity.ok(response); // Updated to return response map
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error adding video to timeline: " + e.getMessage());
@@ -1069,6 +1075,39 @@ public class ProjectController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error deleting project: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/{projectId}/audio/{filename:.+}")
+    public ResponseEntity<Resource> serveAudio(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @PathVariable String filename) {
+        try {
+            User user = getUserFromToken(token);
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            if (!project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define the directory where audio files are stored
+            String audioDirectory = "audio/projects/" + projectId + "/extracted/";
+            File audioFile = new File(audioDirectory, filename);
+            if (!audioFile.exists() || !audioFile.isFile()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            Resource resource = new FileSystemResource(audioFile);
+            String contentType = filename.toLowerCase().endsWith(".mp3") ? "audio/mpeg" : "application/octet-stream";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .body(resource);
+        } catch (Exception e) {
+            System.err.println("Error serving audio: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
 }

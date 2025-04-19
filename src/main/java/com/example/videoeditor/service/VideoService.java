@@ -11,6 +11,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -23,21 +24,25 @@ public class VideoService {
         new File(uploadDir).mkdirs();
     }
 
-    public Video uploadVideo(MultipartFile file, String title, User user) throws IOException {
+    public List<Video> uploadVideos(MultipartFile[] files, String[] titles, User user) throws IOException {
+        List<Video> uploadedVideos = new ArrayList<>();
 
-        String originalFilename = file.getOriginalFilename();
+        for (int i = 0; i < files.length; i++) {
+            MultipartFile file = files[i];
+            String title = (titles != null && i < titles.length && titles[i] != null) ? titles[i] : file.getOriginalFilename();
 
-        // Ensure filename is unique by appending a timestamp and user ID
-        String uniqueFilename = user.getId() + "_" + System.currentTimeMillis() + "_" + originalFilename;
-        String filePath = uploadDir + uniqueFilename;
+            String filename = file.getOriginalFilename();
+            String filePath = uploadDir + filename;
+            file.transferTo(Paths.get(filePath));
 
-        file.transferTo(Paths.get(filePath));
+            Video video = new Video();
+            video.setTitle(title);
+            video.setFilePath(filename);
+            video.setUser(user);
+            uploadedVideos.add(videoRepository.save(video));
+        }
 
-        Video video = new Video();
-        video.setTitle(title);
-        video.setFilePath(uniqueFilename);
-        video.setUser(user);
-        return videoRepository.save(video);
+        return uploadedVideos;
     }
 
     public List<Video> getVideosByUser(String email) {

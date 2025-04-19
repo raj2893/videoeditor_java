@@ -73,18 +73,27 @@ public class VideoController {
                 .body(resource);
     }
 
-    @PostMapping("/upload")
+    @PostMapping("/upload/{projectId}")
     public ResponseEntity<?> uploadVideo(
             @RequestHeader("Authorization") String token,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam("title") String title
+            @PathVariable Long projectId,
+            @RequestParam("files") MultipartFile[] files,
+            @RequestParam(value = "titles", required = false) String[] titles
     ) throws IOException {
-        String email = jwtUtil.extractEmail(token.substring(7));  // Extract user email from JWT
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        try {
+            String email = jwtUtil.extractEmail(token.substring(7)); // Extract user email from JWT
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
 
-        Video video = videoService.uploadVideo(file, title, user);
-        return ResponseEntity.ok(video);
+            List<Video> videos = videoService.uploadVideos(files, titles, user); // Updated call
+            return ResponseEntity.ok(videos);
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error uploading videos: " + e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(e.getMessage());
+        }
     }
 
     @GetMapping("/my-videos")

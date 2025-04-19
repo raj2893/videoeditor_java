@@ -1881,7 +1881,7 @@ public class VideoEditingService {
                 filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
 
-                // Apply filters (unchanged)
+                // Apply filters
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(vs.getId()))
                         .collect(Collectors.toList());
@@ -1987,14 +1987,22 @@ public class VideoEditingService {
                     }
                 }
 
-                // Apply transitions
+                // Apply transitions and get position and crop parameters
                 List<Transition> relevantTransitions = timelineState.getTransitions().stream()
                         .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(vs.getId())) ||
                                 (t.getFromSegmentId() != null && t.getFromSegmentId().equals(vs.getId())))
                         .filter(t -> t.getLayer() == vs.getLayer())
                         .collect(Collectors.toList());
 
-                applyTransitionFilters(filterComplex, relevantTransitions, vs.getTimelineStartTime(), vs.getTimelineEndTime(), canvasWidth, canvasHeight);
+                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, vs.getTimelineStartTime(), vs.getTimelineEndTime(), canvasWidth, canvasHeight);
+
+                // Apply crop filter for wipe transition if needed
+                if (!transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih")) {
+                    filterComplex.append("crop=w='").append(transitionOffsets.get("cropWidth")).append("':h='")
+                            .append(transitionOffsets.get("cropHeight")).append("':x='")
+                            .append(transitionOffsets.get("cropX")).append("':y='")
+                            .append(transitionOffsets.get("cropY")).append("',");
+                }
 
                 // Handle scaling with keyframes
                 StringBuilder scaleExpr = new StringBuilder();
@@ -2053,10 +2061,16 @@ public class VideoEditingService {
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
-                    xExpr.insert(0, "(W/2)+").append("-(w/2)");
                 } else {
-                    xExpr.append("(W/2)+").append(String.format("%.6f", baseX)).append("-(w/2)");
+                    xExpr.append(String.format("%.6f", baseX));
                 }
+
+                // Add transition offset for x
+                String xTransitionOffset = transitionOffsets.get("x");
+                if (!xTransitionOffset.equals("0")) {
+                    xExpr.append("+").append(xTransitionOffset);
+                }
+                xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
 
                 // Handle position Y with keyframes
                 StringBuilder yExpr = new StringBuilder();
@@ -2068,7 +2082,7 @@ public class VideoEditingService {
                     Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
                     yExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posXKeyframes.size(); j++) {
+                    for (int j = 1; j < posYKeyframes.size(); j++) {
                         Keyframe prevKf = posYKeyframes.get(j - 1);
                         Keyframe kf = posYKeyframes.get(j);
                         double prevTime = prevKf.getTime();
@@ -2084,10 +2098,16 @@ public class VideoEditingService {
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
-                    yExpr.insert(0, "(H/2)+").append("-(h/2)");
                 } else {
-                    yExpr.append("(H/2)+").append(String.format("%.6f", baseY)).append("-(h/2)");
+                    yExpr.append(String.format("%.6f", baseY));
                 }
+
+                // Add transition offset for y
+                String yTransitionOffset = transitionOffsets.get("y");
+                if (!yTransitionOffset.equals("0")) {
+                    yExpr.append("+").append(yTransitionOffset);
+                }
+                yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
 
                 // Overlay the scaled video onto the previous output
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
@@ -2212,14 +2232,22 @@ public class VideoEditingService {
                     }
                 }
 
-                // Apply transitions
+                // Apply transitions and get position and crop parameters
                 List<Transition> relevantTransitions = timelineState.getTransitions().stream()
                         .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(is.getId())) ||
                                 (t.getFromSegmentId() != null && t.getFromSegmentId().equals(is.getId())))
                         .filter(t -> t.getLayer() == is.getLayer())
                         .collect(Collectors.toList());
 
-                applyTransitionFilters(filterComplex, relevantTransitions, is.getTimelineStartTime(), is.getTimelineEndTime(), canvasWidth, canvasHeight);
+                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, is.getTimelineStartTime(), is.getTimelineEndTime(), canvasWidth, canvasHeight);
+
+                // Apply crop filter for wipe transition if needed
+                if (!transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih")) {
+                    filterComplex.append("crop=w='").append(transitionOffsets.get("cropWidth")).append("':h='")
+                            .append(transitionOffsets.get("cropHeight")).append("':x='")
+                            .append(transitionOffsets.get("cropX")).append("':y='")
+                            .append(transitionOffsets.get("cropY")).append("',");
+                }
 
                 // Handle scaling with keyframes
                 StringBuilder scaleExpr = new StringBuilder();
@@ -2280,10 +2308,16 @@ public class VideoEditingService {
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
-                    xExpr.insert(0, "(W/2)+").append("-(w/2)");
                 } else {
-                    xExpr.append("(W/2)+").append(String.format("%.6f", baseX)).append("-(w/2)");
+                    xExpr.append(String.format("%.6f", baseX));
                 }
+
+                // Add transition offset for x
+                String xTransitionOffset = transitionOffsets.get("x");
+                if (!xTransitionOffset.equals("0")) {
+                    xExpr.append("+").append(xTransitionOffset);
+                }
+                xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
 
                 // Handle position Y with keyframes
                 StringBuilder yExpr = new StringBuilder();
@@ -2311,10 +2345,16 @@ public class VideoEditingService {
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
-                    yExpr.insert(0, "(H/2)+").append("-(h/2)");
                 } else {
-                    yExpr.append("(H/2)+").append(String.format("%.6f", baseY)).append("-(h/2)");
+                    yExpr.append(String.format("%.6f", baseY));
                 }
+
+                // Add transition offset for y
+                String yTransitionOffset = transitionOffsets.get("y");
+                if (!yTransitionOffset.equals("0")) {
+                    yExpr.append("+").append(yTransitionOffset);
+                }
+                yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
 
                 // Overlay the scaled image onto the previous output
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
@@ -2326,6 +2366,15 @@ public class VideoEditingService {
                 lastOutput = "ov" + outputLabel;
             } else if (segment instanceof TextSegment) {
                 TextSegment ts = (TextSegment) segment;
+
+                // Apply transitions and get position and crop parameters
+                List<Transition> relevantTransitions = timelineState.getTransitions().stream()
+                        .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(ts.getId())) ||
+                                (t.getFromSegmentId() != null && t.getFromSegmentId().equals(ts.getId())))
+                        .filter(t -> t.getLayer() == ts.getLayer())
+                        .collect(Collectors.toList());
+
+                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
 
                 filterComplex.append("[").append(lastOutput).append("]");
                 filterComplex.append("drawtext=");
@@ -2339,11 +2388,11 @@ public class VideoEditingService {
                     filterComplex.append("box=1:boxcolor=").append(ts.getBackgroundColor()).append("@0.5:");
                 }
 
-                // Handle scale with keyframes (copied logic from ImageSegment)
+                // Handle scale with keyframes
                 StringBuilder fontSizeExpr = new StringBuilder();
                 List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
                 double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
-                double baseFontSize = 24.0; // Base font size for scaling, same as original
+                double baseFontSize = 24.0; // Base font size for scaling
 
                 if (!scaleKeyframes.isEmpty()) {
                     Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
@@ -2399,10 +2448,16 @@ public class VideoEditingService {
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
-                    xExpr.insert(0, "(W/2)+").append("-(tw/2)");
                 } else {
-                    xExpr.append("(W/2)+").append(String.format("%.6f", baseX)).append("-(tw/2)");
+                    xExpr.append(String.format("%.6f", baseX));
                 }
+
+                // Add transition offset for x
+                String xTransitionOffset = transitionOffsets.get("x");
+                if (!xTransitionOffset.equals("0")) {
+                    xExpr.append("+").append(xTransitionOffset);
+                }
+                xExpr.insert(0, "(W/2)+(").append(")-(tw/2)");
 
                 // Handle position Y with keyframes
                 StringBuilder yExpr = new StringBuilder();
@@ -2431,12 +2486,27 @@ public class VideoEditingService {
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
-                    yExpr.insert(0, "(H/2)+").append("-(th/2)");
                 } else {
-                    yExpr.append("(H/2)+").append(String.format("%.6f", baseY)).append("-(th/2)");
+                    yExpr.append(String.format("%.6f", baseY));
                 }
 
+                // Add transition offset for y
+                String yTransitionOffset = transitionOffsets.get("y");
+                if (!yTransitionOffset.equals("0")) {
+                    yExpr.append("+").append(yTransitionOffset);
+                }
+                yExpr.insert(0, "(H/2)+(").append(")-(th/2)");
+
                 filterComplex.append("x='").append(xExpr).append("':y='").append(yExpr).append("'");
+
+                // Apply crop filter for wipe transition if needed
+                if (!transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih")) {
+                    filterComplex.append(",crop=w='").append(transitionOffsets.get("cropWidth")).append("':h='")
+                            .append(transitionOffsets.get("cropHeight")).append("':x='")
+                            .append(transitionOffsets.get("cropX")).append("':y='")
+                            .append(transitionOffsets.get("cropY")).append("'");
+                }
+
                 filterComplex.append("[ov").append(outputLabel).append("];");
                 System.out.println("Text segment filter chain for " + ts.getId() + ": " +
                         filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
@@ -2557,13 +2627,23 @@ public class VideoEditingService {
         return outputPath;
     }
 
-    private void applyTransitionFilters(StringBuilder filterComplex, List<Transition> transitions,
-                                        double segmentStartTime, double segmentEndTime, int canvasWidth, int canvasHeight) {
+    private Map<String, String> applyTransitionFilters(StringBuilder filterComplex, List<Transition> transitions,
+                                                       double segmentStartTime, double segmentEndTime, int canvasWidth, int canvasHeight) {
+        Map<String, String> transitionOffsets = new HashMap<>();
+        transitionOffsets.put("x", "0"); // Default x offset
+        transitionOffsets.put("y", "0"); // Default y offset
+        transitionOffsets.put("cropWidth", "iw"); // Default crop width (full input width)
+        transitionOffsets.put("cropHeight", "ih"); // Default crop height (full input height)
+        transitionOffsets.put("cropX", "0"); // Default crop x position
+        transitionOffsets.put("cropY", "0"); // Default crop y position
+
         for (Transition transition : transitions) {
             double transStart = transition.getTimelineStartTime();
             double transEnd = transStart + transition.getDuration();
             // Ensure transition is within segment bounds
             if (transStart >= segmentEndTime || transEnd <= segmentStartTime) {
+                System.out.println("Skipping transition " + transition.getId() + " for segment: transStart=" + transStart +
+                        ", transEnd=" + transEnd + ", segmentStart=" + segmentStartTime + ", segmentEnd=" + segmentEndTime);
                 continue;
             }
 
@@ -2576,188 +2656,107 @@ public class VideoEditingService {
                     transition.getFromSegmentId().equals(transition.getFromSegmentId());
 
             // Calculate progress expression: (t - transStart) / duration
-            String progressExpr = String.format(
-                    "clamp((t-%.2f)/%.2f,0,1)", transStart, transition.getDuration());
+            String progressExpr = String.format("(t-%.6f)/%.6f", transStart, transition.getDuration());
 
             switch (transType) {
-                case "Fade":
-                    if (isToSegment && transition.getFromSegmentId() == null) {
-                        // Fade in
-                        filterComplex.append("setpts=PTS-STARTPTS,");
-                        filterComplex.append("format=rgba,");
-                        filterComplex.append("colorchannelmixer=aa=").append(progressExpr).append(",");
-                        filterComplex.append("format=rgb,");
-                    } else if (isFromSegment) {
-                        // Fade out
-                        filterComplex.append("setpts=PTS-STARTPTS,");
-                        filterComplex.append("format=rgba,");
-                        filterComplex.append("colorchannelmixer=aa=1-").append(progressExpr).append(",");
-                        filterComplex.append("format=rgb,");
-                    }
-                    System.out.println("Fade transition filter chain: " +
-                            filterComplex.substring(Math.max(0, filterComplex.length() - 100)));
-                    break;
-
                 case "Slide":
                     String slideXExpr = "0";
                     String slideYExpr = "0";
                     if (isToSegment) {
                         switch (direction) {
                             case "right":
-                                slideXExpr = String.format("lerp(%d,0,%s)", canvasWidth, progressExpr);
+                                slideXExpr = String.format("lerp(%d,0,min(1,max(0,%s)))", canvasWidth, progressExpr);
                                 break;
                             case "left":
-                                slideXExpr = String.format("lerp(-%d,0,%s)", canvasWidth, progressExpr);
+                                slideXExpr = String.format("lerp(-%d,0,min(1,max(0,%s)))", canvasWidth, progressExpr);
                                 break;
                             case "top":
-                                slideYExpr = String.format("lerp(-%d,0,%s)", canvasHeight, progressExpr);
+                                slideYExpr = String.format("lerp(-%d,0,min(1,max(0,%s)))", canvasHeight, progressExpr);
                                 break;
                             case "bottom":
-                                slideYExpr = String.format("lerp(%d,0,%s)", canvasHeight, progressExpr);
+                                slideYExpr = String.format("lerp(%d,0,min(1,max(0,%s)))", canvasHeight, progressExpr);
                                 break;
                         }
                     } else if (isFromSegment) {
                         switch (direction) {
                             case "right":
-                                slideXExpr = String.format("lerp(0,-%d,%s)", canvasWidth, progressExpr);
+                                slideXExpr = String.format("lerp(0,-%d,min(1,max(0,%s)))", canvasWidth, progressExpr);
                                 break;
                             case "left":
-                                slideXExpr = String.format("lerp(0,%d,%s)", canvasWidth, progressExpr);
+                                slideXExpr = String.format("lerp(0,%d,min(1,max(0,%s)))", canvasWidth, progressExpr);
                                 break;
                             case "top":
-                                slideYExpr = String.format("lerp(0,%d,%s)", canvasHeight, progressExpr);
+                                slideYExpr = String.format("lerp(0,%d,min(1,max(0,%s)))", canvasHeight, progressExpr);
                                 break;
                             case "bottom":
-                                slideYExpr = String.format("lerp(0,-%d,%s)", canvasHeight, progressExpr);
+                                slideYExpr = String.format("lerp(0,-%d,min(1,max(0,%s)))", canvasHeight, progressExpr);
                                 break;
                         }
                     }
-                    filterComplex.append("setpts=PTS-STARTPTS,");
-                    filterComplex.append("overlay=x=").append(slideXExpr).append(":y=").append(slideYExpr);
-                    filterComplex.append(String.format(":enable='between(t,%.2f,%.2f)',", transStart, transEnd));
-                    System.out.println("Slide transition filter chain: " +
-                            filterComplex.substring(Math.max(0, filterComplex.length() - 100)));
+                    String enableExpr = String.format("if(between(t,%.6f,%.6f),%s,0)", transStart, transEnd, slideXExpr);
+                    transitionOffsets.put("x", enableExpr);
+                    enableExpr = String.format("if(between(t,%.6f,%.6f),%s,0)", transStart, transEnd, slideYExpr);
+                    transitionOffsets.put("y", enableExpr);
+                    System.out.println("Slide transition offsets for " + transition.getId() + ": x=" + transitionOffsets.get("x") +
+                            ", y=" + transitionOffsets.get("y"));
                     break;
 
                 case "Wipe":
-                    String cropExpr = "";
-                    if (isToSegment) {
-                        switch (direction) {
-                            case "left":
-                                cropExpr = String.format("crop=iw*(1-%s):ih:0:0", progressExpr);
-                                break;
-                            case "right":
-                                cropExpr = String.format("crop=iw*(1-%s):ih:iw*%s:0", progressExpr, progressExpr);
-                                break;
-                            case "top":
-                                cropExpr = String.format("crop=iw:ih*(1-%s):0:0", progressExpr);
-                                break;
-                            case "bottom":
-                                cropExpr = String.format("crop=iw:ih*(1-%s):0:ih*%s", progressExpr, progressExpr);
-                                break;
-                        }
-                    } else if (isFromSegment) {
-                        switch (direction) {
-                            case "left":
-                                cropExpr = String.format("crop=iw*%s:ih:0:0", progressExpr);
-                                break;
-                            case "right":
-                                cropExpr = String.format("crop=iw*%s:ih:iw*(1-%s):0", progressExpr, progressExpr);
-                                break;
-                            case "top":
-                                cropExpr = String.format("crop=iw:ih*%s:0:0", progressExpr);
-                                break;
-                            case "bottom":
-                                cropExpr = String.format("crop=iw:ih*%s:0:ih*(1-%s)", progressExpr, progressExpr);
-                                break;
-                        }
-                    }
-                    if (!cropExpr.isEmpty()) {
-                        filterComplex.append("setpts=PTS-STARTPTS,");
-                        filterComplex.append(cropExpr).append(",");
-                    }
-                    System.out.println("Wipe transition filter chain: " +
-                            filterComplex.substring(Math.max(0, filterComplex.length() - 100)));
-                    break;
-
-                case "Zoom":
-                    String zoomExpr = "";
-                    if (isToSegment) {
-                        if (direction.equals("in")) {
-                            zoomExpr = String.format("lerp(0.1,1,%s)", progressExpr);
-                        } else { // out
-                            zoomExpr = String.format("lerp(2,1,%s)", progressExpr);
-                        }
-                    } else if (isFromSegment) {
-                        if (direction.equals("in")) {
-                            zoomExpr = String.format("lerp(1,2,%s)", progressExpr);
-                        } else { // out
-                            zoomExpr = String.format("lerp(1,0.1,%s)", progressExpr);
-                        }
-                    }
-                    if (!zoomExpr.isEmpty()) {
-                        filterComplex.append("setpts=PTS-STARTPTS,");
-                        filterComplex.append("zoompan=z='").append(zoomExpr).append("':d=1:s=").append(canvasWidth).append("x").append(canvasHeight).append(",");
-                    }
-                    System.out.println("Zoom transition filter chain: " +
-                            filterComplex.substring(Math.max(0, filterComplex.length() - 100)));
-                    break;
-
-                case "Rotate":
-                    String rotateExpr = "";
-                    double angle = direction.equals("clockwise") ? 90 : -90;
-                    if (isToSegment) {
-                        rotateExpr = String.format("lerp(%f,0,%s)", angle, progressExpr);
-                    } else if (isFromSegment) {
-                        rotateExpr = String.format("lerp(0,%f,%s)", angle, progressExpr);
-                    }
-                    if (!rotateExpr.isEmpty()) {
-                        filterComplex.append("setpts=PTS-STARTPTS,");
-                        filterComplex.append("rotate='").append(rotateExpr).append("*PI/180':c=black,");
-                    }
-                    System.out.println("Rotate transition filter chain: " +
-                            filterComplex.substring(Math.max(0, filterComplex.length() - 100)));
-                    break;
-
-                case "Push":
-                    String pushXExpr = "0";
-                    String pushYExpr = "0";
+                    String cropWidthExpr = "iw";
+                    String cropHeightExpr = "ih";
+                    String cropXExpr = "0";
+                    String cropYExpr = "0";
                     if (isToSegment) {
                         switch (direction) {
                             case "right":
-                                pushXExpr = String.format("lerp(-%d,0,%s)", canvasWidth, progressExpr);
+                                cropWidthExpr = String.format("lerp(0,iw,min(1,max(0,%s)))", progressExpr);
+                                cropXExpr = "0";
                                 break;
                             case "left":
-                                pushXExpr = String.format("lerp(%d,0,%s)", canvasWidth, progressExpr);
+                                cropWidthExpr = String.format("lerp(0,iw,min(1,max(0,%s)))", progressExpr);
+                                cropXExpr = String.format("lerp(iw,0,min(1,max(0,%s)))", progressExpr);
                                 break;
                             case "top":
-                                pushYExpr = String.format("lerp(%d,0,%s)", canvasHeight, progressExpr);
+                                cropHeightExpr = String.format("lerp(0,ih,min(1,max(0,%s)))", progressExpr);
+                                cropYExpr = String.format("lerp(ih,0,min(1,max(0,%s)))", progressExpr);
                                 break;
                             case "bottom":
-                                pushYExpr = String.format("lerp(-%d,0,%s)", canvasHeight, progressExpr);
+                                cropHeightExpr = String.format("lerp(0,ih,min(1,max(0,%s)))", progressExpr);
+                                cropYExpr = "0";
                                 break;
                         }
                     } else if (isFromSegment) {
                         switch (direction) {
                             case "right":
-                                pushXExpr = String.format("lerp(0,%d,%s)", canvasWidth, progressExpr);
+                                cropWidthExpr = String.format("lerp(iw,0,min(1,max(0,%s)))", progressExpr);
+                                cropXExpr = "0";
                                 break;
                             case "left":
-                                pushXExpr = String.format("lerp(0,-%d,%s)", canvasWidth, progressExpr);
+                                cropWidthExpr = String.format("lerp(iw,0,min(1,max(0,%s)))", progressExpr);
+                                cropXExpr = String.format("lerp(0,iw,min(1,max(0,%s)))", progressExpr);
                                 break;
                             case "top":
-                                pushYExpr = String.format("lerp(0,-%d,%s)", canvasHeight, progressExpr);
+                                cropHeightExpr = String.format("lerp(ih,0,min(1,max(0,%s)))", progressExpr);
+                                cropYExpr = String.format("lerp(0,ih,min(1,max(0,%s)))", progressExpr);
                                 break;
                             case "bottom":
-                                pushYExpr = String.format("lerp(0,%d,%s)", canvasHeight, progressExpr);
+                                cropHeightExpr = String.format("lerp(ih,0,min(1,max(0,%s)))", progressExpr);
+                                cropYExpr = "0";
                                 break;
                         }
                     }
-                    filterComplex.append("setpts=PTS-STARTPTS,");
-                    filterComplex.append("overlay=x=").append(pushXExpr).append(":y=").append(pushYExpr);
-                    filterComplex.append(String.format(":enable='between(t,%.2f,%.2f)',", transStart, transEnd));
-                    System.out.println("Push transition filter chain: " +
-                            filterComplex.substring(Math.max(0, filterComplex.length() - 100)));
+                    String cropEnableExpr = String.format("if(between(t,%.6f,%.6f),%s,iw)", transStart, transEnd, cropWidthExpr);
+                    transitionOffsets.put("cropWidth", cropEnableExpr);
+                    cropEnableExpr = String.format("if(between(t,%.6f,%.6f),%s,ih)", transStart, transEnd, cropHeightExpr);
+                    transitionOffsets.put("cropHeight", cropEnableExpr);
+                    cropEnableExpr = String.format("if(between(t,%.6f,%.6f),%s,0)", transStart, transEnd, cropXExpr);
+                    transitionOffsets.put("cropX", cropEnableExpr);
+                    cropEnableExpr = String.format("if(between(t,%.6f,%.6f),%s,0)", transStart, transEnd, cropYExpr);
+                    transitionOffsets.put("cropY", cropEnableExpr);
+                    System.out.println("Wipe transition parameters for " + transition.getId() + ": cropWidth=" + transitionOffsets.get("cropWidth") +
+                            ", cropHeight=" + transitionOffsets.get("cropHeight") +
+                            ", cropX=" + transitionOffsets.get("cropX") +
+                            ", cropY=" + transitionOffsets.get("cropY"));
                     break;
 
                 default:
@@ -2765,6 +2764,7 @@ public class VideoEditingService {
                     break;
             }
         }
+        return transitionOffsets;
     }
 
     private String getDefaultDirection(String transitionType) {

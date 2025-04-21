@@ -14,6 +14,7 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -548,7 +549,8 @@ public class ProjectController {
             Double timelineEndTime = request.get("timelineEndTime") != null ?
                     ((Number) request.get("timelineEndTime")).doubleValue() : null;
             String imageFileName = (String) request.get("imageFileName");
-            Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null; // Added opacity
+            Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null;
+            Boolean isElement = request.get("isElement") != null ? Boolean.valueOf(request.get("isElement").toString()) : false;
 
             if (layer < 0) {
                 return ResponseEntity.badRequest().body("Layer must be a non-negative integer");
@@ -560,24 +562,23 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Timeline end time must be greater than start time");
             }
             if (imageFileName == null || imageFileName.isEmpty()) {
-                return ResponseEntity.badRequest().body("Image filename is required");
+                return ResponseEntity.badRequest().body("Image or element filename is required");
             }
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
 
             videoEditingService.addImageToTimelineFromProject(
-                    user, sessionId, projectId, layer, timelineStartTime, timelineEndTime, null, imageFileName, opacity);
+                    user, sessionId, projectId, layer, timelineStartTime, timelineEndTime, null, imageFileName, opacity, isElement);
             return ResponseEntity.ok().build();
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error adding project image to timeline: " + e.getMessage());
+                    .body("Error adding project image or element to timeline: " + e.getMessage());
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(e.getMessage());
         }
     }
-
 
     @PutMapping("/{projectId}/update-image")
     public ResponseEntity<?> updateImageSegment(
@@ -665,27 +666,57 @@ public class ProjectController {
         }
     }
 
-    @GetMapping("/{projectId}/images/{filename}")
+    @GetMapping("/{projectId}/images/{filename:.+}")
     public ResponseEntity<Resource> serveImage(
+            @RequestHeader(value = "Authorization", required = false) String token,
             @PathVariable Long projectId,
             @PathVariable String filename) {
         try {
-            // Define the directory where images are stored
-            String imageDirectory = "images/projects/" + projectId + "/";
-            Path filePath = Paths.get(imageDirectory).resolve(filename).normalize();
-            Resource resource = new UrlResource(filePath.toUri());
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                // Authenticate user if token is provided
+                user = getUserFromToken(token);
+            }
+
+            // Verify project exists
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+            // Check if the file is in the elements directory first (global access)
+            String elementsDirectory = "D:/Backend/videoEditor-main/elements/";
+            Path elementsPath = Paths.get(elementsDirectory).resolve(filename).normalize();
+            Resource resource = new UrlResource(elementsPath.toUri());
 
             if (resource.exists() && resource.isReadable()) {
-                // Determine the content type based on file extension
                 String contentType = determineContentType(filename);
                 return ResponseEntity.ok()
                         .contentType(MediaType.parseMediaType(contentType))
                         .body(resource);
-            } else {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
             }
+
+            // If not in elements, check project-specific images (requires ownership)
+            if (user != null && !project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            String projectImageDirectory = "images/projects/" + projectId + "/";
+            Path projectImagePath = Paths.get(projectImageDirectory).resolve(filename).normalize();
+            resource = new UrlResource(projectImagePath.toUri());
+
+            if (resource.exists() && resource.isReadable()) {
+                String contentType = determineContentType(filename);
+                return ResponseEntity.ok()
+                        .contentType(MediaType.parseMediaType(contentType))
+                        .body(resource);
+            }
+
+            // File not found in either location
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving image: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         } catch (Exception e) {
-            // Log the error for debugging
             System.err.println("Error serving image: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
@@ -1142,4 +1173,35 @@ public class ProjectController {
         if (filename.endsWith(".ogg")) return "audio/ogg";
         return "application/octet-stream"; // Default fallback
     }
+
+
+    @PostMapping("/elements/upload")
+    public ResponseEntity<List<ElementDto>> uploadElements(
+            @RequestParam("files") MultipartFile[] files,
+            @RequestParam(value = "title", required = false) String title,
+            Authentication authentication
+    ) throws IOException {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
+        }
+
+        String email = (String) authentication.getPrincipal();
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found with email: " + email));
+
+        List<ElementDto> elements = videoEditingService.uploadElements(files, title, user);
+        return ResponseEntity.ok(elements);
+    }
+
+    @GetMapping("/elements")
+    public ResponseEntity<List<ElementDto>> getElements(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
+        }
+
+        String email = (String) authentication.getPrincipal();
+        List<ElementDto> elements = videoEditingService.getElementsByUser(email);
+        return ResponseEntity.ok(elements);
+    }
+
 }

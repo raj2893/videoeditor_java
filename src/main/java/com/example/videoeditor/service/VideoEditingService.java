@@ -1,14 +1,17 @@
 package com.example.videoeditor.service;
 
+import com.example.videoeditor.entity.Element;
 import com.example.videoeditor.entity.Project;
 import com.example.videoeditor.dto.*;
 import com.example.videoeditor.entity.User;
 import com.example.videoeditor.repository.EditedVideoRepository;
+import com.example.videoeditor.repository.ElementRepository;
 import com.example.videoeditor.repository.ProjectRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
+import org.apache.commons.io.FilenameUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -18,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.nio.file.Paths;
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -34,15 +38,19 @@ public class VideoEditingService {
 
     private final String ffmpegPath = "C:\\Users\\raj.p\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe";
     private final String baseDir = "D:\\Backend\\videoEditor-main"; // Base directory constant
+    private final String ELEMENTS_DIR = "D:\\Backend\\videoEditor-main\\elements\\";
+
+    private final ElementRepository elementRepository;
 
     public VideoEditingService(
             ProjectRepository projectRepository,
             EditedVideoRepository editedVideoRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper, ElementRepository elementRepository
     ) {
         this.projectRepository = projectRepository;
         this.editedVideoRepository = editedVideoRepository;
         this.objectMapper = objectMapper;
+        this.elementRepository = elementRepository;
         this.activeSessions = new ConcurrentHashMap<>();
     }
 
@@ -1128,25 +1136,42 @@ public class VideoEditingService {
             Double timelineEndTime,
             Map<String, String> filters,
             String imageFileName,
-            Double opacity) throws IOException {
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            Double opacity,
+            boolean isElement) throws IOException {
+        String imagePath;
 
-        if (!project.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Unauthorized to modify this project");
+        if (isElement) {
+            // Handle element
+            Element element = elementRepository.findByFileNameAndUser(imageFileName, user)
+                    .orElseThrow(() -> new RuntimeException("Element not found with filename: " + imageFileName));
+            imagePath = element.getFilePath(); // e.g., "elements/filename.png"
+
+            // Optionally, associate the element with the project (if not already)
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            if (!project.getUser().getId().equals(user.getId())) {
+                throw new RuntimeException("Unauthorized to modify this project");
+            }
+            addElement(project, imagePath, imageFileName); // Store in element_json
+        } else {
+            // Handle project image
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            if (!project.getUser().getId().equals(user.getId())) {
+                throw new RuntimeException("Unauthorized to modify this project");
+            }
+            List<Map<String, String>> images = getImages(project);
+            Map<String, String> targetImage = images.stream()
+                    .filter(img -> img.get("imageFileName").equals(imageFileName))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("No image found with filename: " + imageFileName));
+            imagePath = targetImage.get("imagePath"); // e.g., "images/projects/{projectId}/filename.png"
         }
 
-        List<Map<String, String>> images = getImages(project);
-        Map<String, String> targetImage = images.stream()
-                .filter(img -> img.get("imageFileName").equals(imageFileName))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No image found with filename: " + imageFileName));
-
-        String imagePath = targetImage.get("imagePath");
         int positionX = 0;
         int positionY = 0;
         double scale = 1.0;
-        // MODIFIED: Round timeline times to three decimal places
+        // Round timeline times to three decimal places
         timelineStartTime = timelineStartTime != null ? roundToThreeDecimals(timelineStartTime) : 0.0;
         if (timelineEndTime != null) {
             timelineEndTime = roundToThreeDecimals(timelineEndTime);
@@ -3284,6 +3309,76 @@ public class VideoEditingService {
         }
 
         session.setLastAccessTime(System.currentTimeMillis());
+    }
+    // Helper method to convert Element to ElementDto
+    private ElementDto toElementDto(Element element) {
+        ElementDto dto = new ElementDto();
+        dto.setId(element.getId());
+        dto.setTitle(element.getTitle());
+        dto.setFilePath(element.getFilePath());
+        dto.setFileName(element.getFileName());
+        return dto;
+    }
+
+    // Updated method for multiple element uploads
+    public List<ElementDto> uploadElements(MultipartFile[] files, String title, User user) throws IOException {
+        List<ElementDto> uploadedElements = new ArrayList<>();
+        for (MultipartFile file : files) {
+            // Validate file type (only images allowed)
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.startsWith("image/")) {
+                throw new IllegalArgumentException("Only image files are allowed: " + file.getOriginalFilename());
+            }
+
+            // Sanitize filename to prevent path traversal
+            String filename = FilenameUtils.getName(file.getOriginalFilename());
+            String filePath = ELEMENTS_DIR + filename;
+
+            // Check for duplicate filenames (optional: append timestamp if needed)
+            File destFile = new File(filePath);
+            if (destFile.exists()) {
+                String baseName = FilenameUtils.getBaseName(filename);
+                String extension = FilenameUtils.getExtension(filename);
+                filename = baseName + "_" + System.currentTimeMillis() + "." + extension;
+                filePath = ELEMENTS_DIR + filename;
+            }
+
+            file.transferTo(Paths.get(filePath));
+
+            Element element = new Element();
+            element.setTitle(title != null ? title : filename);
+            element.setFilePath("elements/" + filename); // Store relative path
+            element.setFileName(filename);
+            element.setUser(user);
+            Element savedElement = elementRepository.save(element);
+            uploadedElements.add(toElementDto(savedElement));
+        }
+        return uploadedElements;
+    }
+
+    // Updated method to retrieve elements by user
+    public List<ElementDto> getElementsByUser(String email) {
+        return elementRepository.findByUserEmail(email).stream()
+                .map(this::toElementDto)
+                .collect(Collectors.toList());
+    }
+
+    // Add element to project (store in element_json)
+    public void addElement(Project project, String elementPath, String elementFileName) throws JsonProcessingException {
+        List<Map<String, String>> elements = getElements(project);
+        Map<String, String> elementData = new HashMap<>();
+        elementData.put("elementPath", elementPath); // e.g., "elements/emoji1.png"
+        elementData.put("elementFileName", elementFileName);
+        elements.add(elementData);
+        project.setElementJson(objectMapper.writeValueAsString(elements));
+    }
+
+    // Get elements from project
+    public List<Map<String, String>> getElements(Project project) throws JsonProcessingException {
+        if (project.getElementJson() == null || project.getElementJson().isEmpty()) {
+            return new ArrayList<>();
+        }
+        return objectMapper.readValue(project.getElementJson(), new TypeReference<List<Map<String, String>>>() {});
     }
 
 }

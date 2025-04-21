@@ -63,6 +63,7 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/videos/upload", "/videos/my-videos", "/videos/merge", "/videos/edited-videos","/videos/trim", "/videos/split", "/videos/duration/**").authenticated()
                         .requestMatchers("/projects/{projectId}/images/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
+                        .requestMatchers("/projects/{projectId}/audio/{filename}").permitAll()
                         .requestMatchers("/projects/**", "/projects/{projectId}/add-to-timeline").authenticated()
                         .requestMatchers(HttpMethod.GET, "/videos/edited-videos/**").permitAll()
                         .requestMatchers("/videos/**", "/videos/*").permitAll()  // ✅ Allow public video access

@@ -1082,34 +1082,64 @@ public class ProjectController {
 
     @GetMapping("/{projectId}/audio/{filename:.+}")
     public ResponseEntity<Resource> serveAudio(
-            @RequestHeader("Authorization") String token,
+            @RequestHeader(value = "Authorization", required = false) String token,
             @PathVariable Long projectId,
             @PathVariable String filename) {
         try {
-            User user = getUserFromToken(token);
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                // Authenticate user if token is provided
+                user = getUserFromToken(token);
+            }
+
+            // Verify project exists
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
-            if (!project.getUser().getId().equals(user.getId())) {
+
+            // If token is provided, verify user has access
+            if (user != null && !project.getUser().getId().equals(user.getId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
             }
 
-            // Define the directory where audio files are stored
-            String audioDirectory = "audio/projects/" + projectId + "/extracted/";
-            File audioFile = new File(audioDirectory, filename);
+            // Define possible audio file paths
+            String baseAudioDirectory = "audio/projects/" + projectId + "/";
+            String extractedAudioDirectory = baseAudioDirectory + "extracted/";
+            File audioFile = new File(baseAudioDirectory, filename);
+
+            // Check if file exists in base directory, if not, try extracted directory
+            if (!audioFile.exists() || !audioFile.isFile()) {
+                audioFile = new File(extractedAudioDirectory, filename);
+            }
+
+            // Verify file existence
             if (!audioFile.exists() || !audioFile.isFile()) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
             }
 
+            // Create resource and determine content type
             Resource resource = new FileSystemResource(audioFile);
-            String contentType = filename.toLowerCase().endsWith(".mp3") ? "audio/mpeg" : "application/octet-stream";
+            String contentType = determineAudioContentType(filename);
 
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(contentType))
                     .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving audio: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
         } catch (Exception e) {
             System.err.println("Error serving audio: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
+    }
+
+    // Helper method to determine audio content type
+    private String determineAudioContentType(String filename) {
+        filename = filename.toLowerCase();
+        if (filename.endsWith(".mp3")) return "audio/mpeg";
+        if (filename.endsWith(".wav")) return "audio/wav";
+        if (filename.endsWith(".ogg")) return "audio/ogg";
+        return "application/octet-stream"; // Default fallback
     }
 }

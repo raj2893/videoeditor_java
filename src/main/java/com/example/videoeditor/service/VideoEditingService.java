@@ -405,7 +405,11 @@ public class VideoEditingService {
             audioDir.mkdirs(); // Create the project-specific extracted directory if it doesn't exist
         }
 
-        File audioFile = new File(audioDir, audioFileName);
+        // Remove the video file extension (e.g., .mp4) and append .mp3
+        String videoFileName = new File(videoPath).getName();
+        String baseFileName = videoFileName.substring(0, videoFileName.lastIndexOf('.')); // Remove extension
+        String cleanAudioFileName = "extracted_" + baseFileName.replaceAll("[^a-zA-Z0-9.]", "_") + ".mp3";
+        File audioFile = new File(audioDir, cleanAudioFileName);
 
         List<String> command = new ArrayList<>();
         command.add(ffmpegPath);
@@ -420,7 +424,7 @@ public class VideoEditingService {
         executeFFmpegCommand(command);
 
         // Return relative path to the project's extracted folder
-        return "audio/projects/" + projectId + "/extracted/" + audioFileName;
+        return "audio/projects/" + projectId + "/extracted/" + cleanAudioFileName;
     }
 
     private double getVideoDuration(String videoPath) throws IOException, InterruptedException {
@@ -2753,55 +2757,64 @@ public class VideoEditingService {
                 System.err.println("Invalid timing for audio segment " + as.getId());
                 continue;
             }
-            if (Math.abs(timelineDuration - sourceDuration) > 0.01) {
-                System.err.println("Warning: Audio segment " + as.getId() + " duration mismatch");
-            }
 
             filterComplex.append("[").append(inputIdx).append(":a]");
-            filterComplex.append("atrim=").append(audioStart).append(":").append(audioEnd).append(",");
+            filterComplex.append("atrim=").append(String.format("%.6f", audioStart)).append(":").append(String.format("%.6f", audioEnd)).append(",");
             filterComplex.append("asetpts=PTS-STARTPTS,");
 
+            // Handle volume with keyframes
             List<Keyframe> volumeKeyframes = as.getKeyframes().getOrDefault("volume", new ArrayList<>());
-            if (!volumeKeyframes.isEmpty()) {
-                StringBuilder volumeExpr = new StringBuilder();
-                double defaultVolume = as.getVolume() != null ? as.getVolume() : 1.0;
+            double defaultVolume = as.getVolume() != null ? as.getVolume() : 1.0;
 
+            if (!volumeKeyframes.isEmpty() && volumeKeyframes.size() >= 2) {
+                // Sort keyframes by time
                 Collections.sort(volumeKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                double firstKfTime = volumeKeyframes.get(0).getTime();
-                double firstKfValue = ((Number) volumeKeyframes.get(0).getValue()).doubleValue();
-                volumeExpr.append("if(lt(t,").append(String.format("%.6f", firstKfTime)).append("),").append(String.format("%.6f", defaultVolume));
 
-                for (int j = 1; j < volumeKeyframes.size(); j++) {
-                    Keyframe prevKf = volumeKeyframes.get(j - 1);
-                    Keyframe kf = volumeKeyframes.get(j);
-                    double prevTime = prevKf.getTime();
-                    double kfTime = kf.getTime();
-                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                    double kfValue = ((Number) kf.getValue()).doubleValue();
+                // Create a volume filter with simple time-based expression
+                // Format: 't/duration*target_volume' for linear fade from 0
 
-                    if (kfTime > prevTime) {
-                        volumeExpr.append(",if(between(t,").append(String.format("%.6f", prevTime)).append(",").append(String.format("%.6f", kfTime)).append("),");
-                        volumeExpr.append(String.format("%.6f", prevValue)).append("+((t-").append(String.format("%.6f", prevTime)).append(")/(")
-                                .append(String.format("%.6f", kfTime)).append("-").append(String.format("%.6f", prevTime)).append("))*(")
-                                .append(String.format("%.6f", kfValue)).append("-").append(String.format("%.6f", prevValue)).append(")");
-                    }
-                }
-                volumeExpr.append(",").append(String.format("%.6f", ((Number) volumeKeyframes.get(volumeKeyframes.size() - 1).getValue()).doubleValue()));
-                for (int j = 0; j < volumeKeyframes.size(); j++) {
-                    volumeExpr.append(")");
-                }
+                // Get first and last keyframe
+                Keyframe firstKf = volumeKeyframes.get(0);
+                Keyframe lastKf = volumeKeyframes.get(volumeKeyframes.size() - 1);
+                double firstTime = firstKf.getTime();
+                double lastTime = lastKf.getTime();
+                double firstValue = ((Number) firstKf.getValue()).doubleValue();
+                double lastValue = ((Number) lastKf.getValue()).doubleValue();
 
-                filterComplex.append("volume=").append(volumeExpr).append(",");
-            } else if (as.getVolume() != null && as.getVolume() != 1.0) {
-                filterComplex.append("volume=").append(String.format("%.6f", as.getVolume())).append(",");
+                // Use a simple expression that works reliably with FFmpeg
+                StringBuilder expr = new StringBuilder();
+                expr.append("'if(lt(t,").append(String.format("%.6f", firstTime)).append("),")
+                        .append(String.format("%.6f", firstValue)).append(",")
+                        .append("if(gt(t,").append(String.format("%.6f", lastTime)).append("),")
+                        .append(String.format("%.6f", lastValue)).append(",")
+                        .append(String.format("%.6f", firstValue)).append("+")
+                        .append("(t-").append(String.format("%.6f", firstTime)).append(")*")
+                        .append("(").append(String.format("%.6f", lastValue - firstValue)).append(")")
+                        .append("/(").append(String.format("%.6f", lastTime - firstTime)).append(")")
+                        .append("))")
+                        .append("'");
+
+                filterComplex.append("volume=").append(expr).append(",");
+            } else if (!volumeKeyframes.isEmpty() && volumeKeyframes.size() == 1) {
+                // Single keyframe - use its value
+                double value = ((Number) volumeKeyframes.get(0).getValue()).doubleValue();
+                filterComplex.append("volume=").append(String.format("%.6f", value)).append(",");
+            } else {
+                // No keyframes - use default volume
+                filterComplex.append("volume=").append(String.format("%.6f", defaultVolume)).append(",");
             }
 
+            // Apply delay
             filterComplex.append("adelay=").append((int)(timelineStart * 1000)).append("|").append((int)(timelineStart * 1000)).append(",");
+
+            // Handle duration
             if (sourceDuration < timelineDuration) {
                 filterComplex.append("apad=pad_dur=").append(String.format("%.6f", timelineDuration - sourceDuration)).append(",");
             } else if (sourceDuration > timelineDuration) {
                 filterComplex.append("atrim=0:").append(String.format("%.6f", timelineDuration)).append(",");
             }
+
+            // Make sure audio extends to the end
             filterComplex.append("apad=pad_dur=").append(String.format("%.6f", totalDuration - timelineEnd)).append(",");
             filterComplex.append("asetpts=PTS-STARTPTS");
 

@@ -1406,6 +1406,7 @@ public class VideoEditingService {
 
     public void addKeyframeToSegment(String sessionId, String segmentId, String segmentType, String property, Keyframe keyframe) {
         EditSession session = getSession(sessionId);
+        keyframe.setTime(roundToThreeDecimals(keyframe.getTime()));
         switch (segmentType.toLowerCase()) {
             case "video":
                 VideoSegment video = session.getTimelineState().getSegments().stream()
@@ -1443,6 +1444,8 @@ public class VideoEditingService {
 
     public void removeKeyframeFromSegment(String sessionId, String segmentId, String segmentType, String property, double time) {
         EditSession session = getSession(sessionId);
+        // Round the time to three decimal places for consistency
+        time = roundToThreeDecimals(time);
         switch (segmentType.toLowerCase()) {
             case "video":
                 VideoSegment video = session.getTimelineState().getSegments().stream()

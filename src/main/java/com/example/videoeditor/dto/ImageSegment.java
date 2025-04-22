@@ -20,6 +20,15 @@ public class ImageSegment implements Segment{
     private int customWidth;
     private int customHeight;
     private boolean maintainAspectRatio = true;
+    private boolean isElement;
+
+    public boolean isElement() {
+        return isElement;
+    }
+
+    public void setElement(boolean element) {
+        isElement = element;
+    }
 
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
 

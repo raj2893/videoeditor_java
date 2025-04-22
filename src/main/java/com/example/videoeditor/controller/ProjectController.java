@@ -570,7 +570,17 @@ public class ProjectController {
 
             videoEditingService.addImageToTimelineFromProject(
                     user, sessionId, projectId, layer, timelineStartTime, timelineEndTime, null, imageFileName, opacity, isElement);
-            return ResponseEntity.ok().build();
+
+            // Retrieve the updated timeline state to get the newly added segment
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            ImageSegment newSegment = timelineState.getImageSegments().stream()
+                    .filter(segment -> segment.getImagePath().endsWith(imageFileName) &&
+                            segment.getLayer() == layer &&
+                            Math.abs(segment.getTimelineStartTime() - timelineStartTime) < 0.001)
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Failed to find newly added segment"));
+
+            return ResponseEntity.ok(newSegment);
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error adding project image or element to timeline: " + e.getMessage());

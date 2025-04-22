@@ -245,6 +245,18 @@ public class VideoEditingService {
         System.out.println("Project saved successfully with timeline state: " + timelineStateJson);
     }
 
+    public void saveForUndoRedo(Long projectId, String sessionId, String timelineStateJson) {
+        EditSession session = getSession(sessionId);
+        // Fetch the project
+        Project project = projectRepository.findById(session.getProjectId())
+                .orElseThrow(() -> new IllegalArgumentException("Project not found with ID: " + projectId));
+
+        // Update timeline_state
+        project.setTimelineState(timelineStateJson);
+        project.setLastModified(LocalDateTime.now());
+        projectRepository.save(project);
+    }
+
     @Scheduled(fixedRate = 3600000) // Every hour
     public void cleanupExpiredSessions() {
         long expiryTime = System.currentTimeMillis() - 3600000;

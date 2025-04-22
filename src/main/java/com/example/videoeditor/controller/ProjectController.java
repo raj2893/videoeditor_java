@@ -8,6 +8,7 @@ import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
 import com.example.videoeditor.service.VideoEditingService;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -95,6 +96,25 @@ public class ProjectController {
             @PathVariable Long projectId,
             @RequestParam String sessionId) throws JsonProcessingException {
         videoEditingService.saveProject(sessionId);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{projectId}/saveForUndoRedo")
+    public ResponseEntity<?> saveForUndoRedo(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestBody Map<String, Object> payload) throws JsonProcessingException {
+        // Validate token and user
+        User user = getUserFromToken(token);
+
+        // Extract timeline_state from payload
+        ObjectMapper mapper = new ObjectMapper();
+        String timelineStateJson = mapper.writeValueAsString(payload.get("timelineState"));
+
+        // Save project with updated timeline_state for undo/redo
+        videoEditingService.saveForUndoRedo(projectId, sessionId, timelineStateJson);
+
         return ResponseEntity.ok().build();
     }
 

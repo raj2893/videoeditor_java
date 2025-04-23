@@ -627,7 +627,10 @@ public class VideoEditingService {
 
     public void addTextToTimeline(String sessionId, String text, int layer, double timelineStartTime, double timelineEndTime,
                                   String fontFamily, Double scale, String fontColor, String backgroundColor,
-                                  Integer positionX, Integer positionY, Double opacity, String alignment) {
+                                  Integer positionX, Integer positionY, Double opacity, String alignment,
+                                  Double backgroundOpacity, Integer backgroundBorderWidth, String backgroundBorderColor,
+                                  Integer backgroundPadding, String shadowColor, Integer shadowOffsetX,
+                                  Integer shadowOffsetY, Double shadowAngle) {
         EditSession session = getSession(sessionId);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
         timelineEndTime = roundToThreeDecimals(timelineEndTime);
@@ -642,13 +645,22 @@ public class VideoEditingService {
         textSegment.setTimelineStartTime(timelineStartTime);
         textSegment.setTimelineEndTime(timelineEndTime);
         textSegment.setFontFamily(fontFamily != null ? fontFamily : "Arial");
-        textSegment.setScale(scale != null ? scale : 1.0); // Set scale instead of fontSize
+        textSegment.setScale(scale != null ? scale : 1.0);
         textSegment.setFontColor(fontColor != null ? fontColor : "white");
         textSegment.setBackgroundColor(backgroundColor != null ? backgroundColor : "transparent");
         textSegment.setPositionX(positionX != null ? positionX : 0);
         textSegment.setPositionY(positionY != null ? positionY : 0);
         textSegment.setOpacity(opacity != null ? opacity : 1.0);
-        textSegment.setAlignment(alignment != null ? alignment : "left"); // Set alignment
+        textSegment.setAlignment(alignment != null ? alignment : "left");
+        // Set new properties
+        textSegment.setBackgroundOpacity(backgroundOpacity);
+        textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
+        textSegment.setBackgroundBorderColor(backgroundBorderColor != null ? backgroundBorderColor : "transparent");
+        textSegment.setBackgroundPadding(backgroundPadding);
+        textSegment.setShadowColor(shadowColor != null ? shadowColor : "transparent");
+        textSegment.setShadowOffsetX(shadowOffsetX);
+        textSegment.setShadowOffsetY(shadowOffsetY);
+        textSegment.setShadowAngle(shadowAngle);
 
         session.getTimelineState().getTextSegments().add(textSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -659,7 +671,7 @@ public class VideoEditingService {
             String segmentId,
             String text,
             String fontFamily,
-            Double scale, // Replaced Integer fontSize
+            Double scale,
             String fontColor,
             String backgroundColor,
             Integer positionX,
@@ -669,6 +681,14 @@ public class VideoEditingService {
             Double timelineEndTime,
             Integer layer,
             String alignment,
+            Double backgroundOpacity,
+            Integer backgroundBorderWidth,
+            String backgroundBorderColor,
+            Integer backgroundPadding,
+            String shadowColor,
+            Integer shadowOffsetX,
+            Integer shadowOffsetY,
+            Double shadowAngle,
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
         EditSession session = getSession(sessionId);
@@ -704,7 +724,7 @@ public class VideoEditingService {
                     case "opacity":
                         textSegment.setOpacity(null);
                         break;
-                    case "scale": // Added support for scale keyframes
+                    case "scale":
                         textSegment.setScale(null);
                         break;
                 }
@@ -712,7 +732,7 @@ public class VideoEditingService {
         } else {
             if (text != null) textSegment.setText(text);
             if (fontFamily != null) textSegment.setFontFamily(fontFamily);
-            if (scale != null) textSegment.setScale(scale); // Replaced fontSize
+            if (scale != null) textSegment.setScale(scale);
             if (fontColor != null) textSegment.setFontColor(fontColor);
             if (backgroundColor != null) textSegment.setBackgroundColor(backgroundColor);
             if (positionX != null) textSegment.setPositionX(positionX);
@@ -732,7 +752,16 @@ public class VideoEditingService {
                 textSegment.setLayer(layer);
                 timelineOrLayerChanged = true;
             }
-            if (alignment != null) textSegment.setAlignment(alignment); // Update alignment
+            if (alignment != null) textSegment.setAlignment(alignment);
+            // Update new properties
+            if (backgroundOpacity != null) textSegment.setBackgroundOpacity(backgroundOpacity);
+            if (backgroundBorderWidth != null) textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
+            if (backgroundBorderColor != null) textSegment.setBackgroundBorderColor(backgroundBorderColor);
+            if (backgroundPadding != null) textSegment.setBackgroundPadding(backgroundPadding);
+            if (shadowColor != null) textSegment.setShadowColor(shadowColor);
+            if (shadowOffsetX != null) textSegment.setShadowOffsetX(shadowOffsetX);
+            if (shadowOffsetY != null) textSegment.setShadowOffsetY(shadowOffsetY);
+            if (shadowAngle != null) textSegment.setShadowAngle(shadowAngle);
         }
 
         // Validate timeline position
@@ -2539,6 +2568,10 @@ public class VideoEditingService {
                 List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
                 double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
 
+// Apply resolution multiplier to scale down high-resolution PNG
+                double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
+                double baseScale = 1.0 / resolutionMultiplier;
+
                 if (!scaleKeyframes.isEmpty()) {
                     Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
@@ -2563,13 +2596,15 @@ public class VideoEditingService {
                     scaleExpr.append(String.format("%.6f", defaultScale));
                 }
 
-                // Apply transition scale multiplier
+// Apply transition scale multiplier
                 String transitionScale = transitionOffsets.get("scale");
                 if (!transitionScale.equals("1")) {
                     scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
                 }
 
-                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
+                filterComplex.append("scale=w='iw*").append(baseScale).append("*").append(scaleExpr)
+                        .append("':h='ih*").append(baseScale).append("*").append(scaleExpr)
+                        .append("':flags=lanczos:force_original_aspect_ratio=decrease:eval=frame[scaled").append(outputLabel).append("];");
 
                 // Handle position X with keyframes
                 StringBuilder xExpr = new StringBuilder();
@@ -2759,6 +2794,12 @@ public class VideoEditingService {
 
         command.add("-c:v");
         command.add("libx264");
+        command.add("-preset");
+        command.add("veryslow"); // High-quality encoding
+        command.add("-b:v");
+        command.add(canvasWidth >= 3840 ? "10M" : "5M"); // Dynamic bitrate for 4K vs. 1080p
+        command.add("-pix_fmt");
+        command.add("yuv420p"); // Ensure compatibility with most players
         command.add("-c:a");
         command.add("aac");
         command.add("-b:a");
@@ -2768,7 +2809,7 @@ public class VideoEditingService {
         command.add("-t");
         command.add(String.valueOf(totalDuration));
         command.add("-r");
-        command.add(String.valueOf(fps));
+        command.add(String.valueOf(fps != null ? fps : 30)); // Fallback to 30 fps if null
         command.add("-y");
         command.add(outputPath);
 
@@ -2793,97 +2834,154 @@ public class VideoEditingService {
     }
 
     private String generateTextPng(TextSegment ts, File tempDir, int canvasWidth, int canvasHeight) throws IOException {
-        // Parse font color (assuming #RRGGBB or #RRGGBBAA)
-        Color fontColor;
-        try {
-            fontColor = Color.decode(ts.getFontColor());
-        } catch (NumberFormatException e) {
-            System.err.println("Invalid font color for text segment " + ts.getId() + ": " + ts.getFontColor() + ", using white");
-            fontColor = Color.WHITE;
+        // Resolution multiplier for high-quality text (2x for 1080p, 1.5x for 4K to save memory)
+        final double RESOLUTION_MULTIPLIER = canvasWidth >= 3840 ? 1.5 : 2.0;
+
+        // Parse colors with helper method for reusability
+        Color fontColor = parseColor(ts.getFontColor(), Color.WHITE, "font", ts.getId());
+        Color bgColor = ts.getBackgroundColor() != null && !ts.getBackgroundColor().equals("transparent") ?
+                parseColor(ts.getBackgroundColor(), null, "background", ts.getId()) : null;
+        Color borderColor = ts.getBackgroundBorderColor() != null && !ts.getBackgroundBorderColor().equals("transparent") ?
+                parseColor(ts.getBackgroundBorderColor(), null, "border", ts.getId()) : null;
+        Color shadowColor = ts.getShadowColor() != null && !ts.getShadowColor().equals("transparent") ?
+                parseColor(ts.getShadowColor(), null, "shadow", ts.getId()) : null;
+
+        // Compute shadow offsets
+        int shadowOffsetX = ts.getShadowOffsetX() != null ? (int) (ts.getShadowOffsetX() * RESOLUTION_MULTIPLIER) : 0;
+        int shadowOffsetY = ts.getShadowOffsetY() != null ? (int) (ts.getShadowOffsetY() * RESOLUTION_MULTIPLIER) : 0;
+        if (ts.getShadowAngle() != null && ts.getShadowAngle() != 0.0 && shadowColor != null) {
+            double angleRad = Math.toRadians(ts.getShadowAngle());
+            double shadowDistance = Math.sqrt(shadowOffsetX * shadowOffsetX + shadowOffsetY * shadowOffsetY);
+            if (shadowDistance == 0) shadowDistance = 5 * RESOLUTION_MULTIPLIER;
+            shadowOffsetX = (int) Math.round(shadowDistance * Math.cos(angleRad));
+            shadowOffsetY = (int) Math.round(shadowDistance * Math.sin(angleRad));
         }
 
-        // Parse background color (if not transparent)
-        Color bgColor = null;
-        float bgOpacity = 0.5f;
-        if (ts.getBackgroundColor() != null && !ts.getBackgroundColor().equals("transparent")) {
-            try {
-                bgColor = Color.decode(ts.getBackgroundColor());
-            } catch (NumberFormatException e) {
-                System.err.println("Invalid background color for text segment " + ts.getId() + ": " + ts.getBackgroundColor() + ", ignoring");
-            }
-        }
-
-        // Load font
+        // Load font with fixed base size of 24, scaled by user scale and resolution multiplier
+        double baseFontSize = 24.0 * (ts.getScale() != null ? ts.getScale() : 1.0) * RESOLUTION_MULTIPLIER;
         Font font;
-        double baseFontSize = 24.0 * (ts.getScale() != null ? ts.getScale() : 1.0);
         try {
             font = Font.createFont(Font.TRUETYPE_FONT, new File(getFontPathByFamily(ts.getFontFamily())))
                     .deriveFont((float) baseFontSize);
         } catch (Exception e) {
-            System.err.println("Failed to load font for text segment " + ts.getId() + ": " + ts.getFontFamily() + ", using default");
+            System.err.println("Failed to load font for text segment " + ts.getId() + ": " + ts.getFontFamily() + ", using Arial");
             font = new Font("Arial", Font.PLAIN, (int) baseFontSize);
         }
 
-        // Create a temporary image to measure text
+        // Measure text
         BufferedImage tempImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2d = tempImage.createGraphics();
         g2d.setFont(font);
         FontMetrics fm = g2d.getFontMetrics();
-
-        // Split text into lines
         String[] lines = ts.getText().split("\n");
         int lineHeight = fm.getHeight();
-        double lineSpacing = 1.2; // Same as previous implementation
-        int totalHeight = (int) (lineHeight * lines.length * lineSpacing);
-        int maxWidth = 0;
+        double lineSpacing = 1.2;
+        int totalTextHeight = (int) (lineHeight * lines.length * lineSpacing);
+        int maxTextWidth = 0;
         for (String line : lines) {
             int lineWidth = fm.stringWidth(line);
-            if (lineWidth > maxWidth) {
-                maxWidth = lineWidth;
+            if (lineWidth > maxTextWidth) {
+                maxTextWidth = lineWidth;
             }
         }
+        g2d.dispose();
+        tempImage.flush();
 
-        // Add padding
-        int padding = 10;
-        maxWidth += 2 * padding;
-        totalHeight += 2 * padding;
+        // Apply padding and border, scaled by resolution multiplier
+        int padding = (int) ((ts.getBackgroundPadding() != null ? ts.getBackgroundPadding() : 10) * RESOLUTION_MULTIPLIER);
+        int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * RESOLUTION_MULTIPLIER);
 
-        // Create the final image
-        BufferedImage image = new BufferedImage(maxWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
+        // Calculate final image dimensions (text + padding + border)
+        int totalWidth = maxTextWidth + 2 * (padding + borderWidth);
+        int totalHeight = totalTextHeight + 2 * (padding + borderWidth);
+
+        // Cap dimensions to prevent excessive memory usage
+        int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER);
+        if (totalWidth > maxDimension || totalHeight > maxDimension) {
+            double scaleDown = Math.min(maxDimension / (double) totalWidth, maxDimension / (double) totalHeight);
+            totalWidth = (int) (totalWidth * scaleDown);
+            totalHeight = (int) (totalHeight * scaleDown);
+            baseFontSize *= scaleDown;
+            padding = (int) (padding * scaleDown);
+            borderWidth = (int) (borderWidth * scaleDown);
+            shadowOffsetX = (int) (shadowOffsetX * scaleDown);
+            shadowOffsetY = (int) (shadowOffsetY * scaleDown);
+            font = font.deriveFont((float) baseFontSize);
+        }
+
+        // Create high-resolution image
+        BufferedImage image = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
         g2d = image.createGraphics();
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
         g2d.setFont(font);
         fm = g2d.getFontMetrics();
 
-        // Draw background if specified
+        // Draw background
         if (bgColor != null) {
+            float bgOpacity = ts.getBackgroundOpacity() != null ? ts.getBackgroundOpacity().floatValue() : 1.0f;
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
-            g2d.fillRect(0, 0, maxWidth, totalHeight);
+            g2d.fillRect(borderWidth, borderWidth, totalWidth - 2 * borderWidth, totalHeight - 2 * borderWidth);
+        }
+
+        // Draw border
+        if (borderColor != null && borderWidth > 0) {
+            g2d.setColor(borderColor);
+            g2d.setStroke(new BasicStroke(borderWidth));
+            g2d.drawRect(borderWidth / 2, borderWidth / 2, totalWidth - borderWidth, totalHeight - borderWidth);
+        }
+
+        // Draw shadow
+        if (shadowColor != null && (shadowOffsetX != 0 || shadowOffsetY != 0)) {
+            g2d.setColor(shadowColor);
+            String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
+            int y = padding + borderWidth + fm.getAscent();
+            for (String line : lines) {
+                int x = calculateXPosition(line, alignment, totalWidth, fm, padding, borderWidth);
+                g2d.drawString(line, x + shadowOffsetX, y + shadowOffsetY);
+                y += (int) (lineHeight * lineSpacing);
+            }
         }
 
         // Draw text
         g2d.setColor(fontColor);
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-        int y = padding + fm.getAscent();
+        int y = padding + borderWidth + fm.getAscent();
         for (String line : lines) {
-            int x;
-            if (alignment.equals("left")) {
-                x = padding;
-            } else if (alignment.equals("right")) {
-                x = maxWidth - fm.stringWidth(line) - padding;
-            } else { // center
-                x = (maxWidth - fm.stringWidth(line)) / 2;
-            }
+            int x = calculateXPosition(line, alignment, totalWidth, fm, padding, borderWidth);
             g2d.drawString(line, x, y);
-            y += lineHeight * lineSpacing;
+            y += (int) (lineHeight * lineSpacing);
         }
 
         g2d.dispose();
 
-        // Save the image to a temporary file
+        // Save the high-resolution PNG
         String tempPngPath = new File(tempDir, "text_" + ts.getId() + ".png").getAbsolutePath();
         ImageIO.write(image, "PNG", new File(tempPngPath));
         return tempPngPath;
+    }
+
+    // Helper method to parse colors
+    private Color parseColor(String colorStr, Color fallback, String type, String segmentId) {
+        try {
+            return Color.decode(colorStr);
+        } catch (NumberFormatException e) {
+            System.err.println("Invalid " + type + " color for text segment " + segmentId + ": " + colorStr + ", using " + (fallback != null ? "fallback" : "none"));
+            return fallback;
+        }
+    }
+
+    // Helper method to calculate x-position based on alignment
+    private int calculateXPosition(String line, String alignment, int totalWidth, FontMetrics fm, int padding, int borderWidth) {
+        int lineWidth = fm.stringWidth(line);
+        if (alignment.equals("left")) {
+            return padding + borderWidth;
+        } else if (alignment.equals("right")) {
+            return totalWidth - lineWidth - padding - borderWidth;
+        } else {
+            return (totalWidth - lineWidth) / 2;
+        }
     }
 
     private Map<String, String> applyTransitionFilters(StringBuilder filterComplex, List<Transition> transitions,

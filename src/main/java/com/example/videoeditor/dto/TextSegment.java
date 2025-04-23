@@ -20,6 +20,16 @@ public class TextSegment implements Segment {
     private Integer layer = 0;
     private String alignment = "left"; // New field for text alignment
 
+    // New fields for professional text editing
+    private Double backgroundOpacity = 1.0; // Opacity of background (0.0 to 1.0)
+    private Integer backgroundBorderWidth = 0; // Border thickness in pixels
+    private String backgroundBorderColor = "transparent"; // Border color
+    private Integer backgroundPadding = 10; // Padding in pixels
+    private String shadowColor = "transparent"; // Shadow color
+    private Integer shadowOffsetX = 0; // Shadow X offset in pixels
+    private Integer shadowOffsetY = 0; // Shadow Y offset in pixels
+    private Double shadowAngle = 0.0; // Shadow angle in degrees (0 to 360)
+
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
 
     // Validate alignment values
@@ -29,6 +39,39 @@ public class TextSegment implements Segment {
         }
         this.alignment = alignment;
     }
+
+    // Validate background opacity
+    public void setBackgroundOpacity(Double backgroundOpacity) {
+        if (backgroundOpacity != null && (backgroundOpacity < 0.0 || backgroundOpacity > 1.0)) {
+            throw new IllegalArgumentException("Background opacity must be between 0.0 and 1.0");
+        }
+        this.backgroundOpacity = backgroundOpacity != null ? backgroundOpacity : 1.0;
+    }
+
+    // Validate background border width
+    public void setBackgroundBorderWidth(Integer backgroundBorderWidth) {
+        if (backgroundBorderWidth != null && backgroundBorderWidth < 0) {
+            throw new IllegalArgumentException("Background border width must be non-negative");
+        }
+        this.backgroundBorderWidth = backgroundBorderWidth != null ? backgroundBorderWidth : 0;
+    }
+
+    // Validate background padding
+    public void setBackgroundPadding(Integer backgroundPadding) {
+        if (backgroundPadding != null && backgroundPadding < 0) {
+            throw new IllegalArgumentException("Background padding must be non-negative");
+        }
+        this.backgroundPadding = backgroundPadding != null ? backgroundPadding : 10;
+    }
+
+    // Validate shadow angle
+    public void setShadowAngle(Double shadowAngle) {
+        if (shadowAngle != null && (shadowAngle < 0.0 || shadowAngle > 360.0)) {
+            throw new IllegalArgumentException("Shadow angle must be between 0 and 360 degrees");
+        }
+        this.shadowAngle = shadowAngle != null ? shadowAngle : 0.0;
+    }
+
 
     public Map<String, List<Keyframe>> getKeyframes() {
         return keyframes;
@@ -95,4 +138,16 @@ public class TextSegment implements Segment {
     public String getAlignment() {
         return alignment;
     }
+    public String getBackgroundBorderColor() { return backgroundBorderColor; }
+    public void setBackgroundBorderColor(String backgroundBorderColor) { this.backgroundBorderColor = backgroundBorderColor; }
+    public String getShadowColor() { return shadowColor; }
+    public void setShadowColor(String shadowColor) { this.shadowColor = shadowColor; }
+    public Integer getShadowOffsetX() { return shadowOffsetX; }
+    public void setShadowOffsetX(Integer shadowOffsetX) { this.shadowOffsetX = shadowOffsetX; }
+    public Integer getShadowOffsetY() { return shadowOffsetY; }
+    public void setShadowOffsetY(Integer shadowOffsetY) { this.shadowOffsetY = shadowOffsetY; }
+    public Double getShadowAngle() { return  shadowAngle;}
+    public Integer getBackgroundPadding(){ return backgroundPadding; }
+    public Integer getBackgroundBorderWidth(){ return backgroundBorderWidth; }
+    public Double getBackgroundOpacity(){ return backgroundOpacity; }
 }

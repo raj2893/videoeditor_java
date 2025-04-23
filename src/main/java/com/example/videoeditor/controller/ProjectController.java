@@ -303,32 +303,59 @@ public class ProjectController {
         try {
             User user = getUserFromToken(token);
 
+            // Existing parameters
             String text = (String) request.get("text");
             Integer layer = request.get("layer") != null ? Integer.valueOf(request.get("layer").toString()) : null;
             Double timelineStartTime = request.get("timelineStartTime") != null ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
             Double timelineEndTime = request.get("timelineEndTime") != null ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
             String fontFamily = (String) request.get("fontFamily");
-            Double scale = request.get("scale") != null ? Double.valueOf(request.get("scale").toString()) : null; // Replaced fontSize
+            Double scale = request.get("scale") != null ? Double.valueOf(request.get("scale").toString()) : null;
             String fontColor = (String) request.get("fontColor");
             String backgroundColor = (String) request.get("backgroundColor");
             Integer positionX = request.get("positionX") != null ? Integer.valueOf(request.get("positionX").toString()) : null;
             Integer positionY = request.get("positionY") != null ? Integer.valueOf(request.get("positionY").toString()) : null;
-            Double opacity = request.get("opacity") != null ? Double.valueOf(request.get("opacity").toString()) : null; // Added opacity
-            String alignment = (String) request.get("alignment"); // New parameter
+            Double opacity = request.get("opacity") != null ? Double.valueOf(request.get("opacity").toString()) : null;
+            String alignment = (String) request.get("alignment");
 
+            // New parameters
+            Double backgroundOpacity = request.get("backgroundOpacity") != null ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
+            Integer backgroundBorderWidth = request.get("backgroundBorderWidth") != null ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
+            String backgroundBorderColor = (String) request.get("backgroundBorderColor");
+            Integer backgroundPadding = request.get("backgroundPadding") != null ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
+            String shadowColor = (String) request.get("shadowColor");
+            Integer shadowOffsetX = request.get("shadowOffsetX") != null ? Integer.valueOf(request.get("shadowOffsetX").toString()) : null;
+            Integer shadowOffsetY = request.get("shadowOffsetY") != null ? Integer.valueOf(request.get("shadowOffsetY").toString()) : null;
+            Double shadowAngle = request.get("shadowAngle") != null ? Double.valueOf(request.get("shadowAngle").toString()) : null;
+
+            // Existing validation
             if (text == null || layer == null || timelineStartTime == null || timelineEndTime == null) {
-                return ResponseEntity.badRequest().body("Missing required parameters: text, layer, timelineStartTime, timelineEndTime, scale");
+                return ResponseEntity.badRequest().body("Missing required parameters: text, layer, timelineStartTime, timelineEndTime");
             }
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
-            // Validate alignment
             if (alignment != null && !Arrays.asList("left", "right", "center").contains(alignment)) {
                 return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
             }
 
+            // New validation
+            if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
+            }
+            if (backgroundBorderWidth != null && backgroundBorderWidth < 0) {
+                return ResponseEntity.badRequest().body("Background border width must be non-negative");
+            }
+            if (backgroundPadding != null && backgroundPadding < 0) {
+                return ResponseEntity.badRequest().body("Background padding must be non-negative");
+            }
+            if (shadowAngle != null && (shadowAngle < 0 || shadowAngle > 360)) {
+                return ResponseEntity.badRequest().body("Shadow angle must be between 0 and 360 degrees");
+            }
+
             videoEditingService.addTextToTimeline(sessionId, text, layer, timelineStartTime, timelineEndTime,
-                    fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment);
+                    fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
+                    backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
+                    shadowColor, shadowOffsetX, shadowOffsetY, shadowAngle);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -346,22 +373,34 @@ public class ProjectController {
         try {
             User user = getUserFromToken(token);
 
+            // Existing parameters
             String segmentId = (String) request.get("segmentId");
             String text = (String) request.get("text");
             String fontFamily = (String) request.get("fontFamily");
-            Double scale = request.containsKey("scale") ? Double.valueOf(request.get("scale").toString()) : null; // Replaced fontSize
+            Double scale = request.containsKey("scale") ? Double.valueOf(request.get("scale").toString()) : null;
             String fontColor = (String) request.get("fontColor");
             String backgroundColor = (String) request.get("backgroundColor");
             Integer positionX = request.containsKey("positionX") ? Integer.valueOf(request.get("positionX").toString()) : null;
             Integer positionY = request.containsKey("positionY") ? Integer.valueOf(request.get("positionY").toString()) : null;
-            Double opacity = request.containsKey("opacity") ? Double.valueOf(request.get("opacity").toString()) : null; // Added opacity
+            Double opacity = request.containsKey("opacity") ? Double.valueOf(request.get("opacity").toString()) : null;
             Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
             Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
             Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
-            String alignment = (String) request.get("alignment"); // New parameter
+            String alignment = (String) request.get("alignment");
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
+            // New parameters
+            Double backgroundOpacity = request.containsKey("backgroundOpacity") ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
+            Integer backgroundBorderWidth = request.containsKey("backgroundBorderWidth") ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
+            String backgroundBorderColor = (String) request.get("backgroundBorderColor");
+            Integer backgroundPadding = request.containsKey("backgroundPadding") ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
+            String shadowColor = (String) request.get("shadowColor");
+            Integer shadowOffsetX = request.containsKey("shadowOffsetX") ? Integer.valueOf(request.get("shadowOffsetX").toString()) : null;
+            Integer shadowOffsetY = request.containsKey("shadowOffsetY") ? Integer.valueOf(request.get("shadowOffsetY").toString()) : null;
+            Double shadowAngle = request.containsKey("shadowAngle") ? Double.valueOf(request.get("shadowAngle").toString()) : null;
+
+            // Parse keyframes
             Map<String, List<Keyframe>> parsedKeyframes = null;
             if (keyframes != null) {
                 parsedKeyframes = new HashMap<>();
@@ -377,6 +416,7 @@ public class ProjectController {
                 }
             }
 
+            // Existing validation
             if (segmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: segmentId");
             }
@@ -386,13 +426,28 @@ public class ProjectController {
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
-            // Validate alignment
             if (alignment != null && !Arrays.asList("left", "right", "center").contains(alignment)) {
                 return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
             }
 
+            // New validation
+            if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
+            }
+            if (backgroundBorderWidth != null && backgroundBorderWidth < 0) {
+                return ResponseEntity.badRequest().body("Background border width must be non-negative");
+            }
+            if (backgroundPadding != null && backgroundPadding < 0) {
+                return ResponseEntity.badRequest().body("Background padding must be non-negative");
+            }
+            if (shadowAngle != null && (shadowAngle < 0 || shadowAngle > 360)) {
+                return ResponseEntity.badRequest().body("Shadow angle must be between 0 and 360 degrees");
+            }
+
             videoEditingService.updateTextSegment(sessionId, segmentId, text, fontFamily, scale,
-                    fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,parsedKeyframes);
+                    fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,
+                    backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
+                    shadowColor, shadowOffsetX, shadowOffsetY, shadowAngle, parsedKeyframes);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {

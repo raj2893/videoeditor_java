@@ -380,6 +380,9 @@ public class ProjectController {
             if (segmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: segmentId");
             }
+            if (text == null || text.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Text content cannot be null or empty");
+            }
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }

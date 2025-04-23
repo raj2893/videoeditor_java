@@ -18,8 +18,17 @@ public class TextSegment implements Segment {
     private double timelineStartTime;
     private double timelineEndTime;
     private Integer layer = 0;
+    private String alignment = "left"; // New field for text alignment
 
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
+
+    // Validate alignment values
+    public void setAlignment(String alignment) {
+        if (alignment == null || (!alignment.equals("left") && !alignment.equals("right") && !alignment.equals("center"))) {
+            throw new IllegalArgumentException("Alignment must be 'left', 'right', or 'center'");
+        }
+        this.alignment = alignment;
+    }
 
     public Map<String, List<Keyframe>> getKeyframes() {
         return keyframes;
@@ -83,4 +92,7 @@ public class TextSegment implements Segment {
     public void setTimelineStartTime(double timelineStartTime) { this.timelineStartTime = timelineStartTime; }
     public void setTimelineEndTime(double timelineEndTime) { this.timelineEndTime = timelineEndTime; }
     public void setLayer(int layer) { this.layer = layer; }
+    public String getAlignment() {
+        return alignment;
+    }
 }

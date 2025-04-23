@@ -630,7 +630,8 @@ public class VideoEditingService {
                                   Integer positionX, Integer positionY, Double opacity, String alignment,
                                   Double backgroundOpacity, Integer backgroundBorderWidth, String backgroundBorderColor,
                                   Integer backgroundPadding, String shadowColor, Integer shadowOffsetX,
-                                  Integer shadowOffsetY, Double shadowAngle) {
+                                  Integer shadowOffsetY, Double shadowBlurRadius, Double shadowSpread, Double shadowOpacity,
+                                  Integer backgroundBorderRadius) {
         EditSession session = getSession(sessionId);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
         timelineEndTime = roundToThreeDecimals(timelineEndTime);
@@ -652,15 +653,19 @@ public class VideoEditingService {
         textSegment.setPositionY(positionY != null ? positionY : 0);
         textSegment.setOpacity(opacity != null ? opacity : 1.0);
         textSegment.setAlignment(alignment != null ? alignment : "left");
-        // Set new properties
+        // Set background properties
         textSegment.setBackgroundOpacity(backgroundOpacity);
         textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
         textSegment.setBackgroundBorderColor(backgroundBorderColor != null ? backgroundBorderColor : "transparent");
         textSegment.setBackgroundPadding(backgroundPadding);
+        textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
+        // Set shadow properties
         textSegment.setShadowColor(shadowColor != null ? shadowColor : "transparent");
         textSegment.setShadowOffsetX(shadowOffsetX);
         textSegment.setShadowOffsetY(shadowOffsetY);
-        textSegment.setShadowAngle(shadowAngle);
+        textSegment.setShadowBlurRadius(shadowBlurRadius);
+        textSegment.setShadowSpread(shadowSpread);
+        textSegment.setShadowOpacity(shadowOpacity);
 
         session.getTimelineState().getTextSegments().add(textSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -688,7 +693,10 @@ public class VideoEditingService {
             String shadowColor,
             Integer shadowOffsetX,
             Integer shadowOffsetY,
-            Double shadowAngle,
+            Double shadowBlurRadius,
+            Double shadowSpread,
+            Double shadowOpacity,
+            Integer backgroundBorderRadius,
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
         EditSession session = getSession(sessionId);
@@ -753,15 +761,19 @@ public class VideoEditingService {
                 timelineOrLayerChanged = true;
             }
             if (alignment != null) textSegment.setAlignment(alignment);
-            // Update new properties
+            // Update background properties
             if (backgroundOpacity != null) textSegment.setBackgroundOpacity(backgroundOpacity);
             if (backgroundBorderWidth != null) textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
             if (backgroundBorderColor != null) textSegment.setBackgroundBorderColor(backgroundBorderColor);
             if (backgroundPadding != null) textSegment.setBackgroundPadding(backgroundPadding);
+            if (backgroundBorderRadius != null) textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
+            // Update shadow properties
             if (shadowColor != null) textSegment.setShadowColor(shadowColor);
             if (shadowOffsetX != null) textSegment.setShadowOffsetX(shadowOffsetX);
             if (shadowOffsetY != null) textSegment.setShadowOffsetY(shadowOffsetY);
-            if (shadowAngle != null) textSegment.setShadowAngle(shadowAngle);
+            if (shadowBlurRadius != null) textSegment.setShadowBlurRadius(shadowBlurRadius);
+            if (shadowSpread != null) textSegment.setShadowSpread(shadowSpread);
+            if (shadowOpacity != null) textSegment.setShadowOpacity(shadowOpacity);
         }
 
         // Validate timeline position
@@ -2837,7 +2849,7 @@ public class VideoEditingService {
         // Resolution multiplier for high-quality text (2x for 1080p, 1.5x for 4K to save memory)
         final double RESOLUTION_MULTIPLIER = canvasWidth >= 3840 ? 1.5 : 2.0;
 
-        // Parse colors with helper method for reusability
+        // Parse colors
         Color fontColor = parseColor(ts.getFontColor(), Color.WHITE, "font", ts.getId());
         Color bgColor = ts.getBackgroundColor() != null && !ts.getBackgroundColor().equals("transparent") ?
                 parseColor(ts.getBackgroundColor(), null, "background", ts.getId()) : null;
@@ -2846,16 +2858,12 @@ public class VideoEditingService {
         Color shadowColor = ts.getShadowColor() != null && !ts.getShadowColor().equals("transparent") ?
                 parseColor(ts.getShadowColor(), null, "shadow", ts.getId()) : null;
 
-        // Compute shadow offsets
+        // Compute shadow properties
         int shadowOffsetX = ts.getShadowOffsetX() != null ? (int) (ts.getShadowOffsetX() * RESOLUTION_MULTIPLIER) : 0;
         int shadowOffsetY = ts.getShadowOffsetY() != null ? (int) (ts.getShadowOffsetY() * RESOLUTION_MULTIPLIER) : 0;
-        if (ts.getShadowAngle() != null && ts.getShadowAngle() != 0.0 && shadowColor != null) {
-            double angleRad = Math.toRadians(ts.getShadowAngle());
-            double shadowDistance = Math.sqrt(shadowOffsetX * shadowOffsetX + shadowOffsetY * shadowOffsetY);
-            if (shadowDistance == 0) shadowDistance = 5 * RESOLUTION_MULTIPLIER;
-            shadowOffsetX = (int) Math.round(shadowDistance * Math.cos(angleRad));
-            shadowOffsetY = (int) Math.round(shadowDistance * Math.sin(angleRad));
-        }
+        double shadowBlurRadius = ts.getShadowBlurRadius() != null ? ts.getShadowBlurRadius() * RESOLUTION_MULTIPLIER : 0.0;
+        double shadowSpread = ts.getShadowSpread() != null ? ts.getShadowSpread() * RESOLUTION_MULTIPLIER : 0.0;
+        float shadowOpacity = ts.getShadowOpacity() != null ? ts.getShadowOpacity().floatValue() : 1.0f;
 
         // Load font with fixed base size of 24, scaled by user scale and resolution multiplier
         double baseFontSize = 24.0 * (ts.getScale() != null ? ts.getScale() : 1.0) * RESOLUTION_MULTIPLIER;
@@ -2887,13 +2895,16 @@ public class VideoEditingService {
         g2d.dispose();
         tempImage.flush();
 
-        // Apply padding and border, scaled by resolution multiplier
+        // Apply padding, border, and shadow spread
         int padding = (int) ((ts.getBackgroundPadding() != null ? ts.getBackgroundPadding() : 10) * RESOLUTION_MULTIPLIER);
         int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * RESOLUTION_MULTIPLIER);
+        int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * RESOLUTION_MULTIPLIER);
+        int shadowExtra = shadowSpread > 0 ? (int) Math.ceil(shadowSpread) : 0;
+        shadowExtra += shadowBlurRadius > 0 ? (int) Math.ceil(shadowBlurRadius * 2) : 0; // Account for blur radius
 
-        // Calculate final image dimensions (text + padding + border)
-        int totalWidth = maxTextWidth + 2 * (padding + borderWidth);
-        int totalHeight = totalTextHeight + 2 * (padding + borderWidth);
+        // Calculate final image dimensions
+        int totalWidth = maxTextWidth + 2 * (padding + borderWidth + shadowExtra);
+        int totalHeight = totalTextHeight + 2 * (padding + borderWidth + shadowExtra);
 
         // Cap dimensions to prevent excessive memory usage
         int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER);
@@ -2904,8 +2915,12 @@ public class VideoEditingService {
             baseFontSize *= scaleDown;
             padding = (int) (padding * scaleDown);
             borderWidth = (int) (borderWidth * scaleDown);
+            borderRadius = (int) (borderRadius * scaleDown);
             shadowOffsetX = (int) (shadowOffsetX * scaleDown);
             shadowOffsetY = (int) (shadowOffsetY * scaleDown);
+            shadowBlurRadius *= scaleDown;
+            shadowSpread *= scaleDown;
+            shadowExtra = (int) (shadowExtra * scaleDown);
             font = font.deriveFont((float) baseFontSize);
         }
 
@@ -2918,38 +2933,89 @@ public class VideoEditingService {
         g2d.setFont(font);
         fm = g2d.getFontMetrics();
 
+        // Draw shadow (if present)
+        if (shadowColor != null && shadowOpacity > 0) {
+            // Create a separate image for the shadow
+            BufferedImage shadowImage = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D shadowG2d = shadowImage.createGraphics();
+            shadowG2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            shadowG2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            shadowG2d.setFont(font);
+
+            // Draw text for shadow
+            shadowG2d.setColor(new Color(shadowColor.getRed(), shadowColor.getGreen(), shadowColor.getBlue(), (int) (shadowOpacity * 255)));
+            String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
+            int y = padding + borderWidth + shadowExtra + fm.getAscent();
+            for (String line : lines) {
+                int x = calculateXPosition(line, alignment, totalWidth, fm, padding + shadowExtra, borderWidth);
+                shadowG2d.drawString(line, x + shadowOffsetX, y + shadowOffsetY);
+                y += (int) (lineHeight * lineSpacing);
+            }
+            shadowG2d.dispose();
+
+            // Apply blur to shadow
+            if (shadowBlurRadius > 0) {
+                BufferedImage blurredShadow = applyGaussianBlur(shadowImage, (float) shadowBlurRadius);
+                shadowImage = blurredShadow;
+            }
+
+            // Draw shadow onto main image
+            g2d.drawImage(shadowImage, 0, 0, null);
+            shadowImage.flush();
+        }
+
         // Draw background
         if (bgColor != null) {
             float bgOpacity = ts.getBackgroundOpacity() != null ? ts.getBackgroundOpacity().floatValue() : 1.0f;
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
-            g2d.fillRect(borderWidth, borderWidth, totalWidth - 2 * borderWidth, totalHeight - 2 * borderWidth);
+            if (borderRadius > 0) {
+                g2d.fillRoundRect(
+                        borderWidth + shadowExtra,
+                        borderWidth + shadowExtra,
+                        totalWidth - 2 * (borderWidth + shadowExtra),
+                        totalHeight - 2 * (borderWidth + shadowExtra),
+                        borderRadius,
+                        borderRadius
+                );
+            } else {
+                g2d.fillRect(
+                        borderWidth + shadowExtra,
+                        borderWidth + shadowExtra,
+                        totalWidth - 2 * (borderWidth + shadowExtra),
+                        totalHeight - 2 * (borderWidth + shadowExtra)
+                );
+            }
         }
 
         // Draw border
         if (borderColor != null && borderWidth > 0) {
             g2d.setColor(borderColor);
             g2d.setStroke(new BasicStroke(borderWidth));
-            g2d.drawRect(borderWidth / 2, borderWidth / 2, totalWidth - borderWidth, totalHeight - borderWidth);
-        }
-
-        // Draw shadow
-        if (shadowColor != null && (shadowOffsetX != 0 || shadowOffsetY != 0)) {
-            g2d.setColor(shadowColor);
-            String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-            int y = padding + borderWidth + fm.getAscent();
-            for (String line : lines) {
-                int x = calculateXPosition(line, alignment, totalWidth, fm, padding, borderWidth);
-                g2d.drawString(line, x + shadowOffsetX, y + shadowOffsetY);
-                y += (int) (lineHeight * lineSpacing);
+            if (borderRadius > 0) {
+                g2d.drawRoundRect(
+                        borderWidth / 2 + shadowExtra,
+                        borderWidth / 2 + shadowExtra,
+                        totalWidth - borderWidth - 2 * shadowExtra,
+                        totalHeight - borderWidth - 2 * shadowExtra,
+                        borderRadius,
+                        borderRadius
+                );
+            } else {
+                g2d.drawRect(
+                        borderWidth / 2 + shadowExtra,
+                        borderWidth / 2 + shadowExtra,
+                        totalWidth - borderWidth - 2 * shadowExtra,
+                        totalHeight - borderWidth - 2 * shadowExtra
+                );
             }
         }
 
         // Draw text
         g2d.setColor(fontColor);
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-        int y = padding + borderWidth + fm.getAscent();
+        int y = padding + borderWidth + shadowExtra + fm.getAscent();
         for (String line : lines) {
-            int x = calculateXPosition(line, alignment, totalWidth, fm, padding, borderWidth);
+            int x = calculateXPosition(line, alignment, totalWidth, fm, padding + shadowExtra, borderWidth);
             g2d.drawString(line, x, y);
             y += (int) (lineHeight * lineSpacing);
         }
@@ -2960,6 +3026,58 @@ public class VideoEditingService {
         String tempPngPath = new File(tempDir, "text_" + ts.getId() + ".png").getAbsolutePath();
         ImageIO.write(image, "PNG", new File(tempPngPath));
         return tempPngPath;
+    }
+
+    private BufferedImage applyGaussianBlur(BufferedImage source, float radius) {
+        if (radius <= 0) return source;
+
+        // Create a kernel for Gaussian blur
+        int size = Math.max(3, (int) Math.ceil(radius * 2) | 1); // Ensure odd size
+        float[] kernel = new float[size * size];
+        float sigma = radius / 3; // Standard deviation
+        float sum = 0;
+        int center = size / 2;
+
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                float dx = x - center;
+                float dy = y - center;
+                float value = (float) Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+                kernel[y * size + x] = value;
+                sum += value;
+            }
+        }
+
+        // Normalize kernel
+        for (int i = 0; i < kernel.length; i++) {
+            kernel[i] /= sum;
+        }
+
+        // Apply convolution
+        BufferedImage result = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                float r = 0, g = 0, b = 0, a = 0;
+                for (int ky = 0; ky < size; ky++) {
+                    for (int kx = 0; kx < size; kx++) {
+                        int px = x + kx - center;
+                        int py = y + ky - center;
+                        if (px >= 0 && px < source.getWidth() && py >= 0 && py < source.getHeight()) {
+                            int pixel = source.getRGB(px, py);
+                            float weight = kernel[ky * size + kx];
+                            r += ((pixel >> 16) & 0xFF) * weight;
+                            g += ((pixel >> 8) & 0xFF) * weight;
+                            b += (pixel & 0xFF) * weight;
+                            a += ((pixel >> 24) & 0xFF) * weight;
+                        }
+                    }
+                }
+                int pixel = ((int) a << 24) | ((int) r << 16) | ((int) g << 8) | (int) b;
+                result.setRGB(x, y, pixel);
+            }
+        }
+
+        return result;
     }
 
     // Helper method to parse colors

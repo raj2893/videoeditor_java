@@ -322,10 +322,13 @@ public class ProjectController {
             Integer backgroundBorderWidth = request.get("backgroundBorderWidth") != null ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
             Integer backgroundPadding = request.get("backgroundPadding") != null ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
+            Integer backgroundBorderRadius = request.get("backgroundBorderRadius") != null ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
             String shadowColor = (String) request.get("shadowColor");
             Integer shadowOffsetX = request.get("shadowOffsetX") != null ? Integer.valueOf(request.get("shadowOffsetX").toString()) : null;
             Integer shadowOffsetY = request.get("shadowOffsetY") != null ? Integer.valueOf(request.get("shadowOffsetY").toString()) : null;
-            Double shadowAngle = request.get("shadowAngle") != null ? Double.valueOf(request.get("shadowAngle").toString()) : null;
+            Double shadowBlurRadius = request.get("shadowBlurRadius") != null ? Double.valueOf(request.get("shadowBlurRadius").toString()) : null;
+            Double shadowSpread = request.get("shadowSpread") != null ? Double.valueOf(request.get("shadowSpread").toString()) : null;
+            Double shadowOpacity = request.get("shadowOpacity") != null ? Double.valueOf(request.get("shadowOpacity").toString()) : null;
 
             // Existing validation
             if (text == null || layer == null || timelineStartTime == null || timelineEndTime == null) {
@@ -348,14 +351,24 @@ public class ProjectController {
             if (backgroundPadding != null && backgroundPadding < 0) {
                 return ResponseEntity.badRequest().body("Background padding must be non-negative");
             }
-            if (shadowAngle != null && (shadowAngle < 0 || shadowAngle > 360)) {
-                return ResponseEntity.badRequest().body("Shadow angle must be between 0 and 360 degrees");
+            if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
+                return ResponseEntity.badRequest().body("Background border radius must be non-negative");
+            }
+            if (shadowBlurRadius != null && shadowBlurRadius < 0) {
+                return ResponseEntity.badRequest().body("Shadow blur radius must be non-negative");
+            }
+            if (shadowSpread != null && shadowSpread < 0) {
+                return ResponseEntity.badRequest().body("Shadow spread must be non-negative");
+            }
+            if (shadowOpacity != null && (shadowOpacity < 0 || shadowOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Shadow opacity must be between 0 and 1");
             }
 
             videoEditingService.addTextToTimeline(sessionId, text, layer, timelineStartTime, timelineEndTime,
                     fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
-                    shadowColor, shadowOffsetX, shadowOffsetY, shadowAngle);
+                    shadowColor, shadowOffsetX, shadowOffsetY, shadowBlurRadius, shadowSpread, shadowOpacity,
+                    backgroundBorderRadius);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -395,16 +408,20 @@ public class ProjectController {
             Integer backgroundBorderWidth = request.containsKey("backgroundBorderWidth") ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
             Integer backgroundPadding = request.containsKey("backgroundPadding") ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
+            Integer backgroundBorderRadius = request.containsKey("backgroundBorderRadius") ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
             String shadowColor = (String) request.get("shadowColor");
             Integer shadowOffsetX = request.containsKey("shadowOffsetX") ? Integer.valueOf(request.get("shadowOffsetX").toString()) : null;
             Integer shadowOffsetY = request.containsKey("shadowOffsetY") ? Integer.valueOf(request.get("shadowOffsetY").toString()) : null;
-            Double shadowAngle = request.containsKey("shadowAngle") ? Double.valueOf(request.get("shadowAngle").toString()) : null;
+            Double shadowBlurRadius = request.containsKey("shadowBlurRadius") ? Double.valueOf(request.get("shadowBlurRadius").toString()) : null;
+            Double shadowSpread = request.containsKey("shadowSpread") ? Double.valueOf(request.get("shadowSpread").toString()) : null;
+            Double shadowOpacity = request.containsKey("shadowOpacity") ? Double.valueOf(request.get("shadowOpacity").toString()) : null;
 
             // Parse keyframes
             Map<String, List<Keyframe>> parsedKeyframes = null;
             if (keyframes != null) {
                 parsedKeyframes = new HashMap<>();
                 for (Map.Entry<String, List<Map<String, Object>>> entry : keyframes.entrySet()) {
+                    String property = entry.getKey();
                     List<Keyframe> kfList = new ArrayList<>();
                     for (Map<String, Object> kfData : entry.getValue()) {
                         double time = Double.valueOf(kfData.get("time").toString());
@@ -440,14 +457,24 @@ public class ProjectController {
             if (backgroundPadding != null && backgroundPadding < 0) {
                 return ResponseEntity.badRequest().body("Background padding must be non-negative");
             }
-            if (shadowAngle != null && (shadowAngle < 0 || shadowAngle > 360)) {
-                return ResponseEntity.badRequest().body("Shadow angle must be between 0 and 360 degrees");
+            if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
+                return ResponseEntity.badRequest().body("Background border radius must be non-negative");
+            }
+            if (shadowBlurRadius != null && shadowBlurRadius < 0) {
+                return ResponseEntity.badRequest().body("Shadow blur radius must be non-negative");
+            }
+            if (shadowSpread != null && shadowSpread < 0) {
+                return ResponseEntity.badRequest().body("Shadow spread must be non-negative");
+            }
+            if (shadowOpacity != null && (shadowOpacity < 0 || shadowOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Shadow opacity must be between 0 and 1");
             }
 
             videoEditingService.updateTextSegment(sessionId, segmentId, text, fontFamily, scale,
                     fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
-                    shadowColor, shadowOffsetX, shadowOffsetY, shadowAngle, parsedKeyframes);
+                    shadowColor, shadowOffsetX, shadowOffsetY, shadowBlurRadius, shadowSpread, shadowOpacity,
+                    backgroundBorderRadius, parsedKeyframes);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {

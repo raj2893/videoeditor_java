@@ -2861,8 +2861,10 @@ public class VideoEditingService {
             double sourceDuration = audioEnd - audioStart;
             double timelineDuration = timelineEnd - timelineStart;
 
+            // Validate timing
             if (audioStart < 0 || audioEnd <= audioStart || timelineStart < 0 || timelineEnd <= timelineStart) {
-                System.err.println("Invalid timing for audio segment " + as.getId());
+                System.err.println("Invalid timing for audio segment " + as.getId() + ": start=" + audioStart +
+                        ", end=" + audioEnd + ", timelineStart=" + timelineStart + ", timelineEnd=" + timelineEnd);
                 continue;
             }
 
@@ -2874,41 +2876,63 @@ public class VideoEditingService {
             List<Keyframe> volumeKeyframes = as.getKeyframes().getOrDefault("volume", new ArrayList<>());
             double defaultVolume = as.getVolume() != null ? as.getVolume() : 1.0;
 
-            if (!volumeKeyframes.isEmpty() && volumeKeyframes.size() >= 2) {
-                // Sort keyframes by time
+            // Debug keyframes
+            System.out.println("Processing audio segment " + as.getId() + " with " + volumeKeyframes.size() + " volume keyframes:");
+            for (Keyframe kf : volumeKeyframes) {
+                System.out.println("  Keyframe: time=" + kf.getTime() + ", value=" + kf.getValue());
+            }
+
+            if (!volumeKeyframes.isEmpty()) {
+                // Sort and validate keyframes
                 Collections.sort(volumeKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double segmentDuration = timelineEnd - timelineStart;
 
-                // Create a volume filter with simple time-based expression
-                // Format: 't/duration*target_volume' for linear fade from 0
+                for (Keyframe kf : volumeKeyframes) {
+                    double kfTime = kf.getTime();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+                    if (kfTime < 0 || kfTime > segmentDuration) {
+                        System.err.println("Invalid keyframe time for audio segment " + as.getId() + ": time=" + kfTime +
+                                ", segmentDuration=" + segmentDuration);
+                        continue;
+                    }
+                    if (kfValue < 0 || kfValue > 1) {
+                        System.err.println("Invalid keyframe value for audio segment " + as.getId() + ": value=" + kfValue);
+                        continue;
+                    }
+                }
 
-                // Get first and last keyframe
-                Keyframe firstKf = volumeKeyframes.get(0);
-                Keyframe lastKf = volumeKeyframes.get(volumeKeyframes.size() - 1);
-                double firstTime = firstKf.getTime();
-                double lastTime = lastKf.getTime();
-                double firstValue = ((Number) firstKf.getValue()).doubleValue();
-                double lastValue = ((Number) lastKf.getValue()).doubleValue();
+                // Build simplified volume expression
+                StringBuilder volumeExpr = new StringBuilder();
+                if (volumeKeyframes.size() == 1) {
+                    double kfValue = ((Number) volumeKeyframes.get(0).getValue()).doubleValue();
+                    volumeExpr.append(String.format("%.6f", kfValue));
+                } else {
+                    volumeExpr.append("'");
+                    for (int j = 0; j < volumeKeyframes.size() - 1; j++) {
+                        Keyframe currentKf = volumeKeyframes.get(j);
+                        Keyframe nextKf = volumeKeyframes.get(j + 1);
+                        double currentTime = currentKf.getTime();
+                        double nextTime = nextKf.getTime();
+                        double currentValue = ((Number) currentKf.getValue()).doubleValue();
+                        double nextValue = ((Number) nextKf.getValue()).doubleValue();
 
-                // Use a simple expression that works reliably with FFmpeg
-                StringBuilder expr = new StringBuilder();
-                expr.append("'if(lt(t,").append(String.format("%.6f", firstTime)).append("),")
-                        .append(String.format("%.6f", firstValue)).append(",")
-                        .append("if(gt(t,").append(String.format("%.6f", lastTime)).append("),")
-                        .append(String.format("%.6f", lastValue)).append(",")
-                        .append(String.format("%.6f", firstValue)).append("+")
-                        .append("(t-").append(String.format("%.6f", firstTime)).append(")*")
-                        .append("(").append(String.format("%.6f", lastValue - firstValue)).append(")")
-                        .append("/(").append(String.format("%.6f", lastTime - firstTime)).append(")")
-                        .append("))")
-                        .append("'");
+                        if (nextTime > currentTime) {
+                            String progress = String.format("(t-%.6f)/(%.6f-%.6f)", currentTime, nextTime, currentTime);
+                            String interpolatedValue = String.format("%.6f+(%.6f-%.6f)*%s", currentValue, nextValue, currentValue, progress);
+                            volumeExpr.append(String.format("if(between(t,%.6f,%.6f),%s,", currentTime, nextTime, interpolatedValue));
+                        }
+                    }
+                    Keyframe lastKf = volumeKeyframes.get(volumeKeyframes.size() - 1);
+                    volumeExpr.append(String.format("%.6f", ((Number) lastKf.getValue()).doubleValue()));
+                    for (int j = 0; j < volumeKeyframes.size() - 1; j++) {
+                        volumeExpr.append(")");
+                    }
+                    volumeExpr.append("'");
+                }
 
-                filterComplex.append("volume=").append(expr).append(",");
-            } else if (!volumeKeyframes.isEmpty() && volumeKeyframes.size() == 1) {
-                // Single keyframe - use its value
-                double value = ((Number) volumeKeyframes.get(0).getValue()).doubleValue();
-                filterComplex.append("volume=").append(String.format("%.6f", value)).append(",");
+                filterComplex.append("volume=").append(volumeExpr).append(":eval=frame,");
+                System.out.println("Volume expression for audio segment " + as.getId() + ": " + volumeExpr);
             } else {
-                // No keyframes - use default volume
                 filterComplex.append("volume=").append(String.format("%.6f", defaultVolume)).append(",");
             }
 
@@ -2922,7 +2946,7 @@ public class VideoEditingService {
                 filterComplex.append("atrim=0:").append(String.format("%.6f", timelineDuration)).append(",");
             }
 
-            // Make sure audio extends to the end
+            // Ensure audio extends to the end of the video
             filterComplex.append("apad=pad_dur=").append(String.format("%.6f", totalDuration - timelineEnd)).append(",");
             filterComplex.append("asetpts=PTS-STARTPTS");
 

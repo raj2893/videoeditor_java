@@ -383,6 +383,10 @@ public class VideoEditingService {
         segment.setLayer(layer);
         segment.setTimelineStartTime(timelineStartTime);
         segment.setTimelineEndTime(timelineEndTime);
+        segment.setCropB(0.0);
+        segment.setCropL(0.0);
+        segment.setCropR(0.0);
+        segment.setCropT(0.0);
 
         if (audioSegment != null) {
             segment.setAudioId(audioSegment.getId());
@@ -494,6 +498,10 @@ public class VideoEditingService {
             Double timelineEndTime,
             Double startTime,
             Double endTime,
+            Double cropL, // New parameter
+            Double cropR, // New parameter
+            Double cropT, // New parameter
+            Double cropB, // New parameter
             Map<String, List<Keyframe>> keyframes
     ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
@@ -514,8 +522,36 @@ public class VideoEditingService {
         double originalStartTime = segmentToUpdate.getStartTime();
         double originalEndTime = segmentToUpdate.getEndTime();
         int originalLayer = segmentToUpdate.getLayer();
+        Double originalCropL = segmentToUpdate.getCropL();
+        Double originalCropR = segmentToUpdate.getCropR();
+        Double originalCropT = segmentToUpdate.getCropT();
+        Double originalCropB = segmentToUpdate.getCropB();
 
         boolean timelineOrLayerChanged = false;
+
+        // Validate crop parameters
+        if (cropL != null && (cropL < 0 || cropL > 100)) {
+            throw new IllegalArgumentException("cropL must be between 0 and 100");
+        }
+        if (cropR != null && (cropR < 0 || cropR > 100)) {
+            throw new IllegalArgumentException("cropR must be between 0 and 100");
+        }
+        if (cropT != null && (cropT < 0 || cropT > 100)) {
+            throw new IllegalArgumentException("cropT must be between 0 and 100");
+        }
+        if (cropB != null && (cropB < 0 || cropB > 100)) {
+            throw new IllegalArgumentException("cropB must be between 0 and 100");
+        }
+        double effectiveCropL = cropL != null ? cropL : segmentToUpdate.getCropL();
+        double effectiveCropR = cropR != null ? cropR : segmentToUpdate.getCropR();
+        double effectiveCropT = cropT != null ? cropT : segmentToUpdate.getCropT();
+        double effectiveCropB = cropB != null ? cropB : segmentToUpdate.getCropB();
+        if (effectiveCropL + effectiveCropR >= 100) {
+            throw new IllegalArgumentException("Total crop percentage (left + right) must be less than 100");
+        }
+        if (effectiveCropT + effectiveCropB >= 100) {
+            throw new IllegalArgumentException("Total crop percentage (top + bottom) must be less than 100");
+        }
 
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
@@ -552,7 +588,6 @@ public class VideoEditingService {
                 segmentToUpdate.setLayer(layer);
                 timelineOrLayerChanged = true;
             }
-
             if (timelineStartTime != null) {
                 timelineStartTime = roundToThreeDecimals(timelineStartTime);
                 segmentToUpdate.setTimelineStartTime(timelineStartTime);
@@ -575,6 +610,11 @@ public class VideoEditingService {
                     segmentToUpdate.setEndTime(roundToThreeDecimals(originalVideoDuration));
                 }
             }
+            // Update crop fields
+            if (cropL != null) segmentToUpdate.setCropL(cropL);
+            if (cropR != null) segmentToUpdate.setCropR(cropR);
+            if (cropT != null) segmentToUpdate.setCropT(cropT);
+            if (cropB != null) segmentToUpdate.setCropB(cropB);
 
             // Ensure timeline duration reflects rounded values
             double newTimelineDuration = roundToThreeDecimals(segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime());
@@ -599,6 +639,10 @@ public class VideoEditingService {
             segmentToUpdate.setStartTime(originalStartTime);
             segmentToUpdate.setEndTime(originalEndTime);
             segmentToUpdate.setLayer(originalLayer);
+            segmentToUpdate.setCropL(originalCropL);
+            segmentToUpdate.setCropR(originalCropR);
+            segmentToUpdate.setCropT(originalCropT);
+            segmentToUpdate.setCropB(originalCropB);
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + segmentToUpdate.getLayer());
         }
 
@@ -1276,6 +1320,10 @@ public class VideoEditingService {
         imageSegment.setTimelineStartTime(timelineStartTime);
         imageSegment.setTimelineEndTime(timelineEndTime);
         imageSegment.setElement(isElement); // Set the isElement field
+        imageSegment.setCropB(0.0);
+        imageSegment.setCropL(0.0);
+        imageSegment.setCropR(0.0);
+        imageSegment.setCropT(0.0);
 
         try {
             File imageFile = new File(baseDir, imagePath);
@@ -1318,6 +1366,10 @@ public class VideoEditingService {
             List<String> filtersToRemove,
             Double timelineStartTime,
             Double timelineEndTime,
+            Double cropL, // New parameter
+            Double cropR, // New parameter
+            Double cropT, // New parameter
+            Double cropB, // New parameter
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
         EditSession session = getSession(sessionId);
@@ -1331,8 +1383,36 @@ public class VideoEditingService {
         double originalTimelineStartTime = targetSegment.getTimelineStartTime();
         double originalTimelineEndTime = targetSegment.getTimelineEndTime();
         int originalLayer = targetSegment.getLayer();
+        Double originalCropL = targetSegment.getCropL();
+        Double originalCropR = targetSegment.getCropR();
+        Double originalCropT = targetSegment.getCropT();
+        Double originalCropB = targetSegment.getCropB();
 
         boolean timelineOrLayerChanged = false;
+
+        // Validate crop parameters
+        if (cropL != null && (cropL < 0 || cropL > 100)) {
+            throw new IllegalArgumentException("cropL must be between 0 and 100");
+        }
+        if (cropR != null && (cropR < 0 || cropR > 100)) {
+            throw new IllegalArgumentException("cropR must be between 0 and 100");
+        }
+        if (cropT != null && (cropT < 0 || cropT > 100)) {
+            throw new IllegalArgumentException("cropT must be between 0 and 100");
+        }
+        if (cropB != null && (cropB < 0 || cropB > 100)) {
+            throw new IllegalArgumentException("cropB must be between 0 and 100");
+        }
+        double effectiveCropL = cropL != null ? cropL : targetSegment.getCropL();
+        double effectiveCropR = cropR != null ? cropR : targetSegment.getCropR();
+        double effectiveCropT = cropT != null ? cropT : targetSegment.getCropT();
+        double effectiveCropB = cropB != null ? cropB : targetSegment.getCropB();
+        if (effectiveCropL + effectiveCropR >= 100) {
+            throw new IllegalArgumentException("Total crop percentage (left + right) must be less than 100");
+        }
+        if (effectiveCropT + effectiveCropB >= 100) {
+            throw new IllegalArgumentException("Total crop percentage (top + bottom) must be less than 100");
+        }
 
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
@@ -1382,6 +1462,11 @@ public class VideoEditingService {
                 targetSegment.setTimelineEndTime(timelineEndTime);
                 timelineOrLayerChanged = true;
             }
+            // Update crop fields
+            if (cropL != null) targetSegment.setCropL(cropL);
+            if (cropR != null) targetSegment.setCropR(cropR);
+            if (cropT != null) targetSegment.setCropT(cropT);
+            if (cropB != null) targetSegment.setCropB(cropB);
             if (filters != null && !filters.isEmpty()) {
                 for (Map.Entry<String, String> filter : filters.entrySet()) {
                     Filter newFilter = new Filter();
@@ -1409,6 +1494,10 @@ public class VideoEditingService {
             targetSegment.setTimelineStartTime(originalTimelineStartTime);
             targetSegment.setTimelineEndTime(originalTimelineEndTime);
             targetSegment.setLayer(originalLayer);
+            targetSegment.setCropL(originalCropL);
+            targetSegment.setCropR(originalCropR);
+            targetSegment.setCropT(originalCropT);
+            targetSegment.setCropB(originalCropB);
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + targetSegment.getLayer());
         }
 
@@ -1989,6 +2078,35 @@ public class VideoEditingService {
                 filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
 
+                // Apply crop filter based on cropL, cropR, cropT, cropB
+                double cropL = vs.getCropL() != null ? vs.getCropL() : 0.0;
+                double cropR = vs.getCropR() != null ? vs.getCropR() : 0.0;
+                double cropT = vs.getCropT() != null ? vs.getCropT() : 0.0;
+                double cropB = vs.getCropB() != null ? vs.getCropB() : 0.0;
+
+                // Validate crop percentages
+                if (cropL < 0 || cropL > 100 || cropR < 0 || cropR > 100 || cropT < 0 || cropT > 100 || cropB < 0 || cropB > 100) {
+                    throw new IllegalArgumentException("Crop percentages must be between 0 and 100 for segment " + vs.getId());
+                }
+                if (cropL + cropR >= 100 || cropT + cropB >= 100) {
+                    throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + vs.getId());
+                }
+
+                // Calculate crop parameters
+                String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+                String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+                String cropX = String.format("iw*%.6f", cropL / 100.0);
+                String cropY = String.format("ih*%.6f", cropT / 100.0);
+
+                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                    filterComplex.append("crop=").append(cropWidth).append(":")
+                            .append(cropHeight).append(":")
+                            .append(cropX).append(":")
+                            .append(cropY).append(",");
+                    System.out.println("Crop filter for video segment " + vs.getId() + ": w=" + cropWidth +
+                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+                }
+
                 // Apply filters
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(vs.getId()))
@@ -2260,6 +2378,35 @@ public class VideoEditingService {
                 filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(is.getTimelineStartTime()).append("/TB,");
 
+                // Apply crop filter based on cropL, cropR, cropT, cropB
+                double cropL = is.getCropL() != null ? is.getCropL() : 0.0;
+                double cropR = is.getCropR() != null ? is.getCropR() : 0.0;
+                double cropT = is.getCropT() != null ? is.getCropT() : 0.0;
+                double cropB = is.getCropB() != null ? is.getCropB() : 0.0;
+
+                // Validate crop percentages
+                if (cropL < 0 || cropL > 100 || cropR < 0 || cropR > 100 || cropT < 0 || cropT > 100 || cropB < 0 || cropB > 100) {
+                    throw new IllegalArgumentException("Crop percentages must be between 0 and 100 for segment " + is.getId());
+                }
+                if (cropL + cropR >= 100 || cropT + cropB >= 100) {
+                    throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + is.getId());
+                }
+
+                // Calculate crop parameters
+                String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+                String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+                String cropX = String.format("iw*%.6f", cropL / 100.0);
+                String cropY = String.format("ih*%.6f", cropT / 100.0);
+
+                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                    filterComplex.append("crop=").append(cropWidth).append(":")
+                            .append(cropHeight).append(":")
+                            .append(cropX).append(":")
+                            .append(cropY).append(",");
+                    System.out.println("Crop filter for image segment " + is.getId() + ": w=" + cropWidth +
+                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+                }
+
                 // Apply filters
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(is.getId()))
@@ -2330,9 +2477,7 @@ public class VideoEditingService {
                                     if (hue == 0.0) {
                                         break;
                                     }
-                                    filterComplex.append("hue=h=").
-
-                                            append(String.format("%.1f", hue)).append(",");
+                                    filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
                                 }
                                 break;
                             case "grayscale":
@@ -2387,7 +2532,7 @@ public class VideoEditingService {
                             .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
                             .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
                             .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",ih)':")
+                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
                             .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
                             .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
                             .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")

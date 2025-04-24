@@ -152,13 +152,12 @@ public class ProjectController {
 
             // Extract parameters from the request
             String videoPath = (String) request.get("videoPath");
-            Integer layer = (Integer) request.get("layer");
+            Integer layer = request.get("layer") != null ? ((Number) request.get("layer")).intValue() : null;
             Double timelineStartTime = request.get("timelineStartTime") != null ? ((Number) request.get("timelineStartTime")).doubleValue() : null;
             Double timelineEndTime = request.get("timelineEndTime") != null ? ((Number) request.get("timelineEndTime")).doubleValue() : null;
             Double startTime = request.get("startTime") != null ? ((Number) request.get("startTime")).doubleValue() : null;
             Double endTime = request.get("endTime") != null ? ((Number) request.get("endTime")).doubleValue() : null;
             Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null;
-            // Extract createAudioSegment, support both createAudioSegment and skipAudio for backward compatibility
             Boolean createAudioSegment = request.get("createAudioSegment") != null ?
                     Boolean.valueOf(request.get("createAudioSegment").toString()) :
                     (request.get("skipAudio") != null ? !Boolean.valueOf(request.get("skipAudio").toString()) : true);
@@ -175,7 +174,7 @@ public class ProjectController {
             videoEditingService.addVideoToTimeline(
                     sessionId,
                     videoPath,
-                    layer != null ? layer : 0,
+                    layer,
                     timelineStartTime,
                     timelineEndTime,
                     startTime,
@@ -187,8 +186,8 @@ public class ProjectController {
             TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
             VideoSegment addedVideoSegment = timelineState.getSegments().stream()
                     .filter(s -> s.getSourceVideoPath().equals(videoPath) &&
-                            (startTime == null || s.getStartTime() == startTime) &&
-                            (timelineStartTime == null || s.getTimelineStartTime() == timelineStartTime))
+                            (startTime == null || Math.abs(s.getStartTime() - startTime) < 0.001) &&
+                            (timelineStartTime == null || Math.abs(s.getTimelineStartTime() - timelineStartTime) < 0.001))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Failed to find added video segment"));
             AudioSegment addedAudioSegment = timelineState.getAudioSegments().stream()
@@ -199,6 +198,7 @@ public class ProjectController {
             // Prepare response
             Map<String, Object> response = new HashMap<>();
             response.put("videoSegmentId", addedVideoSegment.getId());
+            response.put("layer", addedVideoSegment.getLayer()); // Include the assigned layer
             if (addedAudioSegment != null) {
                 response.put("audioSegmentId", addedAudioSegment.getId());
                 response.put("audioLayer", addedAudioSegment.getLayer());
@@ -224,12 +224,16 @@ public class ProjectController {
             Integer positionX = request.containsKey("positionX") ? Integer.valueOf(request.get("positionX").toString()) : null;
             Integer positionY = request.containsKey("positionY") ? Integer.valueOf(request.get("positionY").toString()) : null;
             Double scale = request.containsKey("scale") ? Double.valueOf(request.get("scale").toString()) : null;
-            Double opacity = request.containsKey("opacity") ? Double.valueOf(request.get("opacity").toString()) : null; // Added opacity
+            Double opacity = request.containsKey("opacity") ? Double.valueOf(request.get("opacity").toString()) : null;
             Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
             Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
             Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
             Double startTime = request.containsKey("startTime") ? Double.valueOf(request.get("startTime").toString()) : null;
             Double endTime = request.containsKey("endTime") ? Double.valueOf(request.get("endTime").toString()) : null;
+            Double cropL = request.containsKey("cropL") ? Double.valueOf(request.get("cropL").toString()) : null;
+            Double cropR = request.containsKey("cropR") ? Double.valueOf(request.get("cropR").toString()) : null;
+            Double cropT = request.containsKey("cropT") ? Double.valueOf(request.get("cropT").toString()) : null;
+            Double cropB = request.containsKey("cropB") ? Double.valueOf(request.get("cropB").toString()) : null;
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
@@ -248,15 +252,42 @@ public class ProjectController {
                 }
             }
 
+            // Validation
             if (segmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: segmentId");
             }
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
+            if (cropL != null && (cropL < 0 || cropL > 100)) {
+                return ResponseEntity.badRequest().body("cropL must be between 0 and 100");
+            }
+            if (cropR != null && (cropR < 0 || cropR > 100)) {
+                return ResponseEntity.badRequest().body("cropR must be between 0 and 100");
+            }
+            if (cropT != null && (cropT < 0 || cropT > 100)) {
+                return ResponseEntity.badRequest().body("cropT must be between 0 and 100");
+            }
+            if (cropB != null && (cropB < 0 || cropB > 100)) {
+                return ResponseEntity.badRequest().body("cropB must be between 0 and 100");
+            }
+            // Validate total crop if static values are provided (not keyframed)
+            if (parsedKeyframes == null ||
+                    (!parsedKeyframes.containsKey("cropL") && !parsedKeyframes.containsKey("cropR") &&
+                            !parsedKeyframes.containsKey("cropT") && !parsedKeyframes.containsKey("cropB"))) {
+                double totalHorizontalCrop = (cropL != null ? cropL : 0.0) + (cropR != null ? cropR : 0.0);
+                double totalVerticalCrop = (cropT != null ? cropT : 0.0) + (cropB != null ? cropB : 0.0);
+                if (totalHorizontalCrop >= 100) {
+                    return ResponseEntity.badRequest().body("Total horizontal crop (cropL + cropR) cannot be 100% or more");
+                }
+                if (totalVerticalCrop >= 100) {
+                    return ResponseEntity.badRequest().body("Total vertical crop (cropT + cropB) cannot be 100% or more");
+                }
+            }
 
-            videoEditingService.updateVideoSegment(sessionId, segmentId, positionX, positionY, scale, opacity,
-                    timelineStartTime, layer, timelineEndTime, startTime, endTime, parsedKeyframes);
+            videoEditingService.updateVideoSegment(
+                    sessionId, segmentId, positionX, positionY, scale, opacity, timelineStartTime, layer,
+                    timelineEndTime, startTime, endTime, cropL, cropR, cropT, cropB, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -721,6 +752,10 @@ public class ProjectController {
             Boolean maintainAspectRatio = request.containsKey("maintainAspectRatio") ? Boolean.valueOf(request.get("maintainAspectRatio").toString()) : null;
             Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
             Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
+            Double cropL = request.containsKey("cropL") ? Double.valueOf(request.get("cropL").toString()) : null;
+            Double cropR = request.containsKey("cropR") ? Double.valueOf(request.get("cropR").toString()) : null;
+            Double cropT = request.containsKey("cropT") ? Double.valueOf(request.get("cropT").toString()) : null;
+            Double cropB = request.containsKey("cropB") ? Double.valueOf(request.get("cropB").toString()) : null;
             @SuppressWarnings("unchecked")
             Map<String, String> filters = request.containsKey("filters") ? (Map<String, String>) request.get("filters") : null;
             @SuppressWarnings("unchecked")
@@ -743,6 +778,7 @@ public class ProjectController {
                 }
             }
 
+            // Validation
             if (segmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: segmentId");
             }
@@ -755,10 +791,36 @@ public class ProjectController {
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
+            if (cropL != null && (cropL < 0 || cropL > 100)) {
+                return ResponseEntity.badRequest().body("cropL must be between 0 and 100");
+            }
+            if (cropR != null && (cropR < 0 || cropR > 100)) {
+                return ResponseEntity.badRequest().body("cropR must be between 0 and 100");
+            }
+            if (cropT != null && (cropT < 0 || cropT > 100)) {
+                return ResponseEntity.badRequest().body("cropT must be between 0 and 100");
+            }
+            if (cropB != null && (cropB < 0 || cropB > 100)) {
+                return ResponseEntity.badRequest().body("cropB must be between 0 and 100");
+            }
+            // Validate total crop if static values are provided (not keyframed)
+            if (parsedKeyframes == null ||
+                    (!parsedKeyframes.containsKey("cropL") && !parsedKeyframes.containsKey("cropR") &&
+                            !parsedKeyframes.containsKey("cropT") && !parsedKeyframes.containsKey("cropB"))) {
+                double totalHorizontalCrop = (cropL != null ? cropL : 0.0) + (cropR != null ? cropR : 0.0);
+                double totalVerticalCrop = (cropT != null ? cropT : 0.0) + (cropB != null ? cropB : 0.0);
+                if (totalHorizontalCrop >= 100) {
+                    return ResponseEntity.badRequest().body("Total horizontal crop (cropL + cropR) cannot be 100% or more");
+                }
+                if (totalVerticalCrop >= 100) {
+                    return ResponseEntity.badRequest().body("Total vertical crop (cropT + cropB) cannot be 100% or more");
+                }
+            }
 
             videoEditingService.updateImageSegment(
                     sessionId, segmentId, positionX, positionY, scale, opacity, layer,
-                    customWidth, customHeight, maintainAspectRatio, filters, filtersToRemove, timelineStartTime, timelineEndTime, parsedKeyframes);
+                    customWidth, customHeight, maintainAspectRatio, filters, filtersToRemove,
+                    timelineStartTime, timelineEndTime, cropL, cropR, cropT, cropB, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

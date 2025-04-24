@@ -2190,11 +2190,14 @@ public class VideoEditingService {
                                     filterComplex.append("negate,");
                                 }
                                 break;
+                            // Inside the ImageSegment processing block, under the "rotate" case:
                             case "rotate":
                                 double rotate = Double.parseDouble(filterValue);
                                 if (rotate >= -180 && rotate <= 180) {
                                     double angleRad = Math.toRadians(rotate);
-                                    filterComplex.append("rotate=").append(angleRad).append(":c=black,");
+                                    filterComplex.append("rotate=").append(angleRad)
+                                            .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
+                                            .append(":c=black,");
                                 }
                                 break;
                             case "flip":
@@ -2490,11 +2493,14 @@ public class VideoEditingService {
                                     filterComplex.append("negate,");
                                 }
                                 break;
+                            // Inside the ImageSegment processing block, under the "rotate" case:
                             case "rotate":
                                 double rotate = Double.parseDouble(filterValue);
                                 if (rotate >= -180 && rotate <= 180) {
                                     double angleRad = Math.toRadians(rotate);
-                                    filterComplex.append("rotate=").append(angleRad).append(":c=black,");
+                                    filterComplex.append("rotate=").append(angleRad)
+                                            .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
+                                            .append(":c=black,");
                                 }
                                 break;
                             case "flip":

@@ -579,50 +579,50 @@ public class VideoEditingService {
                         break;
                 }
             }
-        } else {
-            if (positionX != null) segmentToUpdate.setPositionX(positionX);
-            if (positionY != null) segmentToUpdate.setPositionY(positionY);
-            if (scale != null) segmentToUpdate.setScale(scale);
-            if (opacity != null) segmentToUpdate.setOpacity(opacity);
-            if (layer != null) {
-                segmentToUpdate.setLayer(layer);
-                timelineOrLayerChanged = true;
-            }
-            if (timelineStartTime != null) {
-                timelineStartTime = roundToThreeDecimals(timelineStartTime);
-                segmentToUpdate.setTimelineStartTime(timelineStartTime);
-                timelineOrLayerChanged = true;
-            }
-            if (timelineEndTime != null) {
-                timelineEndTime = roundToThreeDecimals(timelineEndTime);
-                segmentToUpdate.setTimelineEndTime(timelineEndTime);
-                timelineOrLayerChanged = true;
-            }
-            if (startTime != null) {
-                startTime = roundToThreeDecimals(startTime);
-                segmentToUpdate.setStartTime(Math.max(0, startTime));
-            }
-            if (endTime != null) {
-                endTime = roundToThreeDecimals(endTime);
-                segmentToUpdate.setEndTime(endTime);
-                double originalVideoDuration = getVideoDuration(segmentToUpdate.getSourceVideoPath());
-                if (endTime > originalVideoDuration) {
-                    segmentToUpdate.setEndTime(roundToThreeDecimals(originalVideoDuration));
-                }
-            }
-            // Update crop fields
-            if (cropL != null) segmentToUpdate.setCropL(cropL);
-            if (cropR != null) segmentToUpdate.setCropR(cropR);
-            if (cropT != null) segmentToUpdate.setCropT(cropT);
-            if (cropB != null) segmentToUpdate.setCropB(cropB);
-
-            // Ensure timeline duration reflects rounded values
-            double newTimelineDuration = roundToThreeDecimals(segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime());
-            double newClipDuration = roundToThreeDecimals(segmentToUpdate.getEndTime() - segmentToUpdate.getStartTime());
-            if (newTimelineDuration < newClipDuration) {
-                segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newClipDuration));
+        }
+        if (positionX != null) segmentToUpdate.setPositionX(positionX);
+        if (positionY != null) segmentToUpdate.setPositionY(positionY);
+        if (scale != null) segmentToUpdate.setScale(scale);
+        if (opacity != null) segmentToUpdate.setOpacity(opacity);
+        if (layer != null) {
+            segmentToUpdate.setLayer(layer);
+            timelineOrLayerChanged = true;
+        }
+        if (timelineStartTime != null) {
+            timelineStartTime = roundToThreeDecimals(timelineStartTime);
+            segmentToUpdate.setTimelineStartTime(timelineStartTime);
+            timelineOrLayerChanged = true;
+        }
+        if (timelineEndTime != null) {
+            timelineEndTime = roundToThreeDecimals(timelineEndTime);
+            segmentToUpdate.setTimelineEndTime(timelineEndTime);
+            timelineOrLayerChanged = true;
+        }
+        if (startTime != null) {
+            startTime = roundToThreeDecimals(startTime);
+            segmentToUpdate.setStartTime(Math.max(0, startTime));
+        }
+        if (endTime != null) {
+            endTime = roundToThreeDecimals(endTime);
+            segmentToUpdate.setEndTime(endTime);
+            double originalVideoDuration = getVideoDuration(segmentToUpdate.getSourceVideoPath());
+            if (endTime > originalVideoDuration) {
+                segmentToUpdate.setEndTime(roundToThreeDecimals(originalVideoDuration));
             }
         }
+        // Update crop fields
+        if (cropL != null) segmentToUpdate.setCropL(cropL);
+        if (cropR != null) segmentToUpdate.setCropR(cropR);
+        if (cropT != null) segmentToUpdate.setCropT(cropT);
+        if (cropB != null) segmentToUpdate.setCropB(cropB);
+
+        // Ensure timeline duration reflects rounded values
+        double newTimelineDuration = roundToThreeDecimals(segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime());
+        double newClipDuration = roundToThreeDecimals(segmentToUpdate.getEndTime() - segmentToUpdate.getStartTime());
+        if (newTimelineDuration < newClipDuration) {
+            segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newClipDuration));
+        }
+
 
         // Validate timeline position with rounded values
         TimelineState timelineState = session.getTimelineState();
@@ -673,8 +673,7 @@ public class VideoEditingService {
                                   String fontFamily, Double scale, String fontColor, String backgroundColor,
                                   Integer positionX, Integer positionY, Double opacity, String alignment,
                                   Double backgroundOpacity, Integer backgroundBorderWidth, String backgroundBorderColor,
-                                  Integer backgroundPadding, String shadowColor, Integer shadowOffsetX,
-                                  Integer shadowOffsetY, Double shadowBlurRadius, Double shadowSpread, Double shadowOpacity,
+                                  Integer backgroundPadding,
                                   Integer backgroundBorderRadius) {
         EditSession session = getSession(sessionId);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
@@ -703,13 +702,7 @@ public class VideoEditingService {
         textSegment.setBackgroundBorderColor(backgroundBorderColor != null ? backgroundBorderColor : "transparent");
         textSegment.setBackgroundPadding(backgroundPadding);
         textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
-        // Set shadow properties
-        textSegment.setShadowColor(shadowColor != null ? shadowColor : "transparent");
-        textSegment.setShadowOffsetX(shadowOffsetX);
-        textSegment.setShadowOffsetY(shadowOffsetY);
-        textSegment.setShadowBlurRadius(shadowBlurRadius);
-        textSegment.setShadowSpread(shadowSpread);
-        textSegment.setShadowOpacity(shadowOpacity);
+
 
         session.getTimelineState().getTextSegments().add(textSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -734,12 +727,6 @@ public class VideoEditingService {
             Integer backgroundBorderWidth,
             String backgroundBorderColor,
             Integer backgroundPadding,
-            String shadowColor,
-            Integer shadowOffsetX,
-            Integer shadowOffsetY,
-            Double shadowBlurRadius,
-            Double shadowSpread,
-            Double shadowOpacity,
             Integer backgroundBorderRadius,
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
@@ -781,44 +768,37 @@ public class VideoEditingService {
                         break;
                 }
             }
-        } else {
-            if (text != null) textSegment.setText(text);
-            if (fontFamily != null) textSegment.setFontFamily(fontFamily);
-            if (scale != null) textSegment.setScale(scale);
-            if (fontColor != null) textSegment.setFontColor(fontColor);
-            if (backgroundColor != null) textSegment.setBackgroundColor(backgroundColor);
-            if (positionX != null) textSegment.setPositionX(positionX);
-            if (positionY != null) textSegment.setPositionY(positionY);
-            if (opacity != null) textSegment.setOpacity(opacity);
-            if (timelineStartTime != null) {
-                timelineStartTime = roundToThreeDecimals(timelineStartTime);
-                textSegment.setTimelineStartTime(timelineStartTime);
-                timelineOrLayerChanged = true;
-            }
-            if (timelineEndTime != null) {
-                timelineEndTime = roundToThreeDecimals(timelineEndTime);
-                textSegment.setTimelineEndTime(timelineEndTime);
-                timelineOrLayerChanged = true;
-            }
-            if (layer != null) {
-                textSegment.setLayer(layer);
-                timelineOrLayerChanged = true;
-            }
-            if (alignment != null) textSegment.setAlignment(alignment);
-            // Update background properties
-            if (backgroundOpacity != null) textSegment.setBackgroundOpacity(backgroundOpacity);
-            if (backgroundBorderWidth != null) textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
-            if (backgroundBorderColor != null) textSegment.setBackgroundBorderColor(backgroundBorderColor);
-            if (backgroundPadding != null) textSegment.setBackgroundPadding(backgroundPadding);
-            if (backgroundBorderRadius != null) textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
-            // Update shadow properties
-            if (shadowColor != null) textSegment.setShadowColor(shadowColor);
-            if (shadowOffsetX != null) textSegment.setShadowOffsetX(shadowOffsetX);
-            if (shadowOffsetY != null) textSegment.setShadowOffsetY(shadowOffsetY);
-            if (shadowBlurRadius != null) textSegment.setShadowBlurRadius(shadowBlurRadius);
-            if (shadowSpread != null) textSegment.setShadowSpread(shadowSpread);
-            if (shadowOpacity != null) textSegment.setShadowOpacity(shadowOpacity);
         }
+
+        // Update non-keyframed properties
+        if (text != null) textSegment.setText(text);
+        if (fontFamily != null) textSegment.setFontFamily(fontFamily);
+        if (scale != null && (keyframes == null || !keyframes.containsKey("scale"))) textSegment.setScale(scale);
+        if (fontColor != null) textSegment.setFontColor(fontColor);
+        if (backgroundColor != null) textSegment.setBackgroundColor(backgroundColor);
+        if (positionX != null && (keyframes == null || !keyframes.containsKey("positionX"))) textSegment.setPositionX(positionX);
+        if (positionY != null && (keyframes == null || !keyframes.containsKey("positionY"))) textSegment.setPositionY(positionY);
+        if (opacity != null && (keyframes == null || !keyframes.containsKey("opacity"))) textSegment.setOpacity(opacity);
+        if (timelineStartTime != null) {
+            timelineStartTime = roundToThreeDecimals(timelineStartTime);
+            textSegment.setTimelineStartTime(timelineStartTime);
+            timelineOrLayerChanged = true;
+        }
+        if (timelineEndTime != null) {
+            timelineEndTime = roundToThreeDecimals(timelineEndTime);
+            textSegment.setTimelineEndTime(timelineEndTime);
+            timelineOrLayerChanged = true;
+        }
+        if (layer != null) {
+            textSegment.setLayer(layer);
+            timelineOrLayerChanged = true;
+        }
+        if (alignment != null) textSegment.setAlignment(alignment);
+        if (backgroundOpacity != null) textSegment.setBackgroundOpacity(backgroundOpacity);
+        if (backgroundBorderWidth != null) textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
+        if (backgroundBorderColor != null) textSegment.setBackgroundBorderColor(backgroundBorderColor);
+        if (backgroundPadding != null) textSegment.setBackgroundPadding(backgroundPadding);
+        if (backgroundBorderRadius != null) textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
 
         // Validate timeline position
         TimelineState timelineState = session.getTimelineState();
@@ -1041,7 +1021,7 @@ public class VideoEditingService {
                     targetSegment.setVolume(null);
                 }
             }
-        } else {
+        }
             boolean timelineChanged = false;
             if (timelineStartTime != null) {
                 // MODIFIED: Round timelineStartTime to three decimal places
@@ -1135,7 +1115,6 @@ public class VideoEditingService {
                 targetSegment.setLayer(originalLayer);
                 throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + targetSegment.getLayer());
             }
-        }
 
         session.setLastAccessTime(System.currentTimeMillis());
     }
@@ -1362,8 +1341,6 @@ public class VideoEditingService {
             Integer customWidth,
             Integer customHeight,
             Boolean maintainAspectRatio,
-            Map<String, String> filters,
-            List<String> filtersToRemove,
             Double timelineStartTime,
             Double timelineEndTime,
             Double cropL, // New parameter
@@ -1440,7 +1417,7 @@ public class VideoEditingService {
                         break;
                 }
             }
-        } else {
+        }
             if (positionX != null) targetSegment.setPositionX(positionX);
             if (positionY != null) targetSegment.setPositionY(positionY);
             if (scale != null) targetSegment.setScale(scale);
@@ -1467,20 +1444,6 @@ public class VideoEditingService {
             if (cropR != null) targetSegment.setCropR(cropR);
             if (cropT != null) targetSegment.setCropT(cropT);
             if (cropB != null) targetSegment.setCropB(cropB);
-            if (filters != null && !filters.isEmpty()) {
-                for (Map.Entry<String, String> filter : filters.entrySet()) {
-                    Filter newFilter = new Filter();
-                    newFilter.setSegmentId(targetSegment.getId());
-                    newFilter.setFilterName(filter.getKey());
-                    newFilter.setFilterValue(filter.getValue());
-                    timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(targetSegment.getId()) && f.getFilterName().equals(filter.getKey()));
-                    timelineState.getFilters().add(newFilter);
-                }
-            }
-            if (filtersToRemove != null && !filtersToRemove.isEmpty()) {
-                timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(targetSegment.getId()) && filtersToRemove.contains(f.getFilterId()));
-            }
-        }
 
         // Validate timeline position
         timelineState.getImageSegments().remove(targetSegment);
@@ -2070,787 +2033,813 @@ public class VideoEditingService {
         for (Object segment : allSegments) {
             String outputLabel = "ov" + overlayCount++;
 
-            if (segment instanceof VideoSegment) {
-                VideoSegment vs = (VideoSegment) segment;
-                String inputIdx = videoInputIndices.get(vs.getId());
+        if (segment instanceof VideoSegment) {
+            VideoSegment vs = (VideoSegment) segment;
+            String inputIdx = videoInputIndices.get(vs.getId());
 
-                filterComplex.append("[").append(inputIdx).append(":v]");
-                filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
-                filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
+            filterComplex.append("[").append(inputIdx).append(":v]");
+            filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
+            filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
 
-                // Apply crop filter based on cropL, cropR, cropT, cropB
-                double cropL = vs.getCropL() != null ? vs.getCropL() : 0.0;
-                double cropR = vs.getCropR() != null ? vs.getCropR() : 0.0;
-                double cropT = vs.getCropT() != null ? vs.getCropT() : 0.0;
-                double cropB = vs.getCropB() != null ? vs.getCropB() : 0.0;
+            // Apply crop filter based on cropL, cropR, cropT, cropB
+            double cropL = vs.getCropL() != null ? vs.getCropL() : 0.0;
+            double cropR = vs.getCropR() != null ? vs.getCropR() : 0.0;
+            double cropT = vs.getCropT() != null ? vs.getCropT() : 0.0;
+            double cropB = vs.getCropB() != null ? vs.getCropB() : 0.0;
 
-                // Validate crop percentages
-                if (cropL < 0 || cropL > 100 || cropR < 0 || cropR > 100 || cropT < 0 || cropT > 100 || cropB < 0 || cropB > 100) {
-                    throw new IllegalArgumentException("Crop percentages must be between 0 and 100 for segment " + vs.getId());
-                }
-                if (cropL + cropR >= 100 || cropT + cropB >= 100) {
-                    throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + vs.getId());
-                }
+            // Validate crop percentages
+            if (cropL < 0 || cropL > 100 || cropR < 0 || cropR > 100 || cropT < 0 || cropT > 100 || cropB < 0 || cropB > 100) {
+                throw new IllegalArgumentException("Crop percentages must be between 0 and 100 for segment " + vs.getId());
+            }
+            if (cropL + cropR >= 100 || cropT + cropB >= 100) {
+                throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + vs.getId());
+            }
 
-                // Calculate crop parameters
-                String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
-                String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
-                String cropX = String.format("iw*%.6f", cropL / 100.0);
-                String cropY = String.format("ih*%.6f", cropT / 100.0);
+            // Calculate crop parameters
+            String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+            String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+            String cropX = String.format("iw*%.6f", cropL / 100.0);
+            String cropY = String.format("ih*%.6f", cropT / 100.0);
 
-                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
-                    filterComplex.append("crop=").append(cropWidth).append(":")
-                            .append(cropHeight).append(":")
-                            .append(cropX).append(":")
-                            .append(cropY).append(",");
-                    System.out.println("Crop filter for video segment " + vs.getId() + ": w=" + cropWidth +
-                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
-                }
+            if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                filterComplex.append("crop=").append(cropWidth).append(":")
+                        .append(cropHeight).append(":")
+                        .append(cropX).append(":")
+                        .append(cropY).append(",");
+                System.out.println("Crop filter for video segment " + vs.getId() + ": w=" + cropWidth +
+                        ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+            }
 
-                // Apply filters
-                List<Filter> segmentFilters = timelineState.getFilters().stream()
-                        .filter(f -> f.getSegmentId().equals(vs.getId()))
-                        .collect(Collectors.toList());
-                for (Filter filter : segmentFilters) {
-                    if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
-                        System.err.println("Skipping invalid filter for segment " + vs.getId() + ": null or empty filter name");
-                        continue;
-                    }
-                    String filterName = filter.getFilterName().toLowerCase().trim();
-                    String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
-                    if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "invert").contains(filterName)) {
-                        System.err.println("Skipping filter " + filterName + " for segment " + vs.getId() + ": empty filter value");
-                        continue;
-                    }
-                    try {
-                        switch (filterName) {
-                            case "brightness":
-                                double brightness = Double.parseDouble(filterValue);
-                                if (brightness >= -1 && brightness <= 1) {
-                                    double cssBrightnessMultiplier = 1 + brightness;
-                                    if (cssBrightnessMultiplier <= 0) {
-                                        filterComplex.append("lutrgb=r=0:g=0:b=0,");
-                                        break;
-                                    }
-                                    if (cssBrightnessMultiplier == 1.0) {
-                                        break;
-                                    }
-                                    filterComplex.append("format=rgb24,");
-                                    String lut = String.format(
-                                            "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
-                                            cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
-                                    );
-                                    filterComplex.append(lut);
-                                    filterComplex.append("format=yuv420p,");
-                                }
-                                break;
-                            case "contrast":
-                                double contrast = Double.parseDouble(filterValue);
-                                if (contrast >= 0 && contrast <= 2) {
-                                    if (contrast == 1.0) {
-                                        break;
-                                    }
-                                    filterComplex.append("format=rgb24,");
-                                    double offset = 128 * (1 - contrast);
-                                    String lut = String.format(
-                                            "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
-                                            contrast, offset, contrast, offset, contrast, offset
-                                    );
-                                    filterComplex.append(lut);
-                                    filterComplex.append("format=yuv420p,");
-                                }
-                                break;
-                            case "saturation":
-                                double saturation = Double.parseDouble(filterValue);
-                                if (saturation >= 0 && saturation <= 2) {
-                                    if (Math.abs(saturation - 1.0) < 0.01) {
-                                        System.out.println("Skipping saturation filter for segment " + vs.getId() + ": value ≈ 1 (" + saturation + ")");
-                                        break;
-                                    }
-                                    System.out.println("Applying saturation filter for segment " + vs.getId() + ": frontend=" + saturation);
-                                    filterComplex.append("eq=saturation=").append(String.format("%.2f", saturation)).append(",");
-                                }
-                                break;
-                            case "hue":
-                                double hue = Double.parseDouble(filterValue);
-                                if (hue >= -180 && hue <= 180) {
-                                    if (hue == 0.0) {
-                                        break;
-                                    }
-                                    filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
-                                }
-                                break;
-                            case "grayscale":
-                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                    filterComplex.append("hue=s=0,");
-                                }
-                                break;
-                            case "invert":
-                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                    filterComplex.append("negate,");
-                                }
-                                break;
-                            // Inside the ImageSegment processing block, under the "rotate" case:
-                            case "rotate":
-                                double rotate = Double.parseDouble(filterValue);
-                                if (rotate >= -180 && rotate <= 180) {
-                                    double angleRad = Math.toRadians(rotate);
-                                    filterComplex.append("rotate=").append(angleRad)
-                                            .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
-                                            .append(":c=black,");
-                                }
-                                break;
-                            case "flip":
-                                if (filterValue.equals("horizontal")) {
-                                    filterComplex.append("hflip,");
-                                } else if (filterValue.equals("vertical")) {
-                                    filterComplex.append("vflip,");
-                                }
-                                break;
-                            default:
-                                System.err.println("Unsupported filter: " + filterName + " for segment " + vs.getId());
-                                break;
-                        }
-                    } catch (NumberFormatException e) {
-                        System.err.println("Invalid filter value for " + filterName + " in segment " + vs.getId() + ": " + filterValue);
-                    }
-                }
-
-                // Apply transitions and get position and crop parameters
-                List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                        .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(vs.getId())) ||
-                                (t.getFromSegmentId() != null && t.getFromSegmentId().equals(vs.getId())))
-                        .filter(t -> t.getLayer() == vs.getLayer())
-                        .collect(Collectors.toList());
-
-                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, vs.getTimelineStartTime(), vs.getTimelineEndTime(), canvasWidth, canvasHeight);
-
-                // Apply crop filter for wipe transition
-                boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
-                        !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
-                if (hasCrop) {
-                    double transStart = vs.getTimelineStartTime();
-                    double transEnd = Math.min(vs.getTimelineStartTime() + 1.0, vs.getTimelineEndTime());
-                    filterComplex.append("crop=")
-                            .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
-                            .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
-                            .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
-                            .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
-                            .append(",");
-                    System.out.println("Crop filter for segment " + vs.getId() + ": w=" + transitionOffsets.get("cropWidth") +
-                            ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
-                            ", enabled between t=" + transStart + " and t=" + transEnd);
-                }
-
-                // Apply rotation from transition
-                String rotationExpr = transitionOffsets.get("rotation");
-                if (rotationExpr != null && !rotationExpr.equals("0")) {
-                    filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
-                    System.out.println("Rotation applied to segment " + vs.getId() + ": " + rotationExpr);
-                }
-
-                // Handle scaling with keyframes
-                StringBuilder scaleExpr = new StringBuilder();
-                List<Keyframe> scaleKeyframes = vs.getKeyframes().getOrDefault("scale", new ArrayList<>());
-                double defaultScale = vs.getScale() != null ? vs.getScale() : 1.0;
-
-                if (!scaleKeyframes.isEmpty()) {
-                    Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
-                    scaleExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < scaleKeyframes.size(); j++) {
-                        Keyframe prevKf = scaleKeyframes.get(j - 1);
-                        Keyframe kf = scaleKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = vs.getTimelineStartTime() + kfTime;
-                            scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
-                    }
-                } else {
-                    scaleExpr.append(String.format("%.6f", defaultScale));
-                }
-
-                // Apply transition scale multiplier
-                String transitionScale = transitionOffsets.get("scale");
-                if (!transitionScale.equals("1")) {
-                    scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
-                }
-
-                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
-
-                // Handle position X with keyframes
-                StringBuilder xExpr = new StringBuilder();
-                List<Keyframe> posXKeyframes = vs.getKeyframes().getOrDefault("positionX", new ArrayList<>());
-                Integer defaultPosX = vs.getPositionX();
-                double baseX = defaultPosX != null ? defaultPosX : 0;
-
-                if (!posXKeyframes.isEmpty()) {
-                    Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
-                    xExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posXKeyframes.size(); j++) {
-                        Keyframe prevKf = posXKeyframes.get(j - 1);
-                        Keyframe kf = posXKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = vs.getTimelineStartTime() + kfTime;
-                            xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
-                    }
-                } else {
-                    xExpr.append(String.format("%.6f", baseX));
-                }
-
-                // Add transition offset for x
-                String xTransitionOffset = transitionOffsets.get("x");
-                if (!xTransitionOffset.equals("0")) {
-                    xExpr.append("+").append(xTransitionOffset);
-                }
-                xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
-
-                // Handle position Y with keyframes
-                StringBuilder yExpr = new StringBuilder();
-                List<Keyframe> posYKeyframes = vs.getKeyframes().getOrDefault("positionY", new ArrayList<>());
-                Integer defaultPosY = vs.getPositionY();
-                double baseY = defaultPosY != null ? defaultPosY : 0;
-
-                if (!posYKeyframes.isEmpty()) {
-                    Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
-                    yExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posYKeyframes.size(); j++) {
-                        Keyframe prevKf = posYKeyframes.get(j - 1);
-                        Keyframe kf = posYKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = vs.getTimelineStartTime() + kfTime;
-                            yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
-                    }
-                } else {
-                    yExpr.append(String.format("%.6f", baseY));
-                }
-
-                // Add transition offset for y
-                String yTransitionOffset = transitionOffsets.get("y");
-                if (!yTransitionOffset.equals("0")) {
-                    yExpr.append("+").append(yTransitionOffset);
-                }
-                yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
-
-                // Overlay the scaled video onto the previous output
-                filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
-                filterComplex.append(":enable='between(t,").append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime()).append(")'");
-                filterComplex.append("[ov").append(outputLabel).append("];");
-                System.out.println("Video segment filter chain for " + vs.getId() + ": " +
-                        filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
-                lastOutput = "ov" + outputLabel;
-            } else if (segment instanceof ImageSegment) {
-                ImageSegment is = (ImageSegment) segment;
-                String inputIdx = videoInputIndices.get(is.getId());
-                double segmentDuration = is.getTimelineEndTime() - is.getTimelineStartTime();
-
-                filterComplex.append("[").append(inputIdx).append(":v]");
-                filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
-                filterComplex.append("setpts=PTS-STARTPTS+").append(is.getTimelineStartTime()).append("/TB,");
-
-                // Apply crop filter based on cropL, cropR, cropT, cropB
-                double cropL = is.getCropL() != null ? is.getCropL() : 0.0;
-                double cropR = is.getCropR() != null ? is.getCropR() : 0.0;
-                double cropT = is.getCropT() != null ? is.getCropT() : 0.0;
-                double cropB = is.getCropB() != null ? is.getCropB() : 0.0;
-
-                // Validate crop percentages
-                if (cropL < 0 || cropL > 100 || cropR < 0 || cropR > 100 || cropT < 0 || cropT > 100 || cropB < 0 || cropB > 100) {
-                    throw new IllegalArgumentException("Crop percentages must be between 0 and 100 for segment " + is.getId());
-                }
-                if (cropL + cropR >= 100 || cropT + cropB >= 100) {
-                    throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + is.getId());
-                }
-
-                // Calculate crop parameters
-                String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
-                String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
-                String cropX = String.format("iw*%.6f", cropL / 100.0);
-                String cropY = String.format("ih*%.6f", cropT / 100.0);
-
-                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
-                    filterComplex.append("crop=").append(cropWidth).append(":")
-                            .append(cropHeight).append(":")
-                            .append(cropX).append(":")
-                            .append(cropY).append(",");
-                    System.out.println("Crop filter for image segment " + is.getId() + ": w=" + cropWidth +
-                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
-                }
-
-                // Apply filters
-                List<Filter> segmentFilters = timelineState.getFilters().stream()
-                        .filter(f -> f.getSegmentId().equals(is.getId()))
-                        .collect(Collectors.toList());
-                for (Filter filter : segmentFilters) {
-                    if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
-                        System.err.println("Skipping invalid filter for segment " + is.getId() + ": null or empty filter name");
-                        continue;
-                    }
-                    String filterName = filter.getFilterName().toLowerCase().trim();
-                    String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
-                    if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "invert").contains(filterName)) {
-                        System.err.println("Skipping filter " + filterName + " for segment " + is.getId() + ": empty filter value");
-                        continue;
-                    }
-                    try {
-                        switch (filterName) {
-                            case "brightness":
-                                double brightness = Double.parseDouble(filterValue);
-                                if (brightness >= -1 && brightness <= 1) {
-                                    double cssBrightnessMultiplier = 1 + brightness;
-                                    if (cssBrightnessMultiplier <= 0) {
-                                        filterComplex.append("lutrgb=r=0:g=0:b=0,");
-                                        break;
-                                    }
-                                    if (cssBrightnessMultiplier == 1.0) {
-                                        break;
-                                    }
-                                    filterComplex.append("format=rgb24,");
-                                    String lut = String.format(
-                                            "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
-                                            cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
-                                    );
-                                    filterComplex.append(lut);
-                                    filterComplex.append("format=yuv420p,");
-                                }
-                                break;
-                            case "contrast":
-                                double contrast = Double.parseDouble(filterValue);
-                                if (contrast >= 0 && contrast <= 2) {
-                                    if (contrast == 1.0) {
-                                        break;
-                                    }
-                                    filterComplex.append("format=rgb24,");
-                                    double offset = 128 * (1 - contrast);
-                                    String lut = String.format(
-                                            "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
-                                            contrast, offset, contrast, offset, contrast, offset
-                                    );
-                                    filterComplex.append(lut);
-                                    filterComplex.append("format=yuv420p,");
-                                }
-                                break;
-                            case "saturation":
-                                double saturation = Double.parseDouble(filterValue);
-                                if (saturation >= 0 && saturation <= 2) {
-                                    if (Math.abs(saturation - 1.0) < 0.01) {
-                                        System.out.println("Skipping saturation filter for segment " + is.getId() + ": value ≈ 1 (" + saturation + ")");
-                                        break;
-                                    }
-                                    System.out.println("Applying saturation filter for segment " + is.getId() + ": frontend=" + saturation);
-                                    filterComplex.append("eq=saturation=").append(String.format("%.2f", saturation)).append(",");
-                                }
-                                break;
-                            case "hue":
-                                double hue = Double.parseDouble(filterValue);
-                                if (hue >= -180 && hue <= 180) {
-                                    if (hue == 0.0) {
-                                        break;
-                                    }
-                                    filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
-                                }
-                                break;
-                            case "grayscale":
-                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                    filterComplex.append("hue=s=0,");
-                                }
-                                break;
-                            case "invert":
-                                if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
-                                    filterComplex.append("negate,");
-                                }
-                                break;
-                            // Inside the ImageSegment processing block, under the "rotate" case:
-                            case "rotate":
-                                double rotate = Double.parseDouble(filterValue);
-                                if (rotate >= -180 && rotate <= 180) {
-                                    double angleRad = Math.toRadians(rotate);
-                                    filterComplex.append("rotate=").append(angleRad)
-                                            .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
-                                            .append(":c=black,");
-                                }
-                                break;
-                            case "flip":
-                                if (filterValue.equals("horizontal")) {
-                                    filterComplex.append("hflip,");
-                                } else if (filterValue.equals("vertical")) {
-                                    filterComplex.append("vflip,");
-                                }
-                                break;
-                            default:
-                                System.err.println("Unsupported filter: " + filterName + " for segment " + is.getId());
-                                break;
-                        }
-                    } catch (NumberFormatException e) {
-                        System.err.println("Invalid filter value for " + filterName + " in segment " + is.getId() + ": " + filterValue);
-                    }
-                }
-
-                // Apply transitions and get position and crop parameters
-                List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                        .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(is.getId())) ||
-                                (t.getFromSegmentId() != null && t.getFromSegmentId().equals(is.getId())))
-                        .filter(t -> t.getLayer() == is.getLayer())
-                        .collect(Collectors.toList());
-
-                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, is.getTimelineStartTime(), is.getTimelineEndTime(), canvasWidth, canvasHeight);
-
-                // Apply crop filter for wipe transition
-                boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
-                        !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
-                if (hasCrop) {
-                    double transStart = is.getTimelineStartTime();
-                    double transEnd = Math.min(is.getTimelineStartTime() + 1.0, is.getTimelineEndTime());
-                    filterComplex.append("crop=")
-                            .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
-                            .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
-                            .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
-                            .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
-                            .append(",");
-                    System.out.println("Crop filter for image segment " + is.getId() + ": w=" + transitionOffsets.get("cropWidth") +
-                            ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
-                            ", enabled between t=" + transStart + " and t=" + transEnd);
-                }
-
-                // Apply rotation from transition
-                String rotationExpr = transitionOffsets.get("rotation");
-                if (rotationExpr != null && !rotationExpr.equals("0")) {
-                    filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
-                    System.out.println("Rotation applied to segment " + is.getId() + ": " + rotationExpr);
-                }
-
-                // Handle scaling with keyframes
-                StringBuilder scaleExpr = new StringBuilder();
-                List<Keyframe> scaleKeyframes = is.getKeyframes().getOrDefault("scale", new ArrayList<>());
-                double defaultScale = is.getScale() != null ? is.getScale() : 1.0;
-
-                if (!scaleKeyframes.isEmpty()) {
-                    Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
-                    scaleExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < scaleKeyframes.size(); j++) {
-                        Keyframe prevKf = scaleKeyframes.get(j - 1);
-                        Keyframe kf = scaleKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = is.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = is.getTimelineStartTime() + kfTime;
-                            scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
-                    }
-                } else {
-                    scaleExpr.append(String.format("%.6f", defaultScale));
-                }
-
-                // Apply transition scale multiplier
-                String transitionScale = transitionOffsets.get("scale");
-                if (!transitionScale.equals("1")) {
-                    scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
-                }
-
-                filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
-
-                // Handle position X with keyframes
-                StringBuilder xExpr = new StringBuilder();
-                List<Keyframe> posXKeyframes = is.getKeyframes().getOrDefault("positionX", new ArrayList<>());
-                Integer defaultPosX = is.getPositionX();
-                double baseX = defaultPosX != null ? defaultPosX : 0;
-
-                if (!posXKeyframes.isEmpty()) {
-                    Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
-                    xExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posXKeyframes.size(); j++) {
-                        Keyframe prevKf = posXKeyframes.get(j - 1);
-                        Keyframe kf = posXKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = is.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = is.getTimelineStartTime() + kfTime;
-                            xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
-                    }
-                } else {
-                    xExpr.append(String.format("%.6f", baseX));
-                }
-
-                // Add transition offset for x
-                String xTransitionOffset = transitionOffsets.get("x");
-                if (!xTransitionOffset.equals("0")) {
-                    xExpr.append("+").append(xTransitionOffset);
-                }
-                xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
-
-                // Handle position Y with keyframes
-                StringBuilder yExpr = new StringBuilder();
-                List<Keyframe> posYKeyframes = is.getKeyframes().getOrDefault("positionY", new ArrayList<>());
-                Integer defaultPosY = is.getPositionY();
-                double baseY = defaultPosY != null ? defaultPosY : 0;
-
-                if (!posYKeyframes.isEmpty()) {
-                    Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
-                    yExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posYKeyframes.size(); j++) {
-                        Keyframe prevKf = posYKeyframes.get(j - 1);
-                        Keyframe kf = posYKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = is.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = is.getTimelineStartTime() + kfTime;
-                            yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
-                    }
-                } else {
-                    yExpr.append(String.format("%.6f", baseY));
-                }
-
-                // Add transition offset for y
-                String yTransitionOffset = transitionOffsets.get("y");
-                if (!yTransitionOffset.equals("0")) {
-                    yExpr.append("+").append(yTransitionOffset);
-                }
-                yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
-
-                // Overlay the scaled image onto the previous output
-                filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
-                filterComplex.append(":enable='between(t,").append(is.getTimelineStartTime()).append(",").append(is.getTimelineEndTime()).append(")'");
-                filterComplex.append("[ov").append(outputLabel).append("];");
-                System.out.println("Image segment filter chain for " + is.getId() + ": " +
-                        filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
-                lastOutput = "ov" + outputLabel;
-            } else if (segment instanceof TextSegment) {
-                TextSegment ts = (TextSegment) segment;
-                String inputIdx = textInputIndices.get(ts.getId());
-                if (inputIdx == null) {
-                    System.err.println("Skipping text segment " + ts.getId() + ": no valid PNG input");
+            // Apply filters
+            List<Filter> segmentFilters = timelineState.getFilters().stream()
+                    .filter(f -> f.getSegmentId().equals(vs.getId()))
+                    .collect(Collectors.toList());
+            for (Filter filter : segmentFilters) {
+                if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
+                    System.err.println("Skipping invalid filter for segment " + vs.getId() + ": null or empty filter name");
                     continue;
                 }
-
-                // Apply transitions and get position and crop parameters
-                List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                        .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(ts.getId())) ||
-                                (t.getFromSegmentId() != null && t.getFromSegmentId().equals(ts.getId())))
-                        .filter(t -> t.getLayer() == ts.getLayer())
-                        .collect(Collectors.toList());
-
-                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
-
-                // Process the text PNG input
-                double segmentDuration = ts.getTimelineEndTime() - ts.getTimelineStartTime();
-                filterComplex.append("[").append(inputIdx).append(":v]");
-                filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
-                filterComplex.append("setpts=PTS-STARTPTS+").append(ts.getTimelineStartTime()).append("/TB,");
-
-                // Apply crop filter for wipe transition
-                boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
-                        !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
-                if (hasCrop) {
-                    double transStart = ts.getTimelineStartTime();
-                    double transEnd = Math.min(ts.getTimelineStartTime() + 1.0, ts.getTimelineEndTime());
-                    filterComplex.append("crop=")
-                            .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
-                            .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
-                            .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
-                            .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
-                            .append(",");
-                    System.out.println("Crop filter for text segment " + ts.getId() + ": w=" + transitionOffsets.get("cropWidth") +
-                            ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
-                            ", enabled between t=" + transStart + " and t=" + transEnd);
+                String filterName = filter.getFilterName().toLowerCase().trim();
+                String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
+                if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "invert").contains(filterName)) {
+                    System.err.println("Skipping filter " + filterName + " for segment " + vs.getId() + ": empty filter value");
+                    continue;
                 }
-
-                // Apply rotation from transition
-                String rotationExpr = transitionOffsets.get("rotation");
-                if (rotationExpr != null && !rotationExpr.equals("0")) {
-                    filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=none,");
-                    System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
-                }
-
-                // Handle scaling with keyframes
-                StringBuilder scaleExpr = new StringBuilder();
-                List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
-                double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
-
-// Apply resolution multiplier to scale down high-resolution PNG
-                double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
-                double baseScale = 1.0 / resolutionMultiplier;
-
-                if (!scaleKeyframes.isEmpty()) {
-                    Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
-                    scaleExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < scaleKeyframes.size(); j++) {
-                        Keyframe prevKf = scaleKeyframes.get(j - 1);
-                        Keyframe kf = scaleKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                            scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
+                try {
+                    switch (filterName) {
+                        case "brightness":
+                            double brightness = Double.parseDouble(filterValue);
+                            if (brightness >= -1 && brightness <= 1) {
+                                double cssBrightnessMultiplier = 1 + brightness;
+                                if (cssBrightnessMultiplier <= 0) {
+                                    filterComplex.append("lutrgb=r=0:g=0:b=0,");
+                                    break;
+                                }
+                                if (cssBrightnessMultiplier == 1.0) {
+                                    break;
+                                }
+                                filterComplex.append("format=rgb24,");
+                                String lut = String.format(
+                                        "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
+                                        cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
+                                );
+                                filterComplex.append(lut);
+                                filterComplex.append("format=yuv420p,");
+                            }
+                            break;
+                        case "contrast":
+                            double contrast = Double.parseDouble(filterValue);
+                            if (contrast >= 0 && contrast <= 2) {
+                                if (contrast == 1.0) {
+                                    break;
+                                }
+                                filterComplex.append("format=rgb24,");
+                                double offset = 128 * (1 - contrast);
+                                String lut = String.format(
+                                        "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
+                                        contrast, offset, contrast, offset, contrast, offset
+                                );
+                                filterComplex.append(lut);
+                                filterComplex.append("format=yuv420p,");
+                            }
+                            break;
+                        case "saturation":
+                            double saturation = Double.parseDouble(filterValue);
+                            if (saturation >= 0 && saturation <= 2) {
+                                if (Math.abs(saturation - 1.0) < 0.01) {
+                                    System.out.println("Skipping saturation filter for segment " + vs.getId() + ": value ≈ 1 (" + saturation + ")");
+                                    break;
+                                }
+                                System.out.println("Applying saturation filter for segment " + vs.getId() + ": frontend=" + saturation);
+                                filterComplex.append("eq=saturation=").append(String.format("%.2f", saturation)).append(",");
+                            }
+                            break;
+                        case "hue":
+                            double hue = Double.parseDouble(filterValue);
+                            if (hue >= -180 && hue <= 180) {
+                                if (hue == 0.0) {
+                                    break;
+                                }
+                                filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
+                            }
+                            break;
+                        case "grayscale":
+                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                filterComplex.append("hue=s=0,");
+                            }
+                            break;
+                        case "invert":
+                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                filterComplex.append("negate,");
+                            }
+                            break;
+                        case "rotate":
+                            double rotate = Double.parseDouble(filterValue);
+                            if (rotate >= -180 && rotate <= 180) {
+                                double angleRad = Math.toRadians(rotate);
+                                filterComplex.append("rotate=").append(angleRad)
+                                        .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
+                                        .append(":c=black,");
+                            }
+                            break;
+                        case "flip":
+                            if (filterValue.equals("horizontal")) {
+                                filterComplex.append("hflip,");
+                            } else if (filterValue.equals("vertical")) {
+                                filterComplex.append("vflip,");
+                            }
+                            break;
+                        default:
+                            System.err.println("Unsupported filter: " + filterName + " for segment " + vs.getId());
+                            break;
                     }
-                } else {
-                    scaleExpr.append(String.format("%.6f", defaultScale));
+                } catch (NumberFormatException e) {
+                    System.err.println("Invalid filter value for " + filterName + " in segment " + vs.getId() + ": " + filterValue);
                 }
+            }
 
-// Apply transition scale multiplier
-                String transitionScale = transitionOffsets.get("scale");
-                if (!transitionScale.equals("1")) {
-                    scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
-                }
+            // Apply transitions and get position and crop parameters
+            List<Transition> relevantTransitions = timelineState.getTransitions().stream()
+                    .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(vs.getId())) ||
+                            (t.getFromSegmentId() != null && t.getFromSegmentId().equals(vs.getId())))
+                    .filter(t -> t.getLayer() == vs.getLayer())
+                    .collect(Collectors.toList());
 
-                filterComplex.append("scale=w='iw*").append(baseScale).append("*").append(scaleExpr)
-                        .append("':h='ih*").append(baseScale).append("*").append(scaleExpr)
-                        .append("':flags=lanczos:force_original_aspect_ratio=decrease:eval=frame[scaled").append(outputLabel).append("];");
+            Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, vs.getTimelineStartTime(), vs.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-                // Handle position X with keyframes
-                StringBuilder xExpr = new StringBuilder();
-                List<Keyframe> posXKeyframes = ts.getKeyframes().getOrDefault("positionX", new ArrayList<>());
-                Integer defaultPosX = ts.getPositionX();
-                double baseX = defaultPosX != null ? defaultPosX : 0;
+            // Apply crop filter for wipe transition
+            boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
+                    !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
+            if (hasCrop) {
+                double transStart = vs.getTimelineStartTime();
+                double transEnd = Math.min(vs.getTimelineStartTime() + 1.0, vs.getTimelineEndTime());
+                filterComplex.append("crop=")
+                        .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
+                        .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
+                        .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
+                        .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
+                        .append(",");
+                System.out.println("Crop filter for segment " + vs.getId() + ": w=" + transitionOffsets.get("cropWidth") +
+                        ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
+                        ", enabled between t=" + transStart + " and t=" + transEnd);
+            }
 
-                if (!posXKeyframes.isEmpty()) {
-                    Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
-                    xExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posXKeyframes.size(); j++) {
-                        Keyframe prevKf = posXKeyframes.get(j - 1);
-                        Keyframe kf = posXKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
+            // Apply rotation from transition
+            String rotationExpr = transitionOffsets.get("rotation");
+            if (rotationExpr != null && !rotationExpr.equals("0")) {
+                filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
+                System.out.println("Rotation applied to segment " + vs.getId() + ": " + rotationExpr);
+            }
 
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                            xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
+            // Apply opacity (CORRECTED)
+            double opacity = vs.getOpacity() != null ? vs.getOpacity() : 1.0;
+            if (opacity < 1.0) {
+                filterComplex.append("format=rgba,");
+                filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
+                filterComplex.append("format=rgba,");
+                System.out.println("Opacity applied to video segment " + vs.getId() + ": " + opacity);
+            }
+
+            // Handle scaling with keyframes
+            StringBuilder scaleExpr = new StringBuilder();
+            List<Keyframe> scaleKeyframes = vs.getKeyframes().getOrDefault("scale", new ArrayList<>());
+            double defaultScale = vs.getScale() != null ? vs.getScale() : 1.0;
+
+            if (!scaleKeyframes.isEmpty()) {
+                Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
+                scaleExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < scaleKeyframes.size(); j++) {
+                    Keyframe prevKf = scaleKeyframes.get(j - 1);
+                    Keyframe kf = scaleKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = vs.getTimelineStartTime() + kfTime;
+                        scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                     }
-                } else {
-                    xExpr.append(String.format("%.6f", baseX));
                 }
+            } else {
+                scaleExpr.append(String.format("%.6f", defaultScale));
+            }
 
-                // Add transition offset for x
-                String xTransitionOffset = transitionOffsets.get("x");
-                if (!xTransitionOffset.equals("0")) {
-                    xExpr.append("+").append(xTransitionOffset);
-                }
-                xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
+            // Apply transition scale multiplier
+            String transitionScale = transitionOffsets.get("scale");
+            if (!transitionScale.equals("1")) {
+                scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
+            }
 
-                // Handle position Y with keyframes
-                StringBuilder yExpr = new StringBuilder();
-                List<Keyframe> posYKeyframes = ts.getKeyframes().getOrDefault("positionY", new ArrayList<>());
-                Integer defaultPosY = ts.getPositionY();
-                double baseY = defaultPosY != null ? defaultPosY : 0;
+            filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
 
-                if (!posYKeyframes.isEmpty()) {
-                    Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                    double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
-                    yExpr.append(String.format("%.6f", firstKfValue));
-                    for (int j = 1; j < posYKeyframes.size(); j++) {
-                        Keyframe prevKf = posYKeyframes.get(j - 1);
-                        Keyframe kf = posYKeyframes.get(j);
-                        double prevTime = prevKf.getTime();
-                        double kfTime = kf.getTime();
-                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                        double kfValue = ((Number) kf.getValue()).doubleValue();
+            // Handle position X with keyframes
+            StringBuilder xExpr = new StringBuilder();
+            List<Keyframe> posXKeyframes = vs.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+            Integer defaultPosX = vs.getPositionX();
+            double baseX = defaultPosX != null ? defaultPosX : 0;
 
-                        if (kfTime > prevTime) {
-                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
-                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                            yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                        }
+            if (!posXKeyframes.isEmpty()) {
+                Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
+                xExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < posXKeyframes.size(); j++) {
+                    Keyframe prevKf = posXKeyframes.get(j - 1);
+                    Keyframe kf = posXKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = vs.getTimelineStartTime() + kfTime;
+                        xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                     }
-                } else {
-                    yExpr.append(String.format("%.6f", baseY));
                 }
+            } else {
+                xExpr.append(String.format("%.6f", baseX));
+            }
 
-                // Add transition offset for y
-                String yTransitionOffset = transitionOffsets.get("y");
-                if (!yTransitionOffset.equals("0")) {
-                    yExpr.append("+").append(yTransitionOffset);
+            // Add transition offset for x
+            String xTransitionOffset = transitionOffsets.get("x");
+            if (!xTransitionOffset.equals("0")) {
+                xExpr.append("+").append(xTransitionOffset);
+            }
+            xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
+
+            // Handle position Y with keyframes
+            StringBuilder yExpr = new StringBuilder();
+            List<Keyframe> posYKeyframes = vs.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+            Integer defaultPosY = vs.getPositionX();
+            double baseY = defaultPosY != null ? defaultPosY : 0;
+
+            if (!posYKeyframes.isEmpty()) {
+                Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
+                yExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < posYKeyframes.size(); j++) {
+                    Keyframe prevKf = posYKeyframes.get(j - 1);
+                    Keyframe kf = posYKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = vs.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = vs.getTimelineStartTime() + kfTime;
+                        yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
                 }
-                yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
+            } else {
+                yExpr.append(String.format("%.6f", baseY));
+            }
 
-                // Overlay the scaled text PNG onto the previous output
-                filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
-                filterComplex.append(":enable='between(t,").append(ts.getTimelineStartTime()).append(",").append(ts.getTimelineEndTime()).append(")'");
-                filterComplex.append("[ov").append(outputLabel).append("];");
-                System.out.println("Text segment filter chain for " + ts.getId() + ": " +
-                        filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
-                lastOutput = "ov" + outputLabel;
+            // Add transition offset for y
+            String yTransitionOffset = transitionOffsets.get("y");
+            if (!yTransitionOffset.equals("0")) {
+                yExpr.append("+").append(yTransitionOffset);
+            }
+            yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
+
+            // Overlay the scaled video onto the previous output
+            filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
+            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
+            filterComplex.append(":enable='between(t,").append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime()).append(")'");
+            filterComplex.append("[ov").append(outputLabel).append("];");
+            System.out.println("Video segment filter chain for " + vs.getId() + ": " +
+                    filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
+            lastOutput = "ov" + outputLabel;
+        } else if (segment instanceof ImageSegment) {
+            ImageSegment is = (ImageSegment) segment;
+            String inputIdx = videoInputIndices.get(is.getId());
+            double segmentDuration = is.getTimelineEndTime() - is.getTimelineStartTime();
+
+            filterComplex.append("[").append(inputIdx).append(":v]");
+            filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
+            filterComplex.append("setpts=PTS-STARTPTS+").append(is.getTimelineStartTime()).append("/TB,");
+
+            // Apply crop filter based on cropL, cropR, cropT, cropB
+            double cropL = is.getCropL() != null ? is.getCropL() : 0.0;
+            double cropR = is.getCropR() != null ? is.getCropR() : 0.0;
+            double cropT = is.getCropT() != null ? is.getCropT() : 0.0;
+            double cropB = is.getCropB() != null ? is.getCropB() : 0.0;
+
+            // Validate crop percentages
+            if (cropL < 0 || cropL > 100 || cropR < 0 || cropR > 100 || cropT < 0 || cropT > 100 || cropB < 0 || cropB > 100) {
+                throw new IllegalArgumentException("Crop percentages must be between 0 and 100 for segment " + is.getId());
+            }
+            if (cropL + cropR >= 100 || cropT + cropB >= 100) {
+                throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + is.getId());
+            }
+
+            // Calculate crop parameters
+            String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+            String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+            String cropX = String.format("iw*%.6f", cropL / 100.0);
+            String cropY = String.format("ih*%.6f", cropT / 100.0);
+
+            if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                filterComplex.append("crop=").append(cropWidth).append(":")
+                        .append(cropHeight).append(":")
+                        .append(cropX).append(":")
+                        .append(cropY).append(",");
+                System.out.println("Crop filter for image segment " + is.getId() + ": w=" + cropWidth +
+                        ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+            }
+
+            // Apply filters
+            List<Filter> segmentFilters = timelineState.getFilters().stream()
+                    .filter(f -> f.getSegmentId().equals(is.getId()))
+                    .collect(Collectors.toList());
+            for (Filter filter : segmentFilters) {
+                if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
+                    System.err.println("Skipping invalid filter for segment " + is.getId() + ": null or empty filter name");
+                    continue;
+                }
+                String filterName = filter.getFilterName().toLowerCase().trim();
+                String filterValue = filter.getFilterValue() != null ? String.valueOf(filter.getFilterValue()) : "";
+                if (filterValue.isEmpty() && !Arrays.asList("grayscale", "sepia", "invert").contains(filterName)) {
+                    System.err.println("Skipping filter " + filterName + " for segment " + is.getId() + ": empty filter value");
+                    continue;
+                }
+                try {
+                    switch (filterName) {
+                        case "brightness":
+                            double brightness = Double.parseDouble(filterValue);
+                            if (brightness >= -1 && brightness <= 1) {
+                                double cssBrightnessMultiplier = 1 + brightness;
+                                if (cssBrightnessMultiplier <= 0) {
+                                    filterComplex.append("lutrgb=r=0:g=0:b=0,");
+                                    break;
+                                }
+                                if (cssBrightnessMultiplier == 1.0) {
+                                    break;
+                                }
+                                filterComplex.append("format=rgb24,");
+                                String lut = String.format(
+                                        "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
+                                        cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
+                                );
+                                filterComplex.append(lut);
+                                filterComplex.append("format=yuv420p,");
+                            }
+                            break;
+                        case "contrast":
+                            double contrast = Double.parseDouble(filterValue);
+                            if (contrast >= 0 && contrast <= 2) {
+                                if (contrast == 1.0) {
+                                    break;
+                                }
+                                filterComplex.append("format=rgb24,");
+                                double offset = 128 * (1 - contrast);
+                                String lut = String.format(
+                                        "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
+                                        contrast, offset, contrast, offset, contrast, offset
+                                );
+                                filterComplex.append(lut);
+                                filterComplex.append("format=yuv420p,");
+                            }
+                            break;
+                        case "saturation":
+                            double saturation = Double.parseDouble(filterValue);
+                            if (saturation >= 0 && saturation <= 2) {
+                                if (Math.abs(saturation - 1.0) < 0.01) {
+                                    System.out.println("Skipping saturation filter for segment " + is.getId() + ": value ≈ 1 (" + saturation + ")");
+                                    break;
+                                }
+                                System.out.println("Applying saturation filter for segment " + is.getId() + ": frontend=" + saturation);
+                                filterComplex.append("eq=saturation=").append(String.format("%.2f", saturation)).append(",");
+                            }
+                            break;
+                        case "hue":
+                            double hue = Double.parseDouble(filterValue);
+                            if (hue >= -180 && hue <= 180) {
+                                if (hue == 0.0) {
+                                    break;
+                                }
+                                filterComplex.append("hue=h=").append(String.format("%.1f", hue)).append(",");
+                            }
+                            break;
+                        case "grayscale":
+                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                filterComplex.append("hue=s=0,");
+                            }
+                            break;
+                        case "invert":
+                            if (!filterValue.isEmpty() && Double.parseDouble(filterValue) > 0) {
+                                filterComplex.append("negate,");
+                            }
+                            break;
+                        case "rotate":
+                            double rotate = Double.parseDouble(filterValue);
+                            if (rotate >= -180 && rotate <= 180) {
+                                double angleRad = Math.toRadians(rotate);
+                                filterComplex.append("rotate=").append(angleRad)
+                                        .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
+                                        .append(":c=black,");
+                            }
+                            break;
+                        case "flip":
+                            if (filterValue.equals("horizontal")) {
+                                filterComplex.append("hflip,");
+                            } else if (filterValue.equals("vertical")) {
+                                filterComplex.append("vflip,");
+                            }
+                            break;
+                        default:
+                            System.err.println("Unsupported filter: " + filterName + " for segment " + is.getId());
+                            break;
+                    }
+                } catch (NumberFormatException e) {
+                    System.err.println("Invalid filter value for " + filterName + " in segment " + is.getId() + ": " + filterValue);
+                }
+            }
+
+            // Apply transitions and get position and crop parameters
+            List<Transition> relevantTransitions = timelineState.getTransitions().stream()
+                    .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(is.getId())) ||
+                            (t.getFromSegmentId() != null && t.getFromSegmentId().equals(is.getId())))
+                    .filter(t -> t.getLayer() == is.getLayer())
+                    .collect(Collectors.toList());
+
+            Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, is.getTimelineStartTime(), is.getTimelineEndTime(), canvasWidth, canvasHeight);
+
+            // Apply crop filter for wipe transition
+            boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
+                    !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
+            if (hasCrop) {
+                double transStart = is.getTimelineStartTime();
+                double transEnd = Math.min(is.getTimelineStartTime() + 1.0, is.getTimelineEndTime());
+                filterComplex.append("crop=")
+                        .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
+                        .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
+                        .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
+                        .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
+                        .append(",");
+                System.out.println("Crop filter for image segment " + is.getId() + ": w=" + transitionOffsets.get("cropWidth") +
+                        ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
+                        ", enabled between t=" + transStart + " and t=" + transEnd);
+            }
+
+            // Apply rotation from transition
+            String rotationExpr = transitionOffsets.get("rotation");
+            if (rotationExpr != null && !rotationExpr.equals("0")) {
+                filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
+                System.out.println("Rotation applied to segment " + is.getId() + ": " + rotationExpr);
+            }
+
+            // Apply opacity (NEW)
+            double opacity = is.getOpacity() != null ? is.getOpacity() : 1.0;
+            if (opacity < 1.0) {
+                filterComplex.append("format=rgba,");
+                filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
+                filterComplex.append("format=rgba,");
+                System.out.println("Opacity applied to image segment " + is.getId() + ": " + opacity);
+            }
+
+            // Handle scaling with keyframes
+            StringBuilder scaleExpr = new StringBuilder();
+            List<Keyframe> scaleKeyframes = is.getKeyframes().getOrDefault("scale", new ArrayList<>());
+            double defaultScale = is.getScale() != null ? is.getScale() : 1.0;
+
+            if (!scaleKeyframes.isEmpty()) {
+                Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
+                scaleExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < scaleKeyframes.size(); j++) {
+                    Keyframe prevKf = scaleKeyframes.get(j - 1);
+                    Keyframe kf = scaleKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = is.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = is.getTimelineStartTime() + kfTime;
+                        scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
+                }
+            } else {
+                scaleExpr.append(String.format("%.6f", defaultScale));
+            }
+
+            // Apply transition scale multiplier
+            String transitionScale = transitionOffsets.get("scale");
+            if (!transitionScale.equals("1")) {
+                scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
+            }
+
+            filterComplex.append("scale=w='iw*").append(scaleExpr).append("':h='ih*").append(scaleExpr).append("':eval=frame[scaled").append(outputLabel).append("];");
+
+            // Handle position X with keyframes
+            StringBuilder xExpr = new StringBuilder();
+            List<Keyframe> posXKeyframes = is.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+            Integer defaultPosX = is.getPositionX();
+            double baseX = defaultPosX != null ? defaultPosX : 0;
+
+            if (!posXKeyframes.isEmpty()) {
+                Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
+                xExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < posXKeyframes.size(); j++) {
+                    Keyframe prevKf = posXKeyframes.get(j - 1);
+                    Keyframe kf = posXKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = is.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = is.getTimelineStartTime() + kfTime;
+                        xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
+                }
+            } else {
+                xExpr.append(String.format("%.6f", baseX));
+            }
+
+            // Add transition offset for x
+            String xTransitionOffset = transitionOffsets.get("x");
+            if (!xTransitionOffset.equals("0")) {
+                xExpr.append("+").append(xTransitionOffset);
+            }
+            xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
+
+            // Handle position Y with keyframes
+            StringBuilder yExpr = new StringBuilder();
+            List<Keyframe> posYKeyframes = is.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+            Integer defaultPosY = is.getPositionY();
+            double baseY = defaultPosY != null ? defaultPosY : 0;
+
+            if (!posYKeyframes.isEmpty()) {
+                Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
+                yExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < posYKeyframes.size(); j++) {
+                    Keyframe prevKf = posYKeyframes.get(j - 1);
+                    Keyframe kf = posYKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = is.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = is.getTimelineStartTime() + kfTime;
+                        yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
+                }
+            } else {
+                yExpr.append(String.format("%.6f", baseY));
+            }
+
+            // Add transition offset for y
+            String yTransitionOffset = transitionOffsets.get("y");
+            if (!yTransitionOffset.equals("0")) {
+                yExpr.append("+").append(yTransitionOffset);
+            }
+            yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
+
+            // Overlay the scaled image onto the previous output
+            filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
+            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
+            filterComplex.append(":enable='between(t,").append(is.getTimelineStartTime()).append(",").append(is.getTimelineEndTime()).append(")'");
+            filterComplex.append("[ov").append(outputLabel).append("];");
+            System.out.println("Image segment filter chain for " + is.getId() + ": " +
+                    filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
+            lastOutput = "ov" + outputLabel;
+
+        } else if (segment instanceof TextSegment) {
+            TextSegment ts = (TextSegment) segment;
+            String inputIdx = textInputIndices.get(ts.getId());
+            if (inputIdx == null) {
+                System.err.println("Skipping text segment " + ts.getId() + ": no valid PNG input");
+                continue;
+            }
+
+            // Apply transitions and get position and crop parameters
+            List<Transition> relevantTransitions = timelineState.getTransitions().stream()
+                    .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(ts.getId())) ||
+                            (t.getFromSegmentId() != null && t.getFromSegmentId().equals(ts.getId())))
+                    .filter(t -> t.getLayer() == ts.getLayer())
+                    .collect(Collectors.toList());
+
+            Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
+
+            // Process the text PNG input
+            double segmentDuration = ts.getTimelineEndTime() - ts.getTimelineStartTime();
+            filterComplex.append("[").append(inputIdx).append(":v]");
+            filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
+            filterComplex.append("setpts=PTS-STARTPTS+").append(ts.getTimelineStartTime()).append("/TB,");
+
+            // Apply crop filter for wipe transition
+            boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
+                    !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
+            if (hasCrop) {
+                double transStart = ts.getTimelineStartTime();
+                double transEnd = Math.min(ts.getTimelineStartTime() + 1.0, ts.getTimelineEndTime());
+                filterComplex.append("crop=")
+                        .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
+                        .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
+                        .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
+                        .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
+                        .append(",");
+                System.out.println("Crop filter for text segment " + ts.getId() + ": w=" + transitionOffsets.get("cropWidth") +
+                        ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
+                        ", enabled between t=" + transStart + " and t=" + transEnd);
+            }
+
+            // Apply rotation from transition
+            String rotationExpr = transitionOffsets.get("rotation");
+            if (rotationExpr != null && !rotationExpr.equals("0")) {
+                filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=none,");
+                System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
+            }
+
+            // Apply opacity (NEW)
+            double opacity = ts.getOpacity() != null ? ts.getOpacity() : 1.0;
+            if (opacity < 1.0) {
+                filterComplex.append("format=rgba,");
+                filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
+                filterComplex.append("format=rgba,");
+                System.out.println("Opacity applied to text segment " + ts.getId() + ": " + opacity);
+            }
+
+            // Handle scaling with keyframes
+            StringBuilder scaleExpr = new StringBuilder();
+            List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
+            double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
+
+            // Apply resolution multiplier to scale down high-resolution PNG
+            double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
+            double baseScale = 1.0 / resolutionMultiplier;
+
+            if (!scaleKeyframes.isEmpty()) {
+                Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
+                scaleExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < scaleKeyframes.size(); j++) {
+                    Keyframe prevKf = scaleKeyframes.get(j - 1);
+                    Keyframe kf = scaleKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                        scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
+                }
+            } else {
+                scaleExpr.append(String.format("%.6f", defaultScale));
+            }
+
+            // Apply transition scale multiplier
+            String transitionScale = transitionOffsets.get("scale");
+            if (!transitionScale.equals("1")) {
+                scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
+            }
+
+            filterComplex.append("scale=w='iw*").append(baseScale).append("*").append(scaleExpr)
+                    .append("':h='ih*").append(baseScale).append("*").append(scaleExpr)
+                    .append("':flags=lanczos:force_original_aspect_ratio=decrease:eval=frame[scaled").append(outputLabel).append("];");
+
+            // Handle position X with keyframes
+            StringBuilder xExpr = new StringBuilder();
+            List<Keyframe> posXKeyframes = ts.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+            Integer defaultPosX = ts.getPositionX();
+            double baseX = defaultPosX != null ? defaultPosX : 0;
+
+            if (!posXKeyframes.isEmpty()) {
+                Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
+                xExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < posXKeyframes.size(); j++) {
+                    Keyframe prevKf = posXKeyframes.get(j - 1);
+                    Keyframe kf = posXKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                        xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
+                }
+            } else {
+                xExpr.append(String.format("%.6f", baseX));
+            }
+
+            // Add transition offset for x
+            String xTransitionOffset = transitionOffsets.get("x");
+            if (!xTransitionOffset.equals("0")) {
+                xExpr.append("+").append(xTransitionOffset);
+            }
+            xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
+
+            // Handle position Y with keyframes
+            StringBuilder yExpr = new StringBuilder();
+            List<Keyframe> posYKeyframes = ts.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+            Integer defaultPosY = ts.getPositionY();
+            double baseY = defaultPosY != null ? defaultPosY : 0;
+
+            if (!posYKeyframes.isEmpty()) {
+                Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
+                yExpr.append(String.format("%.6f", firstKfValue));
+                for (int j = 1; j < posYKeyframes.size(); j++) {
+                    Keyframe prevKf = posYKeyframes.get(j - 1);
+                    Keyframe kf = posYKeyframes.get(j);
+                    double prevTime = prevKf.getTime();
+                    double kfTime = kf.getTime();
+                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                    double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                    if (kfTime > prevTime) {
+                        double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                        double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                        yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                    }
+                }
+            } else {
+                yExpr.append(String.format("%.6f", baseY));
+            }
+
+            // Add transition offset for y
+            String yTransitionOffset = transitionOffsets.get("y");
+            if (!yTransitionOffset.equals("0")) {
+                yExpr.append("+").append(yTransitionOffset);
+            }
+            yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
+
+            // Overlay the scaled text PNG onto the previous output
+            filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
+            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
+            filterComplex.append(":enable='between(t,").append(ts.getTimelineStartTime()).append(",").append(ts.getTimelineEndTime()).append(")'");
+            filterComplex.append("[ov").append(outputLabel).append("];");
+            System.out.println("Text segment filter chain for " + ts.getId() + ": " +
+                    filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
+            lastOutput = "ov" + outputLabel;
             }
         }
 
@@ -3021,7 +3010,7 @@ public class VideoEditingService {
     }
 
     private String generateTextPng(TextSegment ts, File tempDir, int canvasWidth, int canvasHeight) throws IOException {
-        // Resolution multiplier for high-quality text (2x for 1080p, 1.5x for 4K to save memory)
+        // Resolution multiplier for high-quality text (1.5 for 4K, 2.0 for 1080p)
         final double RESOLUTION_MULTIPLIER = canvasWidth >= 3840 ? 1.5 : 2.0;
 
         // Parse colors
@@ -3030,15 +3019,6 @@ public class VideoEditingService {
                 parseColor(ts.getBackgroundColor(), null, "background", ts.getId()) : null;
         Color borderColor = ts.getBackgroundBorderColor() != null && !ts.getBackgroundBorderColor().equals("transparent") ?
                 parseColor(ts.getBackgroundBorderColor(), null, "border", ts.getId()) : null;
-        Color shadowColor = ts.getShadowColor() != null && !ts.getShadowColor().equals("transparent") ?
-                parseColor(ts.getShadowColor(), null, "shadow", ts.getId()) : null;
-
-        // Compute shadow properties
-        int shadowOffsetX = ts.getShadowOffsetX() != null ? (int) (ts.getShadowOffsetX() * RESOLUTION_MULTIPLIER) : 0;
-        int shadowOffsetY = ts.getShadowOffsetY() != null ? (int) (ts.getShadowOffsetY() * RESOLUTION_MULTIPLIER) : 0;
-        double shadowBlurRadius = ts.getShadowBlurRadius() != null ? ts.getShadowBlurRadius() * RESOLUTION_MULTIPLIER : 0.0;
-        double shadowSpread = ts.getShadowSpread() != null ? ts.getShadowSpread() * RESOLUTION_MULTIPLIER : 0.0;
-        float shadowOpacity = ts.getShadowOpacity() != null ? ts.getShadowOpacity().floatValue() : 1.0f;
 
         // Load font with fixed base size of 24, scaled by user scale and resolution multiplier
         double baseFontSize = 24.0 * (ts.getScale() != null ? ts.getScale() : 1.0) * RESOLUTION_MULTIPLIER;
@@ -3070,16 +3050,14 @@ public class VideoEditingService {
         g2d.dispose();
         tempImage.flush();
 
-        // Apply padding, border, and shadow spread
+        // Apply padding and border
         int padding = (int) ((ts.getBackgroundPadding() != null ? ts.getBackgroundPadding() : 10) * RESOLUTION_MULTIPLIER);
         int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * RESOLUTION_MULTIPLIER);
         int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * RESOLUTION_MULTIPLIER);
-        int shadowExtra = shadowSpread > 0 ? (int) Math.ceil(shadowSpread) : 0;
-        shadowExtra += shadowBlurRadius > 0 ? (int) Math.ceil(shadowBlurRadius * 2) : 0; // Account for blur radius
 
         // Calculate final image dimensions
-        int totalWidth = maxTextWidth + 2 * (padding + borderWidth + shadowExtra);
-        int totalHeight = totalTextHeight + 2 * (padding + borderWidth + shadowExtra);
+        int totalWidth = maxTextWidth + 2 * (padding + borderWidth);
+        int totalHeight = totalTextHeight + 2 * (padding + borderWidth);
 
         // Cap dimensions to prevent excessive memory usage
         int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER);
@@ -3091,11 +3069,6 @@ public class VideoEditingService {
             padding = (int) (padding * scaleDown);
             borderWidth = (int) (borderWidth * scaleDown);
             borderRadius = (int) (borderRadius * scaleDown);
-            shadowOffsetX = (int) (shadowOffsetX * scaleDown);
-            shadowOffsetY = (int) (shadowOffsetY * scaleDown);
-            shadowBlurRadius *= scaleDown;
-            shadowSpread *= scaleDown;
-            shadowExtra = (int) (shadowExtra * scaleDown);
             font = font.deriveFont((float) baseFontSize);
         }
 
@@ -3108,56 +3081,25 @@ public class VideoEditingService {
         g2d.setFont(font);
         fm = g2d.getFontMetrics();
 
-        // Draw shadow (if present)
-        if (shadowColor != null && shadowOpacity > 0) {
-            // Create a separate image for the shadow
-            BufferedImage shadowImage = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D shadowG2d = shadowImage.createGraphics();
-            shadowG2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            shadowG2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            shadowG2d.setFont(font);
-
-            // Draw text for shadow
-            shadowG2d.setColor(new Color(shadowColor.getRed(), shadowColor.getGreen(), shadowColor.getBlue(), (int) (shadowOpacity * 255)));
-            String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-            int y = padding + borderWidth + shadowExtra + fm.getAscent();
-            for (String line : lines) {
-                int x = calculateXPosition(line, alignment, totalWidth, fm, padding + shadowExtra, borderWidth);
-                shadowG2d.drawString(line, x + shadowOffsetX, y + shadowOffsetY);
-                y += (int) (lineHeight * lineSpacing);
-            }
-            shadowG2d.dispose();
-
-            // Apply blur to shadow
-            if (shadowBlurRadius > 0) {
-                BufferedImage blurredShadow = applyGaussianBlur(shadowImage, (float) shadowBlurRadius);
-                shadowImage = blurredShadow;
-            }
-
-            // Draw shadow onto main image
-            g2d.drawImage(shadowImage, 0, 0, null);
-            shadowImage.flush();
-        }
-
         // Draw background
         if (bgColor != null) {
             float bgOpacity = ts.getBackgroundOpacity() != null ? ts.getBackgroundOpacity().floatValue() : 1.0f;
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
             if (borderRadius > 0) {
                 g2d.fillRoundRect(
-                        borderWidth + shadowExtra,
-                        borderWidth + shadowExtra,
-                        totalWidth - 2 * (borderWidth + shadowExtra),
-                        totalHeight - 2 * (borderWidth + shadowExtra),
+                        borderWidth,
+                        borderWidth,
+                        totalWidth - 2 * borderWidth,
+                        totalHeight - 2 * borderWidth,
                         borderRadius,
                         borderRadius
                 );
             } else {
                 g2d.fillRect(
-                        borderWidth + shadowExtra,
-                        borderWidth + shadowExtra,
-                        totalWidth - 2 * (borderWidth + shadowExtra),
-                        totalHeight - 2 * (borderWidth + shadowExtra)
+                        borderWidth,
+                        borderWidth,
+                        totalWidth - 2 * borderWidth,
+                        totalHeight - 2 * borderWidth
                 );
             }
         }
@@ -3168,19 +3110,19 @@ public class VideoEditingService {
             g2d.setStroke(new BasicStroke(borderWidth));
             if (borderRadius > 0) {
                 g2d.drawRoundRect(
-                        borderWidth / 2 + shadowExtra,
-                        borderWidth / 2 + shadowExtra,
-                        totalWidth - borderWidth - 2 * shadowExtra,
-                        totalHeight - borderWidth - 2 * shadowExtra,
+                        borderWidth / 2,
+                        borderWidth / 2,
+                        totalWidth - borderWidth,
+                        totalHeight - borderWidth,
                         borderRadius,
                         borderRadius
                 );
             } else {
                 g2d.drawRect(
-                        borderWidth / 2 + shadowExtra,
-                        borderWidth / 2 + shadowExtra,
-                        totalWidth - borderWidth - 2 * shadowExtra,
-                        totalHeight - borderWidth - 2 * shadowExtra
+                        borderWidth / 2,
+                        borderWidth / 2,
+                        totalWidth - borderWidth,
+                        totalHeight - borderWidth
                 );
             }
         }
@@ -3188,9 +3130,9 @@ public class VideoEditingService {
         // Draw text
         g2d.setColor(fontColor);
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-        int y = padding + borderWidth + shadowExtra + fm.getAscent();
+        int y = padding + borderWidth + fm.getAscent();
         for (String line : lines) {
-            int x = calculateXPosition(line, alignment, totalWidth, fm, padding + shadowExtra, borderWidth);
+            int x = calculateXPosition(line, alignment, totalWidth, fm, padding, borderWidth);
             g2d.drawString(line, x, y);
             y += (int) (lineHeight * lineSpacing);
         }
@@ -3201,58 +3143,6 @@ public class VideoEditingService {
         String tempPngPath = new File(tempDir, "text_" + ts.getId() + ".png").getAbsolutePath();
         ImageIO.write(image, "PNG", new File(tempPngPath));
         return tempPngPath;
-    }
-
-    private BufferedImage applyGaussianBlur(BufferedImage source, float radius) {
-        if (radius <= 0) return source;
-
-        // Create a kernel for Gaussian blur
-        int size = Math.max(3, (int) Math.ceil(radius * 2) | 1); // Ensure odd size
-        float[] kernel = new float[size * size];
-        float sigma = radius / 3; // Standard deviation
-        float sum = 0;
-        int center = size / 2;
-
-        for (int y = 0; y < size; y++) {
-            for (int x = 0; x < size; x++) {
-                float dx = x - center;
-                float dy = y - center;
-                float value = (float) Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
-                kernel[y * size + x] = value;
-                sum += value;
-            }
-        }
-
-        // Normalize kernel
-        for (int i = 0; i < kernel.length; i++) {
-            kernel[i] /= sum;
-        }
-
-        // Apply convolution
-        BufferedImage result = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < source.getHeight(); y++) {
-            for (int x = 0; x < source.getWidth(); x++) {
-                float r = 0, g = 0, b = 0, a = 0;
-                for (int ky = 0; ky < size; ky++) {
-                    for (int kx = 0; kx < size; kx++) {
-                        int px = x + kx - center;
-                        int py = y + ky - center;
-                        if (px >= 0 && px < source.getWidth() && py >= 0 && py < source.getHeight()) {
-                            int pixel = source.getRGB(px, py);
-                            float weight = kernel[ky * size + kx];
-                            r += ((pixel >> 16) & 0xFF) * weight;
-                            g += ((pixel >> 8) & 0xFF) * weight;
-                            b += (pixel & 0xFF) * weight;
-                            a += ((pixel >> 24) & 0xFF) * weight;
-                        }
-                    }
-                }
-                int pixel = ((int) a << 24) | ((int) r << 16) | ((int) g << 8) | (int) b;
-                result.setRGB(x, y, pixel);
-            }
-        }
-
-        return result;
     }
 
     // Helper method to parse colors

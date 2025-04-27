@@ -354,12 +354,6 @@ public class ProjectController {
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
             Integer backgroundPadding = request.get("backgroundPadding") != null ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
             Integer backgroundBorderRadius = request.get("backgroundBorderRadius") != null ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
-            String shadowColor = (String) request.get("shadowColor");
-            Integer shadowOffsetX = request.get("shadowOffsetX") != null ? Integer.valueOf(request.get("shadowOffsetX").toString()) : null;
-            Integer shadowOffsetY = request.get("shadowOffsetY") != null ? Integer.valueOf(request.get("shadowOffsetY").toString()) : null;
-            Double shadowBlurRadius = request.get("shadowBlurRadius") != null ? Double.valueOf(request.get("shadowBlurRadius").toString()) : null;
-            Double shadowSpread = request.get("shadowSpread") != null ? Double.valueOf(request.get("shadowSpread").toString()) : null;
-            Double shadowOpacity = request.get("shadowOpacity") != null ? Double.valueOf(request.get("shadowOpacity").toString()) : null;
 
             // Existing validation
             if (text == null || layer == null || timelineStartTime == null || timelineEndTime == null) {
@@ -385,20 +379,10 @@ public class ProjectController {
             if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
-            if (shadowBlurRadius != null && shadowBlurRadius < 0) {
-                return ResponseEntity.badRequest().body("Shadow blur radius must be non-negative");
-            }
-            if (shadowSpread != null && shadowSpread < 0) {
-                return ResponseEntity.badRequest().body("Shadow spread must be non-negative");
-            }
-            if (shadowOpacity != null && (shadowOpacity < 0 || shadowOpacity > 1)) {
-                return ResponseEntity.badRequest().body("Shadow opacity must be between 0 and 1");
-            }
 
             videoEditingService.addTextToTimeline(sessionId, text, layer, timelineStartTime, timelineEndTime,
                     fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
-                    shadowColor, shadowOffsetX, shadowOffsetY, shadowBlurRadius, shadowSpread, shadowOpacity,
                     backgroundBorderRadius);
 
             return ResponseEntity.ok().build();
@@ -440,12 +424,6 @@ public class ProjectController {
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
             Integer backgroundPadding = request.containsKey("backgroundPadding") ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
             Integer backgroundBorderRadius = request.containsKey("backgroundBorderRadius") ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
-            String shadowColor = (String) request.get("shadowColor");
-            Integer shadowOffsetX = request.containsKey("shadowOffsetX") ? Integer.valueOf(request.get("shadowOffsetX").toString()) : null;
-            Integer shadowOffsetY = request.containsKey("shadowOffsetY") ? Integer.valueOf(request.get("shadowOffsetY").toString()) : null;
-            Double shadowBlurRadius = request.containsKey("shadowBlurRadius") ? Double.valueOf(request.get("shadowBlurRadius").toString()) : null;
-            Double shadowSpread = request.containsKey("shadowSpread") ? Double.valueOf(request.get("shadowSpread").toString()) : null;
-            Double shadowOpacity = request.containsKey("shadowOpacity") ? Double.valueOf(request.get("shadowOpacity").toString()) : null;
 
             // Parse keyframes
             Map<String, List<Keyframe>> parsedKeyframes = null;
@@ -491,20 +469,10 @@ public class ProjectController {
             if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
-            if (shadowBlurRadius != null && shadowBlurRadius < 0) {
-                return ResponseEntity.badRequest().body("Shadow blur radius must be non-negative");
-            }
-            if (shadowSpread != null && shadowSpread < 0) {
-                return ResponseEntity.badRequest().body("Shadow spread must be non-negative");
-            }
-            if (shadowOpacity != null && (shadowOpacity < 0 || shadowOpacity > 1)) {
-                return ResponseEntity.badRequest().body("Shadow opacity must be between 0 and 1");
-            }
 
             videoEditingService.updateTextSegment(sessionId, segmentId, text, fontFamily, scale,
                     fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
-                    shadowColor, shadowOffsetX, shadowOffsetY, shadowBlurRadius, shadowSpread, shadowOpacity,
                     backgroundBorderRadius, parsedKeyframes);
 
             return ResponseEntity.ok().build();
@@ -756,10 +724,7 @@ public class ProjectController {
             Double cropR = request.containsKey("cropR") ? Double.valueOf(request.get("cropR").toString()) : null;
             Double cropT = request.containsKey("cropT") ? Double.valueOf(request.get("cropT").toString()) : null;
             Double cropB = request.containsKey("cropB") ? Double.valueOf(request.get("cropB").toString()) : null;
-            @SuppressWarnings("unchecked")
-            Map<String, String> filters = request.containsKey("filters") ? (Map<String, String>) request.get("filters") : null;
-            @SuppressWarnings("unchecked")
-            List<String> filtersToRemove = request.containsKey("filtersToRemove") ? (List<String>) request.get("filtersToRemove") : null;
+
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
@@ -819,7 +784,7 @@ public class ProjectController {
 
             videoEditingService.updateImageSegment(
                     sessionId, segmentId, positionX, positionY, scale, opacity, layer,
-                    customWidth, customHeight, maintainAspectRatio, filters, filtersToRemove,
+                    customWidth, customHeight, maintainAspectRatio,
                     timelineStartTime, timelineEndTime, cropL, cropR, cropT, cropB, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {

@@ -1065,28 +1065,35 @@ public class ProjectController {
 
             String type = (String) request.get("type");
             Double duration = request.get("duration") != null ? Double.valueOf(request.get("duration").toString()) : null;
-            String fromSegmentId = (String) request.get("fromSegmentId"); // Can be null
-            String toSegmentId = (String) request.get("toSegmentId");
+            String segmentId = (String) request.get("segmentId");
+            Boolean start = request.get("start") != null ? Boolean.valueOf(request.get("start").toString()) : null;
+            Boolean end = request.get("end") != null ? Boolean.valueOf(request.get("end").toString()) : null;
             Integer layer = request.get("layer") != null ? Integer.valueOf(request.get("layer").toString()) : null;
             @SuppressWarnings("unchecked")
             Map<String, String> parameters = request.containsKey("parameters") ? (Map<String, String>) request.get("parameters") : null;
 
-            // Validate required parameters, allowing fromSegmentId to be null
-            if (type == null || duration == null || toSegmentId == null || layer == null) {
-                return ResponseEntity.badRequest().body("Missing required parameters: type, duration, toSegmentId, layer");
+            // Validate required parameters
+            if (type == null || duration == null || segmentId == null || start == null || end == null || layer == null) {
+                return ResponseEntity.badRequest().body("Missing required parameters: type, duration, segmentId, start, end, layer");
             }
             if (duration <= 0) {
                 return ResponseEntity.badRequest().body("Duration must be positive");
             }
+            if (!start && !end) {
+                return ResponseEntity.badRequest().body("Transition must be applied at start, end, or both");
+            }
 
-            videoEditingService.addTransition(sessionId, type, duration, fromSegmentId, toSegmentId, layer, parameters);
+            videoEditingService.addTransition(sessionId, type, duration, segmentId, start, end, layer, parameters);
 
             // Retrieve the newly added transition
             TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
             Transition addedTransition = timelineState.getTransitions().stream()
-                    .filter(t -> t.getToSegmentId().equals(toSegmentId) &&
-                            (fromSegmentId == null ? t.getFromSegmentId() == null : t.getFromSegmentId() != null && t.getFromSegmentId().equals(fromSegmentId)) &&
-                            t.getLayer() == layer)
+                    .filter(t -> t.getSegmentId().equals(segmentId) &&
+                            t.isStart() == start &&
+                            t.isEnd() == end &&
+                            t.getLayer() == layer &&
+                            t.getType().equals(type) &&
+                            Math.abs(t.getDuration() - duration) < 0.001)
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("Failed to find added transition"));
 
@@ -1094,10 +1101,12 @@ public class ProjectController {
                     "transitionId", addedTransition.getId(),
                     "type", addedTransition.getType(),
                     "duration", addedTransition.getDuration(),
-                    "fromSegmentId", addedTransition.getFromSegmentId(),
-                    "toSegmentId", addedTransition.getToSegmentId(),
+                    "segmentId", addedTransition.getSegmentId(),
+                    "start", addedTransition.isStart(),
+                    "end", addedTransition.isEnd(),
                     "layer", addedTransition.getLayer(),
-                    "timelineStartTime", addedTransition.getTimelineStartTime()
+                    "timelineStartTime", addedTransition.getTimelineStartTime(),
+                    "parameters", addedTransition.getParameters()
             ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -1118,21 +1127,38 @@ public class ProjectController {
             String transitionId = (String) request.get("transitionId");
             String type = (String) request.get("type");
             Double duration = request.containsKey("duration") ? Double.valueOf(request.get("duration").toString()) : null;
-            String fromSegmentId = (String) request.get("fromSegmentId");
-            String toSegmentId = (String) request.get("toSegmentId");
+            String segmentId = (String) request.get("segmentId");
+            Boolean start = request.containsKey("start") ? Boolean.valueOf(request.get("start").toString()) : null;
+            Boolean end = request.containsKey("end") ? Boolean.valueOf(request.get("end").toString()) : null;
             Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
             @SuppressWarnings("unchecked")
             Map<String, String> parameters = request.containsKey("parameters") ? (Map<String, String>) request.get("parameters") : null;
 
+            // Validate required parameters
             if (transitionId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameter: transitionId");
             }
             if (duration != null && duration <= 0) {
                 return ResponseEntity.badRequest().body("Duration must be positive");
             }
+            if (start != null && end != null && !start && !end) {
+                return ResponseEntity.badRequest().body("Transition must be applied at start, end, or both");
+            }
 
-            videoEditingService.updateTransition(sessionId, transitionId, type, duration, fromSegmentId, toSegmentId, layer, parameters);
-            return ResponseEntity.ok().build();
+            Transition updatedTransition = videoEditingService.updateTransition(
+                    sessionId, transitionId, type, duration, segmentId, start, end, layer, parameters);
+
+            return ResponseEntity.ok(Map.of(
+                    "transitionId", updatedTransition.getId(),
+                    "type", updatedTransition.getType(),
+                    "duration", updatedTransition.getDuration(),
+                    "segmentId", updatedTransition.getSegmentId(),
+                    "start", updatedTransition.isStart(),
+                    "end", updatedTransition.isEnd(),
+                    "layer", updatedTransition.getLayer(),
+                    "timelineStartTime", updatedTransition.getTimelineStartTime(),
+                    "parameters", updatedTransition.getParameters()
+            ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error updating transition: " + e.getMessage());
@@ -1149,7 +1175,7 @@ public class ProjectController {
         try {
             User user = getUserFromToken(token);
 
-            if (transitionId == null) {
+            if (transitionId == null || transitionId.isEmpty()) {
                 return ResponseEntity.badRequest().body("Missing required parameter: transitionId");
             }
 
@@ -1161,7 +1187,6 @@ public class ProjectController {
         }
     }
 
-    // NEW: Endpoint to get all transitions
     @GetMapping("/{projectId}/transitions")
     public ResponseEntity<List<Transition>> getTransitions(
             @RequestHeader("Authorization") String token,

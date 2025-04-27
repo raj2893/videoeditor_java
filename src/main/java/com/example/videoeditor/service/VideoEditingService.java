@@ -1629,59 +1629,54 @@ public class VideoEditingService {
             String sessionId,
             String type,
             double duration,
-            String fromSegmentId,
-            String toSegmentId,
+            String segmentId,
+            boolean start,
+            boolean end,
             int layer,
             Map<String, String> parameters
     ) throws IOException {
         EditSession session = getSession(sessionId);
         TimelineState timelineState = session.getTimelineState();
 
-        // Validate toSegment
-        Segment toSegment = findSegment(timelineState, toSegmentId);
-        if (toSegment == null) {
-            throw new RuntimeException("To segment not found");
+        // Validate segment
+        Segment segment = findSegment(timelineState, segmentId);
+        if (segment == null) {
+            throw new RuntimeException("Segment not found with ID: " + segmentId);
         }
-        if (toSegment.getLayer() != layer) {
-            throw new RuntimeException("To segment must be on the same layer as the transition");
+        if (segment.getLayer() != layer) {
+            throw new RuntimeException("Segment must be on the same layer as the transition");
         }
-
-        // Validate fromSegment if provided
-        Segment fromSegment = fromSegmentId != null ? findSegment(timelineState, fromSegmentId) : null;
-        if (fromSegmentId != null && fromSegment == null) {
-            throw new RuntimeException("From segment not found");
-        }
-        if (fromSegment != null) {
-            if (fromSegment.getLayer() != layer) {
-                throw new RuntimeException("From segment must be on the same layer as the transition");
-            }
-            if (Math.abs(fromSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) > 0.001) {
-                throw new RuntimeException("Segments must be adjacent on the timeline");
-            }
+        if (!start && !end) {
+            throw new RuntimeException("Transition must be applied at start, end, or both");
         }
 
         // Validate duration
         if (duration <= 0) {
             throw new RuntimeException("Invalid transition duration: Duration must be positive");
         }
-        if (duration > toSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) {
-            throw new RuntimeException("Invalid transition duration: Duration exceeds toSegment duration");
-        }
-        if (fromSegment != null && duration > fromSegment.getTimelineEndTime() - fromSegment.getTimelineStartTime()) {
-            throw new RuntimeException("Invalid transition duration: Duration exceeds fromSegment duration");
+        double segmentDuration = segment.getTimelineEndTime() - segment.getTimelineStartTime();
+        if (duration > segmentDuration) {
+            throw new RuntimeException("Invalid transition duration: Duration exceeds segment duration");
         }
 
         // Calculate timeline start time
-        double timelineStartTime = fromSegment != null
-                ? roundToThreeDecimals(fromSegment.getTimelineEndTime() - duration)
-                : roundToThreeDecimals(toSegment.getTimelineStartTime());
+        double timelineStartTime;
+        if (start) {
+            timelineStartTime = roundToThreeDecimals(segment.getTimelineStartTime());
+        } else { // end
+            timelineStartTime = roundToThreeDecimals(segment.getTimelineEndTime() - duration);
+        }
 
         // Check for overlapping transitions
         for (Transition existingTransition : timelineState.getTransitions()) {
             if (existingTransition.getLayer() == layer &&
+                    existingTransition.getSegmentId().equals(segmentId) &&
+                    existingTransition.isStart() == start &&
+                    existingTransition.isEnd() == end &&
                     timelineStartTime < existingTransition.getTimelineStartTime() + existingTransition.getDuration() &&
                     timelineStartTime + duration > existingTransition.getTimelineStartTime()) {
-                throw new RuntimeException("Transition overlaps with an existing transition on layer " + layer);
+                throw new RuntimeException("Transition overlaps with an existing transition on layer " + layer +
+                        " for segment " + segmentId + " at " + (start ? "start" : "end"));
             }
         }
 
@@ -1689,8 +1684,9 @@ public class VideoEditingService {
         Transition transition = new Transition();
         transition.setType(type);
         transition.setDuration(roundToThreeDecimals(duration));
-        transition.setFromSegmentId(fromSegmentId);
-        transition.setToSegmentId(toSegmentId);
+        transition.setSegmentId(segmentId);
+        transition.setStart(start);
+        transition.setEnd(end);
         transition.setLayer(layer);
         transition.setTimelineStartTime(timelineStartTime);
         if (parameters != null) {
@@ -1706,14 +1702,15 @@ public class VideoEditingService {
             String transitionId,
             String type,
             Double duration,
-            String fromSegmentId,
-            String toSegmentId,
+            String segmentId,
+            Boolean start,
+            Boolean end,
             Integer layer,
             Map<String, String> parameters
     ) throws IOException {
         Logger log = LoggerFactory.getLogger(VideoEditingService.class);
-        log.info("Updating transition: sessionId={}, transitionId={}, type={}, duration={}, fromSegmentId={}, toSegmentId={}, layer={}",
-                sessionId, transitionId, type, duration, fromSegmentId, toSegmentId, layer);
+        log.info("Updating transition: sessionId={}, transitionId={}, type={}, duration={}, segmentId={}, start={}, end={}, layer={}",
+                sessionId, transitionId, type, duration, segmentId, start, end, layer);
 
         EditSession session = getSession(sessionId);
         TimelineState timelineState = session.getTimelineState();
@@ -1729,8 +1726,9 @@ public class VideoEditingService {
         // Store original values for rollback
         String originalType = transition.getType();
         double originalDuration = transition.getDuration();
-        String originalFromSegmentId = transition.getFromSegmentId();
-        String originalToSegmentId = transition.getToSegmentId();
+        String originalSegmentId = transition.getSegmentId();
+        boolean originalStart = transition.isStart();
+        boolean originalEnd = transition.isEnd();
         int originalLayer = transition.getLayer();
         double originalTimelineStartTime = transition.getTimelineStartTime();
         Map<String, String> originalParameters = transition.getParameters();
@@ -1738,104 +1736,93 @@ public class VideoEditingService {
         // Update fields if provided
         if (type != null) transition.setType(type);
         if (duration != null) transition.setDuration(roundToThreeDecimals(duration));
-        if (fromSegmentId != null) transition.setFromSegmentId(fromSegmentId);
-        if (toSegmentId != null) transition.setToSegmentId(toSegmentId);
+        if (segmentId != null) transition.setSegmentId(segmentId);
+        if (start != null) transition.setStart(start);
+        if (end != null) transition.setEnd(end);
         if (layer != null) transition.setLayer(layer);
         if (parameters != null) transition.setParameters(parameters);
 
         // Validate updated transition
-        Segment fromSegment = transition.getFromSegmentId() != null ? findSegment(timelineState, transition.getFromSegmentId()) : null;
-        Segment toSegment = transition.getToSegmentId() != null ? findSegment(timelineState, transition.getToSegmentId()) : null;
+        if (transition.isStart() == false && transition.isEnd() == false) {
+            rollbackTransition(transition, originalType, originalDuration, originalSegmentId, originalStart, originalEnd, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Transition must be applied at start, end, or both");
+        }
 
-        // Ensure at least one segment is present
-        if (fromSegment == null && toSegment == null) {
-            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-            throw new RuntimeException("At least one segment (fromSegment or toSegment) must be present");
+        Segment segment = findSegment(timelineState, transition.getSegmentId());
+        if (segment == null) {
+            rollbackTransition(transition, originalType, originalDuration, originalSegmentId, originalStart, originalEnd, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Segment not found: " + transition.getSegmentId());
         }
 
         // Validate layer consistency
-        if (fromSegment != null && fromSegment.getLayer() != transition.getLayer()) {
-            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-            throw new RuntimeException("fromSegment must be on the same layer as the transition");
-        }
-        if (toSegment != null && toSegment.getLayer() != transition.getLayer()) {
-            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-            throw new RuntimeException("toSegment must be on the same layer as the transition");
-        }
-
-        // Validate adjacency if both segments are present
-        if (fromSegment != null && toSegment != null) {
-            if (Math.abs(fromSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) > 0.001) {
-                rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-                throw new RuntimeException("Segments must be adjacent on the timeline");
-            }
+        if (segment.getLayer() != transition.getLayer()) {
+            rollbackTransition(transition, originalType, originalDuration, originalSegmentId, originalStart, originalEnd, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Segment must be on the same layer as the transition");
         }
 
         // Validate duration
         if (transition.getDuration() <= 0) {
-            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
+            rollbackTransition(transition, originalType, originalDuration, originalSegmentId, originalStart, originalEnd, originalLayer, originalTimelineStartTime, originalParameters);
             throw new RuntimeException("Invalid transition duration: Duration must be positive");
         }
+        double segmentDuration = segment.getTimelineEndTime() - segment.getTimelineStartTime();
+        if (transition.getDuration() > segmentDuration) {
+            rollbackTransition(transition, originalType, originalDuration, originalSegmentId, originalStart, originalEnd, originalLayer, originalTimelineStartTime, originalParameters);
+            throw new RuntimeException("Invalid transition duration: Duration exceeds segment duration");
+        }
 
-        // Validate duration against segment boundaries
-        double transitionEndTime = transition.getTimelineStartTime() + transition.getDuration();
-        if (fromSegment != null && transitionEndTime > fromSegment.getTimelineEndTime() + 0.001) {
-            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-            throw new RuntimeException("Invalid transition duration: Transition end time exceeds fromSegment end time");
+        // Recalculate timelineStartTime if necessary
+        double timelineStartTime;
+        if (transition.isStart()) {
+            timelineStartTime = roundToThreeDecimals(segment.getTimelineStartTime());
+        } else { // transition.isEnd()
+            timelineStartTime = roundToThreeDecimals(segment.getTimelineEndTime() - transition.getDuration());
         }
-        if (toSegment != null && transitionEndTime > toSegment.getTimelineEndTime() + 0.001) {
-            rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-            throw new RuntimeException("Invalid transition duration: Transition end time exceeds toSegment end time");
-        }
+        transition.setTimelineStartTime(timelineStartTime);
 
         // Check for overlapping transitions
         timelineState.getTransitions().remove(transition);
         for (Transition existingTransition : timelineState.getTransitions()) {
             if (existingTransition.getLayer() == transition.getLayer() &&
+                    existingTransition.getSegmentId().equals(transition.getSegmentId()) &&
+                    existingTransition.isStart() == transition.isStart() &&
+                    existingTransition.isEnd() == transition.isEnd() &&
                     transition.getTimelineStartTime() < existingTransition.getTimelineStartTime() + existingTransition.getDuration() &&
                     transition.getTimelineStartTime() + transition.getDuration() > existingTransition.getTimelineStartTime()) {
                 timelineState.getTransitions().add(transition);
-                rollbackTransition(transition, originalType, originalDuration, originalFromSegmentId, originalToSegmentId, originalLayer, originalTimelineStartTime, originalParameters);
-                throw new RuntimeException("Transition overlaps with an existing transition on layer " + transition.getLayer());
+                rollbackTransition(transition, originalType, originalDuration, originalSegmentId, originalStart, originalEnd, originalLayer, originalTimelineStartTime, originalParameters);
+                throw new RuntimeException("Transition overlaps with an existing transition on layer " + transition.getLayer() +
+                        " for segment " + transition.getSegmentId() + " at " + (transition.isStart() ? "start" : "end"));
             }
         }
         timelineState.getTransitions().add(transition);
-
-        // Recalculate timelineStartTime only if segments or layer changed
-        if (fromSegmentId != null || toSegmentId != null || layer != null) {
-            if (toSegment != null) {
-                transition.setTimelineStartTime(roundToThreeDecimals(toSegment.getTimelineStartTime()));
-            } else if (fromSegment != null) {
-                transition.setTimelineStartTime(roundToThreeDecimals(fromSegment.getTimelineEndTime() - transition.getDuration()));
-            }
-        }
 
         session.setLastAccessTime(System.currentTimeMillis());
         log.info("Transition updated successfully: id={}", transition.getId());
         return transition;
     }
 
-    // Updated rollback method to include parameters
     private void rollbackTransition(
             Transition transition,
             String type,
             double duration,
-            String fromSegmentId,
-            String toSegmentId,
+            String segmentId,
+            boolean start,
+            boolean end,
             int layer,
             double timelineStartTime,
             Map<String, String> parameters
     ) {
         transition.setType(type);
         transition.setDuration(duration);
-        transition.setFromSegmentId(fromSegmentId);
-        transition.setToSegmentId(toSegmentId);
+        transition.setSegmentId(segmentId);
+        transition.setStart(start);
+        transition.setEnd(end);
         transition.setLayer(layer);
         transition.setTimelineStartTime(timelineStartTime);
         transition.setParameters(parameters);
     }
 
-    // NEW: Method to remove a transition
     public void removeTransition(String sessionId, String transitionId) {
         EditSession session = getSession(sessionId);
         TimelineState timelineState = session.getTimelineState();
@@ -1868,7 +1855,7 @@ public class VideoEditingService {
 
         // Find transitions involving this segment
         List<Transition> transitionsToUpdate = timelineState.getTransitions().stream()
-                .filter(t -> segmentId.equals(t.getFromSegmentId()) || segmentId.equals(t.getToSegmentId()))
+                .filter(t -> segmentId.equals(t.getSegmentId()))
                 .collect(Collectors.toList());
 
         for (Transition transition : transitionsToUpdate) {
@@ -1876,22 +1863,18 @@ public class VideoEditingService {
             transition.setLayer(newLayer);
 
             // Recalculate timelineStartTime
-            Segment fromSegment = transition.getFromSegmentId() != null ? findSegment(timelineState, transition.getFromSegmentId()) : null;
-            Segment toSegment = findSegment(timelineState, transition.getToSegmentId());
-
-            if (toSegment == null) {
-                throw new RuntimeException("To segment not found for transition: " + transition.getId());
+            double timelineStartTime;
+            if (transition.isStart()) {
+                timelineStartTime = roundToThreeDecimals(newTimelineStartTime);
+            } else { // transition.isEnd()
+                timelineStartTime = roundToThreeDecimals(newTimelineEndTime - transition.getDuration());
             }
-
-            double timelineStartTime = fromSegment != null
-                    ? roundToThreeDecimals(fromSegment.getTimelineEndTime() - transition.getDuration())
-                    : roundToThreeDecimals(toSegment.getTimelineStartTime());
-
             transition.setTimelineStartTime(timelineStartTime);
 
-            // Validate transition
-            if (fromSegment != null && Math.abs(fromSegment.getTimelineEndTime() - toSegment.getTimelineStartTime()) > 0.001) {
-                throw new RuntimeException("Segments must be adjacent after transition update for transition: " + transition.getId());
+            // Validate transition duration
+            double segmentDuration = newTimelineEndTime - newTimelineStartTime;
+            if (transition.getDuration() > segmentDuration) {
+                throw new RuntimeException("Transition duration exceeds segment duration after update for transition: " + transition.getId());
             }
         }
 
@@ -2180,14 +2163,13 @@ public class VideoEditingService {
 
             // Apply transitions and get position and crop parameters
             List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                    .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(vs.getId())) ||
-                            (t.getFromSegmentId() != null && t.getFromSegmentId().equals(vs.getId())))
+                    .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(vs.getId()))
                     .filter(t -> t.getLayer() == vs.getLayer())
                     .collect(Collectors.toList());
 
             Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, vs.getTimelineStartTime(), vs.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-            // Apply crop filter for wipe transition
+// Apply crop filter for wipe transition
             boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
                     !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
             if (hasCrop) {
@@ -2208,7 +2190,7 @@ public class VideoEditingService {
                         ", enabled between t=" + transStart + " and t=" + transEnd);
             }
 
-            // Apply rotation from transition
+// Apply rotation from transition
             String rotationExpr = transitionOffsets.get("rotation");
             if (rotationExpr != null && !rotationExpr.equals("0")) {
                 filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
@@ -2491,14 +2473,13 @@ public class VideoEditingService {
 
             // Apply transitions and get position and crop parameters
             List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                    .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(is.getId())) ||
-                            (t.getFromSegmentId() != null && t.getFromSegmentId().equals(is.getId())))
+                    .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(is.getId()))
                     .filter(t -> t.getLayer() == is.getLayer())
                     .collect(Collectors.toList());
 
             Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, is.getTimelineStartTime(), is.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-            // Apply crop filter for wipe transition
+// Apply crop filter for wipe transition
             boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
                     !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
             if (hasCrop) {
@@ -2514,12 +2495,12 @@ public class VideoEditingService {
                         .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
                         .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
                         .append(",");
-                System.out.println("Crop filter for image segment " + is.getId() + ": w=" + transitionOffsets.get("cropWidth") +
+                System.out.println("Crop filter for segment " + is.getId() + ": w=" + transitionOffsets.get("cropWidth") +
                         ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
                         ", enabled between t=" + transStart + " and t=" + transEnd);
             }
 
-            // Apply rotation from transition
+// Apply rotation from transition
             String rotationExpr = transitionOffsets.get("rotation");
             if (rotationExpr != null && !rotationExpr.equals("0")) {
                 filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
@@ -2665,20 +2646,19 @@ public class VideoEditingService {
 
             // Apply transitions and get position and crop parameters
             List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                    .filter(t -> (t.getToSegmentId() != null && t.getToSegmentId().equals(ts.getId())) ||
-                            (t.getFromSegmentId() != null && t.getFromSegmentId().equals(ts.getId())))
+                    .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(ts.getId()))
                     .filter(t -> t.getLayer() == ts.getLayer())
                     .collect(Collectors.toList());
 
             Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-            // Process the text PNG input
+// Process the text PNG input
             double segmentDuration = ts.getTimelineEndTime() - ts.getTimelineStartTime();
             filterComplex.append("[").append(inputIdx).append(":v]");
             filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
             filterComplex.append("setpts=PTS-STARTPTS+").append(ts.getTimelineStartTime()).append("/TB,");
 
-            // Apply crop filter for wipe transition
+// Apply crop filter for wipe transition
             boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
                     !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
             if (hasCrop) {
@@ -2699,7 +2679,7 @@ public class VideoEditingService {
                         ", enabled between t=" + transStart + " and t=" + transEnd);
             }
 
-            // Apply rotation from transition
+// Apply rotation from transition
             String rotationExpr = transitionOffsets.get("rotation");
             if (rotationExpr != null && !rotationExpr.equals("0")) {
                 filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=none,");
@@ -3184,13 +3164,19 @@ public class VideoEditingService {
             double transDuration = transition.getDuration();
             double transEnd;
 
-            // Force 1-second wipe or zoom transition to start at segmentStartTime
+            // Force 1-second wipe or zoom transition to start at segmentStartTime for start transitions
             if (("Wipe".equals(transition.getType()) || "Zoom".equals(transition.getType())) && Math.abs(transDuration - 1.0) < 0.01) {
-                transStart = segmentStartTime;
-                transEnd = Math.min(segmentStartTime + 1.0, segmentEndTime);
+                if (transition.isStart()) {
+                    transStart = segmentStartTime;
+                    transEnd = Math.min(segmentStartTime + 1.0, segmentEndTime);
+                } else { // end
+                    transEnd = Math.min(segmentEndTime, segmentStartTime + transStart + 1.0);
+                    transStart = Math.max(segmentStartTime, transEnd - 1.0);
+                }
                 transDuration = transEnd - transStart;
-                System.out.println(transition.getType() + " transition for segment ID=" + transition.getToSegmentId() +
-                        ": transStart=" + transStart + ", transEnd=" + transEnd + ", duration=" + transDuration);
+                System.out.println(transition.getType() + " transition for segment ID=" + transition.getSegmentId() +
+                        ": transStart=" + transStart + ", transEnd=" + transEnd + ", duration=" + transDuration +
+                        ", position=" + (transition.isStart() ? "start" : "end"));
             } else {
                 transEnd = transStart + transDuration;
             }
@@ -3205,8 +3191,7 @@ public class VideoEditingService {
             String transType = transition.getType();
             Map<String, String> params = transition.getParameters() != null ? transition.getParameters() : new HashMap<>();
             String direction = params.getOrDefault("direction", getDefaultDirection(transType));
-            boolean isToSegment = transition.getToSegmentId() != null && transition.getToSegmentId().equals(transition.getToSegmentId());
-            boolean isFromSegment = transition.getFromSegmentId() != null && transition.getFromSegmentId().equals(transition.getFromSegmentId());
+            boolean isStartTransition = transition.isStart();
 
             // Progress: 0 to 1 during transition
             String progressExpr = String.format("(t-%.6f)/%.6f", transStart, transDuration);
@@ -3215,14 +3200,14 @@ public class VideoEditingService {
                 case "Slide":
                     String slideXExpr = "0";
                     String slideYExpr = "0";
-                    if (isToSegment) {
+                    if (isStartTransition) {
                         switch (direction) {
                             case "right": slideXExpr = String.format("%d*(1-%s)", canvasWidth, progressExpr); break;
                             case "left": slideXExpr = String.format("-%d*(1-%s)", canvasWidth, progressExpr); break;
                             case "top": slideYExpr = String.format("-%d*(1-%s)", canvasHeight, progressExpr); break;
                             case "bottom": slideYExpr = String.format("%d*(1-%s)", canvasHeight, progressExpr); break;
                         }
-                    } else if (isFromSegment) {
+                    } else { // end
                         switch (direction) {
                             case "right": slideXExpr = String.format("-%d*%s", canvasWidth, progressExpr); break;
                             case "left": slideXExpr = String.format("%d*%s", canvasWidth, progressExpr); break;
@@ -3241,7 +3226,7 @@ public class VideoEditingService {
                     String cropHeightExpr = "ih";
                     String cropXExpr = "0";
                     String cropYExpr = "0";
-                    if (isToSegment) {
+                    if (isStartTransition) {
                         switch (direction) {
                             case "left":
                                 cropWidthExpr = String.format("iw*max(0,min(1,%s))", progressExpr);
@@ -3260,7 +3245,7 @@ public class VideoEditingService {
                                 cropYExpr = "0";
                                 break;
                         }
-                    } else if (isFromSegment) {
+                    } else { // end
                         switch (direction) {
                             case "left":
                                 cropWidthExpr = String.format("iw*(1-max(0,min(1,%s)))", progressExpr);
@@ -3290,7 +3275,7 @@ public class VideoEditingService {
 
                 case "Zoom":
                     String scaleExpr;
-                    if (isToSegment) {
+                    if (isStartTransition) {
                         if ("in".equals(direction)) {
                             // Zoom in: scale from 0.0 to 1.0
                             scaleExpr = String.format("0.0+1.0*%s", progressExpr);
@@ -3298,7 +3283,7 @@ public class VideoEditingService {
                             // Zoom out: scale from 2.0 to 1.0
                             scaleExpr = String.format("2.0-1.0*%s", progressExpr);
                         }
-                    } else if (isFromSegment) {
+                    } else { // end
                         if ("in".equals(direction)) {
                             // Zoom in: scale from 1.0 to 2.0
                             scaleExpr = String.format("1.0+1.0*%s", progressExpr);
@@ -3306,8 +3291,6 @@ public class VideoEditingService {
                             // Zoom out: scale from 1.0 to 0.1
                             scaleExpr = String.format("1.0-0.9*%s", progressExpr);
                         }
-                    } else {
-                        scaleExpr = "1";
                     }
                     transitionOffsets.put("scale", String.format("if(between(t,%.6f,%.6f),%s,1)", transStart, transEnd, scaleExpr));
                     System.out.println("Zoom transition " + transition.getId() + ": scale=" + transitionOffsets.get("scale") +
@@ -3316,12 +3299,12 @@ public class VideoEditingService {
 
                 case "Rotate":
                     String rotationExpr = "0";
-                    double rotationSpeed = "clockwise".equals(direction) ? 4 * Math.PI : -4 * Math.PI; // Changed from 2*PI to 4*PI (720°/s)
+                    double rotationSpeed = "clockwise".equals(direction) ? 4 * Math.PI : -4 * Math.PI;
 
-                    if (isToSegment) {
+                    if (isStartTransition) {
                         // Segment is entering: rotate from initial angle to 0
                         rotationExpr = String.format("(%f)*(1-%s)", rotationSpeed * transDuration, progressExpr);
-                    } else if (isFromSegment) {
+                    } else { // end
                         // Segment is exiting: rotate from 0 to final angle
                         rotationExpr = String.format("(%f)*(%s)", rotationSpeed * transDuration, progressExpr);
                     }
@@ -3331,6 +3314,16 @@ public class VideoEditingService {
                             ", direction=" + direction + ", transStart=" + transStart + ", transEnd=" + transEnd);
                     break;
 
+                case "Fade":
+                    double opacityStart = isStartTransition ? 0.0 : 1.0;
+                    double opacityEnd = isStartTransition ? 1.0 : 0.0;
+                    String opacityExpr = String.format("%.6f+(%.6f-%.6f)*%s", opacityStart, opacityEnd, opacityStart, progressExpr);
+                    filterComplex.append("format=rgba,");
+                    filterComplex.append("lutrgb=a='val*").append(String.format("if(between(t,%.6f,%.6f),%s,1)", transStart, transEnd, opacityExpr)).append("',");
+                    filterComplex.append("format=rgba,");
+                    System.out.println("Fade transition " + transition.getId() + ": opacity=" + opacityExpr +
+                            ", applied between t=" + transStart + " and t=" + transEnd);
+                    break;
 
                 default:
                     System.err.println("Unsupported transition type: " + transType);

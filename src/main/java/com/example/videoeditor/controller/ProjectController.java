@@ -1037,16 +1037,15 @@ public class ProjectController {
             @RequestHeader("Authorization") String token,
             @PathVariable Long projectId,
             @RequestParam String sessionId,
-            @RequestParam String filterId,
             @RequestParam String segmentId) {
         try {
             User user = getUserFromToken(token);
 
-            if (filterId == null || segmentId == null) {
+            if (segmentId == null) {
                 return ResponseEntity.badRequest().body("Missing required parameters: filterId, segmentId");
             }
 
-            videoEditingService.removeFilter(sessionId, segmentId, filterId);
+            videoEditingService.removeFilter(sessionId, segmentId);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -2140,9 +2140,11 @@ public class VideoEditingService {
                             double rotate = Double.parseDouble(filterValue);
                             if (rotate >= -180 && rotate <= 180) {
                                 double angleRad = Math.toRadians(rotate);
+                                filterComplex.append("format=rgba,");
                                 filterComplex.append("rotate=").append(angleRad)
                                         .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
-                                        .append(":c=black,");
+                                        .append(":c=none,");
+                                filterComplex.append("format=rgba,");
                             }
                             break;
                         case "flip":
@@ -2193,7 +2195,9 @@ public class VideoEditingService {
 // Apply rotation from transition
             String rotationExpr = transitionOffsets.get("rotation");
             if (rotationExpr != null && !rotationExpr.equals("0")) {
-                filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
+                filterComplex.append("format=rgba,");
+                filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
+                filterComplex.append("format=rgba,");
                 System.out.println("Rotation applied to segment " + vs.getId() + ": " + rotationExpr);
             }
 
@@ -2319,7 +2323,7 @@ public class VideoEditingService {
 
             // Overlay the scaled video onto the previous output
             filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
+            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
             filterComplex.append(":enable='between(t,").append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime()).append(")'");
             filterComplex.append("[ov").append(outputLabel).append("];");
             System.out.println("Video segment filter chain for " + vs.getId() + ": " +
@@ -2450,9 +2454,11 @@ public class VideoEditingService {
                             double rotate = Double.parseDouble(filterValue);
                             if (rotate >= -180 && rotate <= 180) {
                                 double angleRad = Math.toRadians(rotate);
+                                filterComplex.append("format=rgba,");
                                 filterComplex.append("rotate=").append(angleRad)
                                         .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
-                                        .append(":c=black,");
+                                        .append(":c=none,");
+                                filterComplex.append("format=rgba,");
                             }
                             break;
                         case "flip":
@@ -2503,7 +2509,9 @@ public class VideoEditingService {
 // Apply rotation from transition
             String rotationExpr = transitionOffsets.get("rotation");
             if (rotationExpr != null && !rotationExpr.equals("0")) {
-                filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=black,");
+                filterComplex.append("format=rgba,");
+                filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
+                filterComplex.append("format=rgba,");
                 System.out.println("Rotation applied to segment " + is.getId() + ": " + rotationExpr);
             }
 
@@ -2629,7 +2637,7 @@ public class VideoEditingService {
 
             // Overlay the scaled image onto the previous output
             filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
+            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
             filterComplex.append(":enable='between(t,").append(is.getTimelineStartTime()).append(",").append(is.getTimelineEndTime()).append(")'");
             filterComplex.append("[ov").append(outputLabel).append("];");
             System.out.println("Image segment filter chain for " + is.getId() + ": " +
@@ -2682,7 +2690,9 @@ public class VideoEditingService {
 // Apply rotation from transition
             String rotationExpr = transitionOffsets.get("rotation");
             if (rotationExpr != null && !rotationExpr.equals("0")) {
-                filterComplex.append("rotate='").append(rotationExpr).append("':ow=iw:oh=ih:c=none,");
+                filterComplex.append("format=rgba,");
+                filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
+                filterComplex.append("format=rgba,");
                 System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
             }
 
@@ -2814,7 +2824,7 @@ public class VideoEditingService {
 
             // Overlay the scaled text PNG onto the previous output
             filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=rgb");
+            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
             filterComplex.append(":enable='between(t,").append(ts.getTimelineStartTime()).append(",").append(ts.getTimelineEndTime()).append(")'");
             filterComplex.append("[ov").append(outputLabel).append("];");
             System.out.println("Text segment filter chain for " + ts.getId() + ": " +

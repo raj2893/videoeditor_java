@@ -352,7 +352,8 @@ public class ProjectController {
             Double backgroundOpacity = request.get("backgroundOpacity") != null ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
             Integer backgroundBorderWidth = request.get("backgroundBorderWidth") != null ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
-            Integer backgroundPadding = request.get("backgroundPadding") != null ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
+            Integer backgroundH = request.get("backgroundH") != null ? Integer.valueOf(request.get("backgroundH").toString()) : null;
+            Integer backgroundW = request.get("backgroundW") != null ? Integer.valueOf(request.get("backgroundW").toString()) : null;
             Integer backgroundBorderRadius = request.get("backgroundBorderRadius") != null ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
 
             // Existing validation
@@ -373,8 +374,11 @@ public class ProjectController {
             if (backgroundBorderWidth != null && backgroundBorderWidth < 0) {
                 return ResponseEntity.badRequest().body("Background border width must be non-negative");
             }
-            if (backgroundPadding != null && backgroundPadding < 0) {
-                return ResponseEntity.badRequest().body("Background padding must be non-negative");
+            if (backgroundH != null && backgroundH < 0) {
+                return ResponseEntity.badRequest().body("Background height must be non-negative");
+            }
+            if (backgroundW != null && backgroundW < 0) {
+                return ResponseEntity.badRequest().body("Background width must be non-negative");
             }
             if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
@@ -382,8 +386,8 @@ public class ProjectController {
 
             videoEditingService.addTextToTimeline(sessionId, text, layer, timelineStartTime, timelineEndTime,
                     fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
-                    backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
-                    backgroundBorderRadius);
+                    backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
+                    backgroundW, backgroundBorderRadius);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -422,7 +426,8 @@ public class ProjectController {
             Double backgroundOpacity = request.containsKey("backgroundOpacity") ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
             Integer backgroundBorderWidth = request.containsKey("backgroundBorderWidth") ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
-            Integer backgroundPadding = request.containsKey("backgroundPadding") ? Integer.valueOf(request.get("backgroundPadding").toString()) : null;
+            Integer backgroundH = request.containsKey("backgroundH") ? Integer.valueOf(request.get("backgroundH").toString()) : null;
+            Integer backgroundW = request.containsKey("backgroundW") ? Integer.valueOf(request.get("backgroundW").toString()) : null;
             Integer backgroundBorderRadius = request.containsKey("backgroundBorderRadius") ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
 
             // Parse keyframes
@@ -463,8 +468,11 @@ public class ProjectController {
             if (backgroundBorderWidth != null && backgroundBorderWidth < 0) {
                 return ResponseEntity.badRequest().body("Background border width must be non-negative");
             }
-            if (backgroundPadding != null && backgroundPadding < 0) {
-                return ResponseEntity.badRequest().body("Background padding must be non-negative");
+            if (backgroundH != null && backgroundH < 0) {
+                return ResponseEntity.badRequest().body("Background height must be non-negative");
+            }
+            if (backgroundW != null && backgroundW < 0) {
+                return ResponseEntity.badRequest().body("Background width must be non-negative");
             }
             if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
@@ -472,8 +480,8 @@ public class ProjectController {
 
             videoEditingService.updateTextSegment(sessionId, segmentId, text, fontFamily, scale,
                     fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,
-                    backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundPadding,
-                    backgroundBorderRadius, parsedKeyframes);
+                    backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
+                    backgroundW, backgroundBorderRadius, parsedKeyframes);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {

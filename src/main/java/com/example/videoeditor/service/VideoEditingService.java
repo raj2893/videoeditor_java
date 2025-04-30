@@ -673,7 +673,7 @@ public class VideoEditingService {
                                   String fontFamily, Double scale, String fontColor, String backgroundColor,
                                   Integer positionX, Integer positionY, Double opacity, String alignment,
                                   Double backgroundOpacity, Integer backgroundBorderWidth, String backgroundBorderColor,
-                                  Integer backgroundPadding,
+                                  Integer backgroundH, Integer backgroundW,
                                   Integer backgroundBorderRadius) {
         EditSession session = getSession(sessionId);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
@@ -700,9 +700,9 @@ public class VideoEditingService {
         textSegment.setBackgroundOpacity(backgroundOpacity);
         textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
         textSegment.setBackgroundBorderColor(backgroundBorderColor != null ? backgroundBorderColor : "transparent");
-        textSegment.setBackgroundPadding(backgroundPadding);
+        textSegment.setBackgroundH(backgroundH);
+        textSegment.setBackgroundW(backgroundW);
         textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
-
 
         session.getTimelineState().getTextSegments().add(textSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -726,7 +726,8 @@ public class VideoEditingService {
             Double backgroundOpacity,
             Integer backgroundBorderWidth,
             String backgroundBorderColor,
-            Integer backgroundPadding,
+            Integer backgroundH,
+            Integer backgroundW,
             Integer backgroundBorderRadius,
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
@@ -797,7 +798,8 @@ public class VideoEditingService {
         if (backgroundOpacity != null) textSegment.setBackgroundOpacity(backgroundOpacity);
         if (backgroundBorderWidth != null) textSegment.setBackgroundBorderWidth(backgroundBorderWidth);
         if (backgroundBorderColor != null) textSegment.setBackgroundBorderColor(backgroundBorderColor);
-        if (backgroundPadding != null) textSegment.setBackgroundPadding(backgroundPadding);
+        if (backgroundH != null) textSegment.setBackgroundH(backgroundH);
+        if (backgroundW != null) textSegment.setBackgroundW(backgroundW);
         if (backgroundBorderRadius != null) textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
 
         // Validate timeline position
@@ -2644,191 +2646,191 @@ public class VideoEditingService {
                         filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
                 lastOutput = "ov" + outputLabel;
             } else if (segment instanceof TextSegment) {
-            TextSegment ts = (TextSegment) segment;
-            String inputIdx = textInputIndices.get(ts.getId());
-            if (inputIdx == null) {
-                System.err.println("Skipping text segment " + ts.getId() + ": no valid PNG input");
-                continue;
-            }
+                TextSegment ts = (TextSegment) segment;
+                String inputIdx = textInputIndices.get(ts.getId());
+                if (inputIdx == null) {
+                    System.err.println("Skipping text segment " + ts.getId() + ": no valid PNG input");
+                    continue;
+                }
 
-            // Apply transitions and get position and crop parameters
-            List<Transition> relevantTransitions = timelineState.getTransitions().stream()
-                    .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(ts.getId()))
-                    .filter(t -> t.getLayer() == ts.getLayer())
-                    .collect(Collectors.toList());
+                // Apply transitions and get position and crop parameters
+                List<Transition> relevantTransitions = timelineState.getTransitions().stream()
+                        .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(ts.getId()))
+                        .filter(t -> t.getLayer() == ts.getLayer())
+                        .collect(Collectors.toList());
 
-            Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
+                Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
 
 // Process the text PNG input
-            double segmentDuration = ts.getTimelineEndTime() - ts.getTimelineStartTime();
-            filterComplex.append("[").append(inputIdx).append(":v]");
-            filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
-            filterComplex.append("setpts=PTS-STARTPTS+").append(ts.getTimelineStartTime()).append("/TB,");
+                double segmentDuration = ts.getTimelineEndTime() - ts.getTimelineStartTime();
+                filterComplex.append("[").append(inputIdx).append(":v]");
+                filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
+                filterComplex.append("setpts=PTS-STARTPTS+").append(ts.getTimelineStartTime()).append("/TB,");
 
 // Apply crop filter for wipe transition
-            boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
-                    !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
-            if (hasCrop) {
-                double transStart = ts.getTimelineStartTime();
-                double transEnd = Math.min(ts.getTimelineStartTime() + 1.0, ts.getTimelineEndTime());
-                filterComplex.append("crop=")
-                        .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
-                        .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
-                        .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
-                        .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
-                        .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
-                        .append(",");
-                System.out.println("Crop filter for text segment " + ts.getId() + ": w=" + transitionOffsets.get("cropWidth") +
-                        ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
-                        ", enabled between t=" + transStart + " and t=" + transEnd);
-            }
+                boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
+                        !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
+                if (hasCrop) {
+                    double transStart = ts.getTimelineStartTime();
+                    double transEnd = Math.min(ts.getTimelineStartTime() + 1.0, ts.getTimelineEndTime());
+                    filterComplex.append("crop=")
+                            .append("w='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropWidth")).append(",iw)':")
+                            .append("h='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropHeight")).append(",ih)':")
+                            .append("x='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropX")).append(",0)':")
+                            .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
+                            .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
+                            .append(",");
+                    System.out.println("Crop filter for text segment " + ts.getId() + ": w=" + transitionOffsets.get("cropWidth") +
+                            ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
+                            ", enabled between t=" + transStart + " and t=" + transEnd);
+                }
 
 // Apply rotation from transition
-            String rotationExpr = transitionOffsets.get("rotation");
-            if (rotationExpr != null && !rotationExpr.equals("0")) {
-                filterComplex.append("format=rgba,");
-                filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
-                filterComplex.append("format=rgba,");
-                System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
-            }
-
-            // Apply opacity (NEW)
-            double opacity = ts.getOpacity() != null ? ts.getOpacity() : 1.0;
-            if (opacity < 1.0) {
-                filterComplex.append("format=rgba,");
-                filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
-                filterComplex.append("format=rgba,");
-                System.out.println("Opacity applied to text segment " + ts.getId() + ": " + opacity);
-            }
-
-            // Handle scaling with keyframes
-            StringBuilder scaleExpr = new StringBuilder();
-            List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
-            double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
-
-            // Apply resolution multiplier to scale down high-resolution PNG
-            double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
-            double baseScale = 1.0 / resolutionMultiplier;
-
-            if (!scaleKeyframes.isEmpty()) {
-                Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
-                scaleExpr.append(String.format("%.6f", firstKfValue));
-                for (int j = 1; j < scaleKeyframes.size(); j++) {
-                    Keyframe prevKf = scaleKeyframes.get(j - 1);
-                    Keyframe kf = scaleKeyframes.get(j);
-                    double prevTime = prevKf.getTime();
-                    double kfTime = kf.getTime();
-                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                    double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                    if (kfTime > prevTime) {
-                        double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
-                        double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                        scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                    }
+                String rotationExpr = transitionOffsets.get("rotation");
+                if (rotationExpr != null && !rotationExpr.equals("0")) {
+                    filterComplex.append("format=rgba,");
+                    filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
+                    filterComplex.append("format=rgba,");
+                    System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
                 }
-            } else {
-                scaleExpr.append(String.format("%.6f", defaultScale));
-            }
 
-            // Apply transition scale multiplier
-            String transitionScale = transitionOffsets.get("scale");
-            if (!transitionScale.equals("1")) {
-                scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
-            }
-
-            filterComplex.append("scale=w='iw*").append(baseScale).append("*").append(scaleExpr)
-                    .append("':h='ih*").append(baseScale).append("*").append(scaleExpr)
-                    .append("':flags=lanczos:force_original_aspect_ratio=decrease:eval=frame[scaled").append(outputLabel).append("];");
-
-            // Handle position X with keyframes
-            StringBuilder xExpr = new StringBuilder();
-            List<Keyframe> posXKeyframes = ts.getKeyframes().getOrDefault("positionX", new ArrayList<>());
-            Integer defaultPosX = ts.getPositionX();
-            double baseX = defaultPosX != null ? defaultPosX : 0;
-
-            if (!posXKeyframes.isEmpty()) {
-                Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
-                xExpr.append(String.format("%.6f", firstKfValue));
-                for (int j = 1; j < posXKeyframes.size(); j++) {
-                    Keyframe prevKf = posXKeyframes.get(j - 1);
-                    Keyframe kf = posXKeyframes.get(j);
-                    double prevTime = prevKf.getTime();
-                    double kfTime = kf.getTime();
-                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                    double kfValue = ((Number) kf.getValue()).doubleValue();
-
-                    if (kfTime > prevTime) {
-                        double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
-                        double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                        xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
-                    }
+                // Apply opacity (NEW)
+                double opacity = ts.getOpacity() != null ? ts.getOpacity() : 1.0;
+                if (opacity < 1.0) {
+                    filterComplex.append("format=rgba,");
+                    filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
+                    filterComplex.append("format=rgba,");
+                    System.out.println("Opacity applied to text segment " + ts.getId() + ": " + opacity);
                 }
-            } else {
-                xExpr.append(String.format("%.6f", baseX));
-            }
 
-            // Add transition offset for x
-            String xTransitionOffset = transitionOffsets.get("x");
-            if (!xTransitionOffset.equals("0")) {
-                xExpr.append("+").append(xTransitionOffset);
-            }
-            xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
+                // Handle scaling with keyframes
+                StringBuilder scaleExpr = new StringBuilder();
+                List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
+                double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
 
-            // Handle position Y with keyframes
-            StringBuilder yExpr = new StringBuilder();
-            List<Keyframe> posYKeyframes = ts.getKeyframes().getOrDefault("positionY", new ArrayList<>());
-            Integer defaultPosY = ts.getPositionY();
-            double baseY = defaultPosY != null ? defaultPosY : 0;
+                // Apply resolution multiplier to scale down high-resolution PNG
+                double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
+                double baseScale = 1.0 / resolutionMultiplier;
 
-            if (!posYKeyframes.isEmpty()) {
-                Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
-                yExpr.append(String.format("%.6f", firstKfValue));
-                for (int j = 1; j < posYKeyframes.size(); j++) {
-                    Keyframe prevKf = posYKeyframes.get(j - 1);
-                    Keyframe kf = posYKeyframes.get(j);
-                    double prevTime = prevKf.getTime();
-                    double kfTime = kf.getTime();
-                    double prevValue = ((Number) prevKf.getValue()).doubleValue();
-                    double kfValue = ((Number) kf.getValue()).doubleValue();
+                if (!scaleKeyframes.isEmpty()) {
+                    Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                    double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
+                    scaleExpr.append(String.format("%.6f", firstKfValue));
+                    for (int j = 1; j < scaleKeyframes.size(); j++) {
+                        Keyframe prevKf = scaleKeyframes.get(j - 1);
+                        Keyframe kf = scaleKeyframes.get(j);
+                        double prevTime = prevKf.getTime();
+                        double kfTime = kf.getTime();
+                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                        double kfValue = ((Number) kf.getValue()).doubleValue();
 
-                    if (kfTime > prevTime) {
-                        double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
-                        double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                        yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
-                                .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
-                                .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                        if (kfTime > prevTime) {
+                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                            scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                        }
                     }
+                } else {
+                    scaleExpr.append(String.format("%.6f", defaultScale));
                 }
-            } else {
-                yExpr.append(String.format("%.6f", baseY));
-            }
 
-            // Add transition offset for y
-            String yTransitionOffset = transitionOffsets.get("y");
-            if (!yTransitionOffset.equals("0")) {
-                yExpr.append("+").append(yTransitionOffset);
-            }
-            yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
+                // Apply transition scale multiplier
+                String transitionScale = transitionOffsets.get("scale");
+                if (!transitionScale.equals("1")) {
+                    scaleExpr.insert(0, "(").append(")*(").append(transitionScale).append(")");
+                }
 
-            // Overlay the scaled text PNG onto the previous output
-            filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
-            filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
-            filterComplex.append(":enable='between(t,").append(ts.getTimelineStartTime()).append(",").append(ts.getTimelineEndTime()).append(")'");
-            filterComplex.append("[ov").append(outputLabel).append("];");
-            System.out.println("Text segment filter chain for " + ts.getId() + ": " +
-                    filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
-            lastOutput = "ov" + outputLabel;
+                filterComplex.append("scale=w='iw*").append(baseScale).append("*").append(scaleExpr)
+                        .append("':h='ih*").append(baseScale).append("*").append(scaleExpr)
+                        .append("':flags=lanczos:force_original_aspect_ratio=decrease:eval=frame[scaled").append(outputLabel).append("];");
+
+                // Handle position X with keyframes
+                StringBuilder xExpr = new StringBuilder();
+                List<Keyframe> posXKeyframes = ts.getKeyframes().getOrDefault("positionX", new ArrayList<>());
+                Integer defaultPosX = ts.getPositionX();
+                double baseX = defaultPosX != null ? defaultPosX : 0;
+
+                if (!posXKeyframes.isEmpty()) {
+                    Collections.sort(posXKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                    double firstKfValue = ((Number) posXKeyframes.get(0).getValue()).doubleValue();
+                    xExpr.append(String.format("%.6f", firstKfValue));
+                    for (int j = 1; j < posXKeyframes.size(); j++) {
+                        Keyframe prevKf = posXKeyframes.get(j - 1);
+                        Keyframe kf = posXKeyframes.get(j);
+                        double prevTime = prevKf.getTime();
+                        double kfTime = kf.getTime();
+                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                        double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                        if (kfTime > prevTime) {
+                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                            xExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                        }
+                    }
+                } else {
+                    xExpr.append(String.format("%.6f", baseX));
+                }
+
+                // Add transition offset for x
+                String xTransitionOffset = transitionOffsets.get("x");
+                if (!xTransitionOffset.equals("0")) {
+                    xExpr.append("+").append(xTransitionOffset);
+                }
+                xExpr.insert(0, "(W/2)+(").append(")-(w/2)");
+
+                // Handle position Y with keyframes
+                StringBuilder yExpr = new StringBuilder();
+                List<Keyframe> posYKeyframes = ts.getKeyframes().getOrDefault("positionY", new ArrayList<>());
+                Integer defaultPosY = ts.getPositionY();
+                double baseY = defaultPosY != null ? defaultPosY : 0;
+
+                if (!posYKeyframes.isEmpty()) {
+                    Collections.sort(posYKeyframes, Comparator.comparingDouble(Keyframe::getTime));
+                    double firstKfValue = ((Number) posYKeyframes.get(0).getValue()).doubleValue();
+                    yExpr.append(String.format("%.6f", firstKfValue));
+                    for (int j = 1; j < posYKeyframes.size(); j++) {
+                        Keyframe prevKf = posYKeyframes.get(j - 1);
+                        Keyframe kf = posYKeyframes.get(j);
+                        double prevTime = prevKf.getTime();
+                        double kfTime = kf.getTime();
+                        double prevValue = ((Number) prevKf.getValue()).doubleValue();
+                        double kfValue = ((Number) kf.getValue()).doubleValue();
+
+                        if (kfTime > prevTime) {
+                            double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
+                            double timelineKfTime = ts.getTimelineStartTime() + kfTime;
+                            yExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                                    .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
+                                    .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
+                        }
+                    }
+                } else {
+                    yExpr.append(String.format("%.6f", baseY));
+                }
+
+                // Add transition offset for y
+                String yTransitionOffset = transitionOffsets.get("y");
+                if (!yTransitionOffset.equals("0")) {
+                    yExpr.append("+").append(yTransitionOffset);
+                }
+                yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
+
+                // Overlay the scaled text PNG onto the previous output
+                filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
+                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
+                filterComplex.append(":enable='between(t,").append(ts.getTimelineStartTime()).append(",").append(ts.getTimelineEndTime()).append(")'");
+                filterComplex.append("[ov").append(outputLabel).append("];");
+                System.out.println("Text segment filter chain for " + ts.getId() + ": " +
+                        filterComplex.substring(Math.max(0, filterComplex.length() - 200)));
+                lastOutput = "ov" + outputLabel;
             }
         }
 
@@ -3001,6 +3003,8 @@ public class VideoEditingService {
     private String generateTextPng(TextSegment ts, File tempDir, int canvasWidth, int canvasHeight) throws IOException {
         // Resolution multiplier for high-quality text (1.5 for 4K, 2.0 for 1080p)
         final double RESOLUTION_MULTIPLIER = canvasWidth >= 3840 ? 1.5 : 2.0;
+        // Scaling factor for border width to match frontend's typical scaleFactor
+        final double BORDER_SCALE_FACTOR = canvasWidth >= 3840 ? 1.5 : 2.0;; // Adjusted to approximate frontend's scaleFactor
 
         // Parse colors
         Color fontColor = parseColor(ts.getFontColor(), Color.WHITE, "font", ts.getId());
@@ -3036,17 +3040,27 @@ public class VideoEditingService {
                 maxTextWidth = lineWidth;
             }
         }
+        // Calculate text block height including ascent and descent for proper centering
+        int textBlockHeight = totalTextHeight - (int) (lineHeight * (lineSpacing - 1.0));
+        if (lines.length > 1) {
+            textBlockHeight += (int) (lineHeight * (lineSpacing - 1.0) * (lines.length - 1));
+        } else {
+            textBlockHeight = fm.getAscent() + fm.getDescent();
+        }
         g2d.dispose();
         tempImage.flush();
 
-        // Apply padding and border
-        int padding = (int) ((ts.getBackgroundPadding() != null ? ts.getBackgroundPadding() : 10) * RESOLUTION_MULTIPLIER);
-        int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * RESOLUTION_MULTIPLIER);
+        // Apply background dimensions and border (aligned with frontend logic)
+        int bgHeight = (int) ((ts.getBackgroundH() != null ? ts.getBackgroundH() : 0) * RESOLUTION_MULTIPLIER);
+        int bgWidth = (int) ((ts.getBackgroundW() != null ? ts.getBackgroundW() : 0) * RESOLUTION_MULTIPLIER);
+        int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * BORDER_SCALE_FACTOR);
         int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * RESOLUTION_MULTIPLIER);
 
-        // Calculate final image dimensions
-        int totalWidth = maxTextWidth + 2 * (padding + borderWidth);
-        int totalHeight = totalTextHeight + 2 * (padding + borderWidth);
+        // Calculate final image dimensions (text size + background dimensions + border)
+        int contentWidth = maxTextWidth + bgWidth; // Background width without border
+        int contentHeight = textBlockHeight + bgHeight; // Background height without border
+        int totalWidth = contentWidth + 2 * borderWidth; // Total width including border
+        int totalHeight = contentHeight + 2 * borderWidth; // Total height including border
 
         // Cap dimensions to prevent excessive memory usage
         int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER);
@@ -3054,11 +3068,40 @@ public class VideoEditingService {
             double scaleDown = Math.min(maxDimension / (double) totalWidth, maxDimension / (double) totalHeight);
             totalWidth = (int) (totalWidth * scaleDown);
             totalHeight = (int) (totalHeight * scaleDown);
+            contentWidth = (int) (contentWidth * scaleDown);
+            contentHeight = (int) (contentHeight * scaleDown);
             baseFontSize *= scaleDown;
-            padding = (int) (padding * scaleDown);
             borderWidth = (int) (borderWidth * scaleDown);
             borderRadius = (int) (borderRadius * scaleDown);
+            bgWidth = (int) (bgWidth * scaleDown);
+            bgHeight = (int) (bgHeight * scaleDown);
             font = font.deriveFont((float) baseFontSize);
+            // Recalculate text dimensions with scaled font
+            tempImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+            g2d = tempImage.createGraphics();
+            g2d.setFont(font);
+            fm = g2d.getFontMetrics();
+            lineHeight = fm.getHeight();
+            totalTextHeight = (int) (lineHeight * lines.length * lineSpacing);
+            maxTextWidth = 0;
+            for (String line : lines) {
+                int lineWidth = fm.stringWidth(line);
+                if (lineWidth > maxTextWidth) {
+                    maxTextWidth = lineWidth;
+                }
+            }
+            textBlockHeight = totalTextHeight - (int) (lineHeight * (lineSpacing - 1.0));
+            if (lines.length > 1) {
+                textBlockHeight += (int) (lineHeight * (lineSpacing - 1.0) * (lines.length - 1));
+            } else {
+                textBlockHeight = fm.getAscent() + fm.getDescent();
+            }
+            g2d.dispose();
+            tempImage.flush();
+            contentWidth = maxTextWidth + bgWidth;
+            contentHeight = textBlockHeight + bgHeight;
+            totalWidth = contentWidth + 2 * borderWidth;
+            totalHeight = contentHeight + 2 * borderWidth;
         }
 
         // Create high-resolution image
@@ -3076,10 +3119,10 @@ public class VideoEditingService {
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
             if (borderRadius > 0) {
                 g2d.fillRoundRect(
+                        borderWidth, // Start at borderWidth to leave space for border
                         borderWidth,
-                        borderWidth,
-                        totalWidth - 2 * borderWidth,
-                        totalHeight - 2 * borderWidth,
+                        contentWidth, // Background size without border
+                        contentHeight,
                         borderRadius,
                         borderRadius
                 );
@@ -3087,8 +3130,8 @@ public class VideoEditingService {
                 g2d.fillRect(
                         borderWidth,
                         borderWidth,
-                        totalWidth - 2 * borderWidth,
-                        totalHeight - 2 * borderWidth
+                        contentWidth,
+                        contentHeight
                 );
             }
         }
@@ -3096,13 +3139,13 @@ public class VideoEditingService {
         // Draw border
         if (borderColor != null && borderWidth > 0) {
             g2d.setColor(borderColor);
-            g2d.setStroke(new BasicStroke(borderWidth));
+            g2d.setStroke(new BasicStroke((float) borderWidth));
             if (borderRadius > 0) {
                 g2d.drawRoundRect(
+                        borderWidth / 2, // Center the stroke on the border's inner edge
                         borderWidth / 2,
-                        borderWidth / 2,
-                        totalWidth - borderWidth,
-                        totalHeight - borderWidth,
+                        contentWidth + borderWidth, // Include one borderWidth for outer edge
+                        contentHeight + borderWidth,
                         borderRadius,
                         borderRadius
                 );
@@ -3110,18 +3153,18 @@ public class VideoEditingService {
                 g2d.drawRect(
                         borderWidth / 2,
                         borderWidth / 2,
-                        totalWidth - borderWidth,
-                        totalHeight - borderWidth
+                        contentWidth + borderWidth,
+                        contentHeight + borderWidth
                 );
             }
         }
 
-        // Draw text
+        // Draw text with corrected vertical positioning
         g2d.setColor(fontColor);
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-        int y = padding + borderWidth + fm.getAscent();
+        int y = borderWidth + (contentHeight - textBlockHeight) / 2 + fm.getAscent();
         for (String line : lines) {
-            int x = calculateXPosition(line, alignment, totalWidth, fm, padding, borderWidth);
+            int x = calculateXPosition(line, alignment, totalWidth, fm, 0, borderWidth);
             g2d.drawString(line, x, y);
             y += (int) (lineHeight * lineSpacing);
         }

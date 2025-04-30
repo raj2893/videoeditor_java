@@ -24,8 +24,9 @@ public class TextSegment implements Segment {
     private Double backgroundOpacity = 1.0; // Opacity of background (0.0 to 1.0)
     private Integer backgroundBorderWidth = 0; // Border thickness in pixels
     private String backgroundBorderColor = "transparent"; // Border color
-    private Integer backgroundPadding = 10; // Padding in pixels
-    private Integer backgroundBorderRadius = 0; // New field for border radius in pixels
+    private Integer backgroundH = 0; // Background height in pixels (replaced backgroundPadding)
+    private Integer backgroundW = 0; // Background width in pixels (replaced backgroundPadding)
+    private Integer backgroundBorderRadius = 0; // Border radius in pixels
 
     // Enhanced shadow properties
     private String shadowColor = "transparent"; // Shadow color
@@ -61,12 +62,20 @@ public class TextSegment implements Segment {
         this.backgroundBorderWidth = backgroundBorderWidth != null ? backgroundBorderWidth : 0;
     }
 
-    // Validate background padding
-    public void setBackgroundPadding(Integer backgroundPadding) {
-        if (backgroundPadding != null && backgroundPadding < 0) {
-            throw new IllegalArgumentException("Background padding must be non-negative");
+    // Validate background height
+    public void setBackgroundH(Integer backgroundH) {
+        if (backgroundH != null && backgroundH < 0) {
+            throw new IllegalArgumentException("Background height must be non-negative");
         }
-        this.backgroundPadding = backgroundPadding != null ? backgroundPadding : 10;
+        this.backgroundH = backgroundH != null ? backgroundH : 0;
+    }
+
+    // Validate background width
+    public void setBackgroundW(Integer backgroundW) {
+        if (backgroundW != null && backgroundW < 0) {
+            throw new IllegalArgumentException("Background width must be non-negative");
+        }
+        this.backgroundW = backgroundW != null ? backgroundW : 0;
     }
 
     // Validate background border radius
@@ -173,7 +182,8 @@ public class TextSegment implements Segment {
     public void setShadowOffsetX(Integer shadowOffsetX) { this.shadowOffsetX = shadowOffsetX; }
     public Integer getShadowOffsetY() { return shadowOffsetY; }
     public void setShadowOffsetY(Integer shadowOffsetY) { this.shadowOffsetY = shadowOffsetY; }
-    public Integer getBackgroundPadding() { return backgroundPadding; }
+    public Integer getBackgroundH() { return backgroundH; }
+    public Integer getBackgroundW() { return backgroundW; }
     public Integer getBackgroundBorderWidth() { return backgroundBorderWidth; }
     public Double getBackgroundOpacity() { return backgroundOpacity; }
     public Integer getBackgroundBorderRadius() { return backgroundBorderRadius; }

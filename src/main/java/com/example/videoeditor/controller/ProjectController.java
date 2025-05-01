@@ -348,13 +348,18 @@ public class ProjectController {
             Double opacity = request.get("opacity") != null ? Double.valueOf(request.get("opacity").toString()) : null;
             String alignment = (String) request.get("alignment");
 
-            // New parameters
+            // New background parameters
             Double backgroundOpacity = request.get("backgroundOpacity") != null ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
             Integer backgroundBorderWidth = request.get("backgroundBorderWidth") != null ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
             Integer backgroundH = request.get("backgroundH") != null ? Integer.valueOf(request.get("backgroundH").toString()) : null;
             Integer backgroundW = request.get("backgroundW") != null ? Integer.valueOf(request.get("backgroundW").toString()) : null;
             Integer backgroundBorderRadius = request.get("backgroundBorderRadius") != null ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
+
+            // New text border parameters
+            String textBorderColor = (String) request.get("textBorderColor");
+            Integer textBorderWidth = request.get("textBorderWidth") != null ? Integer.valueOf(request.get("textBorderWidth").toString()) : null;
+            Double textBorderOpacity = request.get("textBorderOpacity") != null ? Double.valueOf(request.get("textBorderOpacity").toString()) : null;
 
             // Existing validation
             if (text == null || layer == null || timelineStartTime == null || timelineEndTime == null) {
@@ -367,7 +372,7 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
             }
 
-            // New validation
+            // New background validation
             if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
                 return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
             }
@@ -384,12 +389,21 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
 
+            // New text border validation
+            if (textBorderWidth != null && textBorderWidth < 0) {
+                return ResponseEntity.badRequest().body("Text border width must be non-negative");
+            }
+            if (textBorderOpacity != null && (textBorderOpacity < 0 || textBorderOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Text border opacity must be between 0 and 1");
+            }
+
             // Add text to timeline
             videoEditingService.addTextToTimeline(
                     sessionId, text, layer, timelineStartTime, timelineEndTime,
                     fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
-                    backgroundW, backgroundBorderRadius);
+                    backgroundW, backgroundBorderRadius,
+                    textBorderColor, textBorderWidth, textBorderOpacity);
 
             // Retrieve the newly added text segment from TimelineState
             TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
@@ -422,6 +436,9 @@ public class ProjectController {
             response.put("backgroundH", addedTextSegment.getBackgroundH());
             response.put("backgroundW", addedTextSegment.getBackgroundW());
             response.put("backgroundBorderRadius", addedTextSegment.getBackgroundBorderRadius());
+            response.put("textBorderColor", addedTextSegment.getTextBorderColor());
+            response.put("textBorderWidth", addedTextSegment.getTextBorderWidth());
+            response.put("textBorderOpacity", addedTextSegment.getTextBorderOpacity());
             response.put("keyframes", addedTextSegment.getKeyframes() != null ? addedTextSegment.getKeyframes() : new HashMap<>());
 
             return ResponseEntity.ok(response);
@@ -457,13 +474,18 @@ public class ProjectController {
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
-            // New parameters
+            // New background parameters
             Double backgroundOpacity = request.containsKey("backgroundOpacity") ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
             Integer backgroundBorderWidth = request.containsKey("backgroundBorderWidth") ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
             Integer backgroundH = request.containsKey("backgroundH") ? Integer.valueOf(request.get("backgroundH").toString()) : null;
             Integer backgroundW = request.containsKey("backgroundW") ? Integer.valueOf(request.get("backgroundW").toString()) : null;
             Integer backgroundBorderRadius = request.containsKey("backgroundBorderRadius") ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
+
+            // New text border parameters
+            String textBorderColor = (String) request.get("textBorderColor");
+            Integer textBorderWidth = request.containsKey("textBorderWidth") ? Integer.valueOf(request.get("textBorderWidth").toString()) : null;
+            Double textBorderOpacity = request.containsKey("textBorderOpacity") ? Double.valueOf(request.get("textBorderOpacity").toString()) : null;
 
             // Parse keyframes
             Map<String, List<Keyframe>> parsedKeyframes = null;
@@ -496,7 +518,7 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
             }
 
-            // New validation
+            // New background validation
             if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
                 return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
             }
@@ -513,10 +535,21 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
 
-            videoEditingService.updateTextSegment(sessionId, segmentId, text, fontFamily, scale,
+            // New text border validation
+            if (textBorderWidth != null && textBorderWidth < 0) {
+                return ResponseEntity.badRequest().body("Text border width must be non-negative");
+            }
+            if (textBorderOpacity != null && (textBorderOpacity < 0 || textBorderOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Text border opacity must be between 0 and 1");
+            }
+
+            videoEditingService.updateTextSegment(
+                    sessionId, segmentId, text, fontFamily, scale,
                     fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
-                    backgroundW, backgroundBorderRadius, parsedKeyframes);
+                    backgroundW, backgroundBorderRadius,
+                    textBorderColor, textBorderWidth, textBorderOpacity,
+                    parsedKeyframes);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {

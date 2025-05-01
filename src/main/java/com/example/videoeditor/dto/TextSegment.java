@@ -28,6 +28,11 @@ public class TextSegment implements Segment {
     private Integer backgroundW = 0; // Background width in pixels (replaced backgroundPadding)
     private Integer backgroundBorderRadius = 0; // Border radius in pixels
 
+    // Text border properties
+    private String textBorderColor = "transparent"; // Text border (stroke) color
+    private Integer textBorderWidth = 0; // Text border (stroke) width in pixels
+    private Double textBorderOpacity = 1.0; // Opacity of text border (0.0 to 1.0)
+
     // Enhanced shadow properties
     private String shadowColor = "transparent"; // Shadow color
     private Integer shadowOffsetX = 0; // Shadow X offset in pixels
@@ -84,6 +89,22 @@ public class TextSegment implements Segment {
             throw new IllegalArgumentException("Background border radius must be non-negative");
         }
         this.backgroundBorderRadius = backgroundBorderRadius != null ? backgroundBorderRadius : 0;
+    }
+
+    // Validate text border width
+    public void setTextBorderWidth(Integer textBorderWidth) {
+        if (textBorderWidth != null && textBorderWidth < 0) {
+            throw new IllegalArgumentException("Text border width must be non-negative");
+        }
+        this.textBorderWidth = textBorderWidth != null ? textBorderWidth : 0;
+    }
+
+    // Validate text border opacity
+    public void setTextBorderOpacity(Double textBorderOpacity) {
+        if (textBorderOpacity != null && (textBorderOpacity < 0.0 || textBorderOpacity > 1.0)) {
+            throw new IllegalArgumentException("Text border opacity must be between 0.0 and 1.0");
+        }
+        this.textBorderOpacity = textBorderOpacity != null ? textBorderOpacity : 1.0;
     }
 
     // Validate shadow blur radius
@@ -176,6 +197,10 @@ public class TextSegment implements Segment {
     public String getAlignment() { return alignment; }
     public String getBackgroundBorderColor() { return backgroundBorderColor; }
     public void setBackgroundBorderColor(String backgroundBorderColor) { this.backgroundBorderColor = backgroundBorderColor; }
+    public String getTextBorderColor() { return textBorderColor; }
+    public void setTextBorderColor(String textBorderColor) { this.textBorderColor = textBorderColor; }
+    public Integer getTextBorderWidth() { return textBorderWidth; }
+    public Double getTextBorderOpacity() { return textBorderOpacity; }
     public String getShadowColor() { return shadowColor; }
     public void setShadowColor(String shadowColor) { this.shadowColor = shadowColor; }
     public Integer getShadowOffsetX() { return shadowOffsetX; }

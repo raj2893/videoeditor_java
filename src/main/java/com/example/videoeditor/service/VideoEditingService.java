@@ -20,6 +20,9 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
+import java.awt.font.FontRenderContext;
+import java.awt.font.TextLayout;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.file.Paths;
@@ -674,7 +677,8 @@ public class VideoEditingService {
                                   Integer positionX, Integer positionY, Double opacity, String alignment,
                                   Double backgroundOpacity, Integer backgroundBorderWidth, String backgroundBorderColor,
                                   Integer backgroundH, Integer backgroundW,
-                                  Integer backgroundBorderRadius) {
+                                  Integer backgroundBorderRadius,
+                                  String textBorderColor, Integer textBorderWidth, Double textBorderOpacity) {
         EditSession session = getSession(sessionId);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
         timelineEndTime = roundToThreeDecimals(timelineEndTime);
@@ -703,6 +707,10 @@ public class VideoEditingService {
         textSegment.setBackgroundH(backgroundH);
         textSegment.setBackgroundW(backgroundW);
         textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
+        // Set text border properties
+        textSegment.setTextBorderColor(textBorderColor != null ? textBorderColor : "transparent");
+        textSegment.setTextBorderWidth(textBorderWidth);
+        textSegment.setTextBorderOpacity(textBorderOpacity);
 
         session.getTimelineState().getTextSegments().add(textSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -729,6 +737,9 @@ public class VideoEditingService {
             Integer backgroundH,
             Integer backgroundW,
             Integer backgroundBorderRadius,
+            String textBorderColor,
+            Integer textBorderWidth,
+            Double textBorderOpacity,
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
         EditSession session = getSession(sessionId);
@@ -801,6 +812,9 @@ public class VideoEditingService {
         if (backgroundH != null) textSegment.setBackgroundH(backgroundH);
         if (backgroundW != null) textSegment.setBackgroundW(backgroundW);
         if (backgroundBorderRadius != null) textSegment.setBackgroundBorderRadius(backgroundBorderRadius);
+        if (textBorderColor != null) textSegment.setTextBorderColor(textBorderColor);
+        if (textBorderWidth != null) textSegment.setTextBorderWidth(textBorderWidth);
+        if (textBorderOpacity != null) textSegment.setTextBorderOpacity(textBorderOpacity);
 
         // Validate timeline position
         TimelineState timelineState = session.getTimelineState();
@@ -3059,8 +3073,10 @@ public class VideoEditingService {
         Color fontColor = parseColor(ts.getFontColor(), Color.WHITE, "font", ts.getId());
         Color bgColor = ts.getBackgroundColor() != null && !ts.getBackgroundColor().equals("transparent") ?
                 parseColor(ts.getBackgroundColor(), null, "background", ts.getId()) : null;
-        Color borderColor = ts.getBackgroundBorderColor() != null && !ts.getBackgroundBorderColor().equals("transparent") ?
+        Color bgBorderColor = ts.getBackgroundBorderColor() != null && !ts.getBackgroundBorderColor().equals("transparent") ?
                 parseColor(ts.getBackgroundBorderColor(), null, "border", ts.getId()) : null;
+        Color textBorderColor = ts.getTextBorderColor() != null && !ts.getTextBorderColor().equals("transparent") ?
+                parseColor(ts.getTextBorderColor(), null, "text border", ts.getId()) : null;
 
         // Load font with fixed base size of 24, scaled by maxScale and resolution multiplier
         double baseFontSize = 24.0 * maxScale * RESOLUTION_MULTIPLIER;
@@ -3099,11 +3115,13 @@ public class VideoEditingService {
         g2d.dispose();
         tempImage.flush();
 
-        // Apply background dimensions and border (aligned with frontend logic, using maxScale)
+        // Apply background dimensions and borders (aligned with frontend logic, using maxScale)
         int bgHeight = (int) ((ts.getBackgroundH() != null ? ts.getBackgroundH() : 0) * maxScale * RESOLUTION_MULTIPLIER);
         int bgWidth = (int) ((ts.getBackgroundW() != null ? ts.getBackgroundW() : 0) * maxScale * RESOLUTION_MULTIPLIER);
-        int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
+        int bgBorderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
         int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * maxScale * RESOLUTION_MULTIPLIER);
+        int textBorderWidth = (int) ((ts.getTextBorderWidth() != null ? ts.getTextBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
+        float textBorderOpacity = ts.getTextBorderOpacity() != null ? ts.getTextBorderOpacity().floatValue() : 1.0f;
 
         // Calculate content dimensions (text size + background dimensions)
         int contentWidth = maxTextWidth + bgWidth;
@@ -3112,26 +3130,27 @@ public class VideoEditingService {
         // Cap dimensions to prevent excessive memory usage, prioritizing text size
         int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER * 1.5); // Increase threshold by 1.5x
         double scaleDown = 1.0;
-        if (contentWidth + 2 * borderWidth > maxDimension || contentHeight + 2 * borderWidth > maxDimension) {
+        if (contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth > maxDimension || contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth > maxDimension) {
             // Calculate scaleDown based on content dimensions, but limit reduction to preserve text
             scaleDown = Math.min(
-                    maxDimension / (double) (contentWidth + 2 * borderWidth),
-                    maxDimension / (double) (contentHeight + 2 * borderWidth)
+                    maxDimension / (double) (contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth),
+                    maxDimension / (double) (contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth)
             );
-            // Cap scaleDown to prevent excessive reduction of text size (e.g., allow scales up to 10)
+            // Cap scaleDown to prevent excessive reduction of text size
             scaleDown = Math.max(scaleDown, 0.5); // Ensure at least 50% of original size
             bgWidth = (int) (bgWidth * scaleDown);
             bgHeight = (int) (bgHeight * scaleDown);
-            borderWidth = (int) (borderWidth * scaleDown);
+            bgBorderWidth = (int) (bgBorderWidth * scaleDown);
             borderRadius = (int) (borderRadius * scaleDown);
+            textBorderWidth = (int) (textBorderWidth * scaleDown);
             // Recalculate content dimensions without scaling text
             contentWidth = maxTextWidth + bgWidth;
             contentHeight = textBlockHeight + bgHeight;
         }
 
         // Calculate final image dimensions
-        int totalWidth = contentWidth + 2 * borderWidth;
-        int totalHeight = contentHeight + 2 * borderWidth;
+        int totalWidth = contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth;
+        int totalHeight = contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth;
 
         // Create high-resolution image
         BufferedImage image = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
@@ -3149,8 +3168,8 @@ public class VideoEditingService {
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
             if (borderRadius > 0) {
                 g2d.fillRoundRect(
-                        borderWidth,
-                        borderWidth,
+                        bgBorderWidth + textBorderWidth,
+                        bgBorderWidth + textBorderWidth,
                         contentWidth,
                         contentHeight,
                         borderRadius,
@@ -3158,43 +3177,53 @@ public class VideoEditingService {
                 );
             } else {
                 g2d.fillRect(
-                        borderWidth,
-                        borderWidth,
+                        bgBorderWidth + textBorderWidth,
+                        bgBorderWidth + textBorderWidth,
                         contentWidth,
                         contentHeight
                 );
             }
         }
 
-        // Draw border
-        if (borderColor != null && borderWidth > 0) {
-            g2d.setColor(borderColor);
-            g2d.setStroke(new BasicStroke((float) borderWidth));
+        // Draw background border
+        if (bgBorderColor != null && bgBorderWidth > 0) {
+            g2d.setColor(bgBorderColor);
+            g2d.setStroke(new BasicStroke((float) bgBorderWidth));
             if (borderRadius > 0) {
                 g2d.drawRoundRect(
-                        borderWidth / 2,
-                        borderWidth / 2,
-                        contentWidth + borderWidth,
-                        contentHeight + borderWidth,
-                        borderRadius + borderWidth,
-                        borderRadius + borderWidth
+                        bgBorderWidth / 2 + textBorderWidth,
+                        bgBorderWidth / 2 + textBorderWidth,
+                        contentWidth + bgBorderWidth,
+                        contentHeight + bgBorderWidth,
+                        borderRadius + bgBorderWidth,
+                        borderRadius + bgBorderWidth
                 );
             } else {
                 g2d.drawRect(
-                        borderWidth / 2,
-                        borderWidth / 2,
-                        contentWidth + borderWidth,
-                        contentHeight + borderWidth
+                        bgBorderWidth / 2 + textBorderWidth,
+                        bgBorderWidth / 2 + textBorderWidth,
+                        contentWidth + bgBorderWidth,
+                        contentHeight + bgBorderWidth
                 );
             }
         }
 
-        // Draw text with corrected vertical positioning
-        g2d.setColor(fontColor);
+        // Draw text with border (stroke) if specified
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-        int y = borderWidth + (contentHeight - textBlockHeight) / 2 + fm.getAscent();
+        int y = bgBorderWidth + textBorderWidth + (contentHeight - textBlockHeight) / 2 + fm.getAscent();
         for (String line : lines) {
-            int x = calculateXPosition(line, alignment, totalWidth, fm, 0, borderWidth);
+            int x = calculateXPosition(line, alignment, totalWidth, fm, 0, bgBorderWidth + textBorderWidth);
+            if (textBorderColor != null && textBorderWidth > 0) {
+                // Draw text border (stroke)
+                g2d.setColor(new Color(textBorderColor.getRed(), textBorderColor.getGreen(), textBorderColor.getBlue(), (int) (textBorderOpacity * 255)));
+                g2d.setStroke(new BasicStroke((float) textBorderWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                FontRenderContext frc = g2d.getFontRenderContext();
+                TextLayout textLayout = new TextLayout(line, font, frc);
+                Shape shape = textLayout.getOutline(AffineTransform.getTranslateInstance(x, y));
+                g2d.draw(shape);
+            }
+            // Draw text fill
+            g2d.setColor(fontColor);
             g2d.drawString(line, x, y);
             y += (int) (lineHeight * lineSpacing);
         }

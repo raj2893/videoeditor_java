@@ -3083,53 +3083,33 @@ public class VideoEditingService {
         int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
         int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * maxScale * RESOLUTION_MULTIPLIER);
 
-        // Calculate final image dimensions (text size + background dimensions + border)
-        int contentWidth = maxTextWidth + bgWidth; // Background width without border
-        int contentHeight = textBlockHeight + bgHeight; // Background height without border
-        int totalWidth = contentWidth + 2 * borderWidth; // Total width including border
-        int totalHeight = contentHeight + 2 * borderWidth; // Total height including border
+        // Calculate content dimensions (text size + background dimensions)
+        int contentWidth = maxTextWidth + bgWidth;
+        int contentHeight = textBlockHeight + bgHeight;
 
-        // Cap dimensions to prevent excessive memory usage
-        int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER);
-        if (totalWidth > maxDimension || totalHeight > maxDimension) {
-            double scaleDown = Math.min(maxDimension / (double) totalWidth, maxDimension / (double) totalHeight);
-            totalWidth = (int) (totalWidth * scaleDown);
-            totalHeight = (int) (totalHeight * scaleDown);
-            contentWidth = (int) (contentWidth * scaleDown);
-            contentHeight = (int) (contentHeight * scaleDown);
-            baseFontSize *= scaleDown;
-            borderWidth = (int) (borderWidth * scaleDown);
-            borderRadius = (int) (borderRadius * scaleDown);
+        // Cap dimensions to prevent excessive memory usage, prioritizing text size
+        int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER * 1.5); // Increase threshold by 1.5x
+        double scaleDown = 1.0;
+        if (contentWidth + 2 * borderWidth > maxDimension || contentHeight + 2 * borderWidth > maxDimension) {
+            // Calculate scaleDown based on content dimensions, but limit reduction to preserve text
+            scaleDown = Math.min(
+                    maxDimension / (double) (contentWidth + 2 * borderWidth),
+                    maxDimension / (double) (contentHeight + 2 * borderWidth)
+            );
+            // Cap scaleDown to prevent excessive reduction of text size (e.g., allow scales up to 10)
+            scaleDown = Math.max(scaleDown, 0.5); // Ensure at least 50% of original size
             bgWidth = (int) (bgWidth * scaleDown);
             bgHeight = (int) (bgHeight * scaleDown);
-            font = font.deriveFont((float) baseFontSize);
-            // Recalculate text dimensions with scaled font
-            tempImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
-            g2d = tempImage.createGraphics();
-            g2d.setFont(font);
-            fm = g2d.getFontMetrics();
-            lineHeight = fm.getHeight();
-            totalTextHeight = (int) (lineHeight * lines.length * lineSpacing);
-            maxTextWidth = 0;
-            for (String line : lines) {
-                int lineWidth = fm.stringWidth(line);
-                if (lineWidth > maxTextWidth) {
-                    maxTextWidth = lineWidth;
-                }
-            }
-            textBlockHeight = totalTextHeight - (int) (lineHeight * (lineSpacing - 1.0));
-            if (lines.length > 1) {
-                textBlockHeight += (int) (lineHeight * (lineSpacing - 1.0) * (lines.length - 1));
-            } else {
-                textBlockHeight = fm.getAscent() + fm.getDescent();
-            }
-            g2d.dispose();
-            tempImage.flush();
+            borderWidth = (int) (borderWidth * scaleDown);
+            borderRadius = (int) (borderRadius * scaleDown);
+            // Recalculate content dimensions without scaling text
             contentWidth = maxTextWidth + bgWidth;
             contentHeight = textBlockHeight + bgHeight;
-            totalWidth = contentWidth + 2 * borderWidth;
-            totalHeight = contentHeight + 2 * borderWidth;
         }
+
+        // Calculate final image dimensions
+        int totalWidth = contentWidth + 2 * borderWidth;
+        int totalHeight = contentHeight + 2 * borderWidth;
 
         // Create high-resolution image
         BufferedImage image = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_ARGB);
@@ -3137,7 +3117,7 @@ public class VideoEditingService {
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY); // Maximize rendering quality
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g2d.setFont(font);
         fm = g2d.getFontMetrics();
 
@@ -3147,9 +3127,9 @@ public class VideoEditingService {
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
             if (borderRadius > 0) {
                 g2d.fillRoundRect(
-                        borderWidth, // Start at borderWidth to leave space for border
                         borderWidth,
-                        contentWidth, // Background size without border
+                        borderWidth,
+                        contentWidth,
                         contentHeight,
                         borderRadius,
                         borderRadius
@@ -3170,12 +3150,12 @@ public class VideoEditingService {
             g2d.setStroke(new BasicStroke((float) borderWidth));
             if (borderRadius > 0) {
                 g2d.drawRoundRect(
-                        borderWidth / 2, // Center the stroke on the border's inner edge
                         borderWidth / 2,
-                        contentWidth + borderWidth, // Include one borderWidth for outer edge
+                        borderWidth / 2,
+                        contentWidth + borderWidth,
                         contentHeight + borderWidth,
-                        borderRadius,
-                        borderRadius
+                        borderRadius + borderWidth,
+                        borderRadius + borderWidth
                 );
             } else {
                 g2d.drawRect(

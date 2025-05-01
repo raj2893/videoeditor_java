@@ -2026,7 +2026,7 @@ public class VideoEditingService {
                 filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
 
-                // Apply crop filter based on cropL, cropR, cropT, cropB
+                // Store crop values before applying crop
                 double cropL = vs.getCropL() != null ? vs.getCropL() : 0.0;
                 double cropR = vs.getCropR() != null ? vs.getCropR() : 0.0;
                 double cropT = vs.getCropT() != null ? vs.getCropT() : 0.0;
@@ -2038,21 +2038,6 @@ public class VideoEditingService {
                 }
                 if (cropL + cropR >= 100 || cropT + cropB >= 100) {
                     throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + vs.getId());
-                }
-
-                // Calculate crop parameters
-                String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
-                String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
-                String cropX = String.format("iw*%.6f", cropL / 100.0);
-                String cropY = String.format("ih*%.6f", cropT / 100.0);
-
-                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
-                    filterComplex.append("crop=").append(cropWidth).append(":")
-                            .append(cropHeight).append(":")
-                            .append(cropX).append(":")
-                            .append(cropY).append(",");
-                    System.out.println("Crop filter for video segment " + vs.getId() + ": w=" + cropWidth +
-                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
                 }
 
                 // Apply filters
@@ -2173,10 +2158,10 @@ public class VideoEditingService {
 
                 Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, vs.getTimelineStartTime(), vs.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-// Apply crop filter for wipe transition
-                boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
+                // Apply crop filter for wipe transition
+                boolean hasTransitionCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
                         !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
-                if (hasCrop) {
+                if (hasTransitionCrop) {
                     double transStart = vs.getTimelineStartTime();
                     double transEnd = Math.min(vs.getTimelineStartTime() + 1.0, vs.getTimelineEndTime());
                     filterComplex.append("crop=")
@@ -2194,7 +2179,7 @@ public class VideoEditingService {
                             ", enabled between t=" + transStart + " and t=" + transEnd);
                 }
 
-// Apply rotation from transition
+                // Apply rotation from transition
                 String rotationExpr = transitionOffsets.get("rotation");
                 if (rotationExpr != null && !rotationExpr.equals("0")) {
                     filterComplex.append("format=rgba,");
@@ -2203,13 +2188,39 @@ public class VideoEditingService {
                     System.out.println("Rotation applied to segment " + vs.getId() + ": " + rotationExpr);
                 }
 
-                // Apply opacity (CORRECTED)
+                // Apply opacity
                 double opacity = vs.getOpacity() != null ? vs.getOpacity() : 1.0;
                 if (opacity < 1.0) {
                     filterComplex.append("format=rgba,");
                     filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
                     filterComplex.append("format=rgba,");
                     System.out.println("Opacity applied to video segment " + vs.getId() + ": " + opacity);
+                }
+
+                // Create a pad filter to maintain original dimensions
+                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                    // Calculate dimensions and offsets for the pad filter
+                    // We need to first apply the crop filter
+                    String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+                    String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+                    String cropX = String.format("iw*%.6f", cropL / 100.0);
+                    String cropY = String.format("ih*%.6f", cropT / 100.0);
+
+                    // Apply the crop
+                    filterComplex.append("crop=").append(cropWidth).append(":")
+                            .append(cropHeight).append(":")
+                            .append(cropX).append(":")
+                            .append(cropY).append(",");
+                    System.out.println("Crop filter for video segment " + vs.getId() + ": w=" + cropWidth +
+                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+
+                    filterComplex.append("format=rgba,");
+                    filterComplex.append("pad=iw/(1-").append(String.format("%.6f", (cropL + cropR) / 100.0)).append("):")
+                            .append("ih/(1-").append(String.format("%.6f", (cropT + cropB) / 100.0)).append("):")
+                            .append("iw*").append(String.format("%.6f", cropL / (100.0 - cropL - cropR))).append(":")
+                            .append("ih*").append(String.format("%.6f", cropT / (100.0 - cropT - cropB))).append(":")
+                            .append("color=0x00000000,");
+                    System.out.println("Pad filter to restore original dimensions for segment " + vs.getId());
                 }
 
                 // Handle scaling with keyframes
@@ -2340,7 +2351,7 @@ public class VideoEditingService {
                 filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(is.getTimelineStartTime()).append("/TB,");
 
-                // Apply crop filter based on cropL, cropR, cropT, cropB
+                // Store crop values before applying crop
                 double cropL = is.getCropL() != null ? is.getCropL() : 0.0;
                 double cropR = is.getCropR() != null ? is.getCropR() : 0.0;
                 double cropT = is.getCropT() != null ? is.getCropT() : 0.0;
@@ -2354,19 +2365,30 @@ public class VideoEditingService {
                     throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + is.getId());
                 }
 
-                // Calculate crop parameters
-                String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
-                String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
-                String cropX = String.format("iw*%.6f", cropL / 100.0);
-                String cropY = String.format("ih*%.6f", cropT / 100.0);
-
+                // Create a pad filter to maintain original dimensions
                 if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                    // Calculate dimensions and offsets for the pad filter
+                    String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+                    String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+                    String cropX = String.format("iw*%.6f", cropL / 100.0);
+                    String cropY = String.format("ih*%.6f", cropT / 100.0);
+
+                    // Apply the crop
                     filterComplex.append("crop=").append(cropWidth).append(":")
                             .append(cropHeight).append(":")
                             .append(cropX).append(":")
                             .append(cropY).append(",");
                     System.out.println("Crop filter for image segment " + is.getId() + ": w=" + cropWidth +
                             ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+
+                    // Apply a pad filter to restore original dimensions with transparent padding
+                    filterComplex.append("format=rgba,");
+                    filterComplex.append("pad=iw/(1-").append(String.format("%.6f", (cropL + cropR) / 100.0)).append("):")
+                            .append("ih/(1-").append(String.format("%.6f", (cropT + cropB) / 100.0)).append("):")
+                            .append("iw*").append(String.format("%.6f", cropL / (100.0 - cropL - cropR))).append(":")
+                            .append("ih*").append(String.format("%.6f", cropT / (100.0 - cropT - cropB))).append(":")
+                            .append("color=0x00000000,");
+                    System.out.println("Pad filter to restore original dimensions for segment " + is.getId());
                 }
 
                 // Apply filters
@@ -2487,7 +2509,7 @@ public class VideoEditingService {
 
                 Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, is.getTimelineStartTime(), is.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-// Apply crop filter for wipe transition
+                // Apply crop filter for wipe transition
                 boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
                         !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
                 if (hasCrop) {
@@ -2508,7 +2530,7 @@ public class VideoEditingService {
                             ", enabled between t=" + transStart + " and t=" + transEnd);
                 }
 
-// Apply rotation from transition
+                // Apply rotation from transition
                 String rotationExpr = transitionOffsets.get("rotation");
                 if (rotationExpr != null && !rotationExpr.equals("0")) {
                     filterComplex.append("format=rgba,");
@@ -2517,7 +2539,7 @@ public class VideoEditingService {
                     System.out.println("Rotation applied to segment " + is.getId() + ": " + rotationExpr);
                 }
 
-                // Apply opacity (NEW)
+                // Apply opacity
                 double opacity = is.getOpacity() != null ? is.getOpacity() : 1.0;
                 if (opacity < 1.0) {
                     filterComplex.append("format=rgba,");

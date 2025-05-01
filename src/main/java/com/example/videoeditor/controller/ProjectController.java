@@ -384,12 +384,47 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
 
-            videoEditingService.addTextToTimeline(sessionId, text, layer, timelineStartTime, timelineEndTime,
+            // Add text to timeline
+            videoEditingService.addTextToTimeline(
+                    sessionId, text, layer, timelineStartTime, timelineEndTime,
                     fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
                     backgroundW, backgroundBorderRadius);
 
-            return ResponseEntity.ok().build();
+            // Retrieve the newly added text segment from TimelineState
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            TextSegment addedTextSegment = timelineState.getTextSegments().stream()
+                    .filter(t -> t.getText().equals(text) &&
+                            Math.abs(t.getTimelineStartTime() - timelineStartTime) < 0.001 &&
+                            Math.abs(t.getTimelineEndTime() - timelineEndTime) < 0.001 &&
+                            t.getLayer() == layer)
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Failed to find added text segment"));
+
+            // Prepare response
+            Map<String, Object> response = new HashMap<>();
+            response.put("textSegmentId", addedTextSegment.getId());
+            response.put("text", addedTextSegment.getText());
+            response.put("layer", addedTextSegment.getLayer());
+            response.put("timelineStartTime", addedTextSegment.getTimelineStartTime());
+            response.put("timelineEndTime", addedTextSegment.getTimelineEndTime());
+            response.put("fontFamily", addedTextSegment.getFontFamily());
+            response.put("scale", addedTextSegment.getScale());
+            response.put("fontColor", addedTextSegment.getFontColor());
+            response.put("backgroundColor", addedTextSegment.getBackgroundColor());
+            response.put("positionX", addedTextSegment.getPositionX());
+            response.put("positionY", addedTextSegment.getPositionY());
+            response.put("opacity", addedTextSegment.getOpacity());
+            response.put("alignment", addedTextSegment.getAlignment());
+            response.put("backgroundOpacity", addedTextSegment.getBackgroundOpacity());
+            response.put("backgroundBorderWidth", addedTextSegment.getBackgroundBorderWidth());
+            response.put("backgroundBorderColor", addedTextSegment.getBackgroundBorderColor());
+            response.put("backgroundH", addedTextSegment.getBackgroundH());
+            response.put("backgroundW", addedTextSegment.getBackgroundW());
+            response.put("backgroundBorderRadius", addedTextSegment.getBackgroundBorderRadius());
+            response.put("keyframes", addedTextSegment.getKeyframes() != null ? addedTextSegment.getKeyframes() : new HashMap<>());
+
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error adding text to timeline: " + e.getMessage());
@@ -528,7 +563,9 @@ public class ProjectController {
             Double timelineEndTime = request.get("timelineEndTime") != null ?
                     ((Number) request.get("timelineEndTime")).doubleValue() : null;
             String audioFileName = (String) request.get("audioFileName");
+            Double volume = request.get("volume") != null ? ((Number) request.get("volume")).doubleValue() : 1.0;
 
+            // Validate parameters
             if (layer >= 0) {
                 return ResponseEntity.badRequest().body("Audio layer must be negative");
             }
@@ -542,9 +579,31 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Audio filename is required");
             }
 
+            // Add audio to timeline
             videoEditingService.addAudioToTimelineFromProject(
                     user, sessionId, projectId, layer, startTime, endTime, timelineStartTime, timelineEndTime, audioFileName);
-            return ResponseEntity.ok().build();
+
+            // Retrieve the newly added audio segment from TimelineState
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            AudioSegment addedAudioSegment = timelineState.getAudioSegments().stream()
+                    .filter(a -> a.getAudioPath().endsWith(audioFileName) &&
+                            Math.abs(a.getTimelineStartTime() - timelineStartTime) < 0.001 &&
+                            (endTime == null || Math.abs(a.getEndTime() - endTime) < 0.001))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Failed to find added audio segment"));
+
+            // Prepare response
+            Map<String, Object> response = new HashMap<>();
+            response.put("audioSegmentId", addedAudioSegment.getId());
+            response.put("layer", addedAudioSegment.getLayer());
+            response.put("timelineStartTime", addedAudioSegment.getTimelineStartTime());
+            response.put("timelineEndTime", addedAudioSegment.getTimelineEndTime());
+            response.put("startTime", addedAudioSegment.getStartTime());
+            response.put("endTime", addedAudioSegment.getEndTime());
+            response.put("volume", volume);
+            response.put("keyframes", addedAudioSegment.getKeyframes() != null ? addedAudioSegment.getKeyframes() : new HashMap<>());
+
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error adding audio to timeline: " + e.getMessage());

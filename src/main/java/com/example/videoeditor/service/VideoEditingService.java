@@ -2661,13 +2661,13 @@ public class VideoEditingService {
 
                 Map<String, String> transitionOffsets = applyTransitionFilters(filterComplex, relevantTransitions, ts.getTimelineStartTime(), ts.getTimelineEndTime(), canvasWidth, canvasHeight);
 
-// Process the text PNG input
+                // Process the text PNG input
                 double segmentDuration = ts.getTimelineEndTime() - ts.getTimelineStartTime();
                 filterComplex.append("[").append(inputIdx).append(":v]");
                 filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(ts.getTimelineStartTime()).append("/TB,");
 
-// Apply crop filter for wipe transition
+                // Apply crop filter for wipe transition
                 boolean hasCrop = !transitionOffsets.get("cropWidth").equals("iw") || !transitionOffsets.get("cropHeight").equals("ih") ||
                         !transitionOffsets.get("cropX").equals("0") || !transitionOffsets.get("cropY").equals("0");
                 if (hasCrop) {
@@ -2688,7 +2688,7 @@ public class VideoEditingService {
                             ", enabled between t=" + transStart + " and t=" + transEnd);
                 }
 
-// Apply rotation from transition
+                // Apply rotation from transition
                 String rotationExpr = transitionOffsets.get("rotation");
                 if (rotationExpr != null && !rotationExpr.equals("0")) {
                     filterComplex.append("format=rgba,");
@@ -2697,7 +2697,7 @@ public class VideoEditingService {
                     System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
                 }
 
-                // Apply opacity (NEW)
+                // Apply opacity
                 double opacity = ts.getOpacity() != null ? ts.getOpacity() : 1.0;
                 if (opacity < 1.0) {
                     filterComplex.append("format=rgba,");
@@ -2711,14 +2711,27 @@ public class VideoEditingService {
                 List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
                 double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
 
-                // Apply resolution multiplier to scale down high-resolution PNG
-                double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
-                double baseScale = 1.0 / resolutionMultiplier;
+                // Determine maximum scale used in PNG generation (must match generateTextPng)
+                double maxScale = defaultScale;
+                if (!scaleKeyframes.isEmpty()) {
+                    maxScale = Math.max(
+                            defaultScale,
+                            scaleKeyframes.stream()
+                                    .mapToDouble(kf -> ((Number) kf.getValue()).doubleValue())
+                                    .max()
+                                    .orElse(defaultScale)
+                    );
+                }
 
+                // Apply resolution multiplier to scale down high-resolution PNG (must match generateTextPng)
+                double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
+                double baseScale = 1.0 / resolutionMultiplier; // Base scale accounts for resolution multiplier only
+
+                // Build the scale expression for keyframes
                 if (!scaleKeyframes.isEmpty()) {
                     Collections.sort(scaleKeyframes, Comparator.comparingDouble(Keyframe::getTime));
                     double firstKfValue = ((Number) scaleKeyframes.get(0).getValue()).doubleValue();
-                    scaleExpr.append(String.format("%.6f", firstKfValue));
+                    scaleExpr.append(String.format("%.6f", firstKfValue / maxScale)); // Normalize by maxScale
                     for (int j = 1; j < scaleKeyframes.size(); j++) {
                         Keyframe prevKf = scaleKeyframes.get(j - 1);
                         Keyframe kf = scaleKeyframes.get(j);
@@ -2730,13 +2743,13 @@ public class VideoEditingService {
                         if (kfTime > prevTime) {
                             double timelinePrevTime = ts.getTimelineStartTime() + prevTime;
                             double timelineKfTime = ts.getTimelineStartTime() + kfTime;
-                            scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue))
+                            scaleExpr.insert(0, "lerp(").append(",").append(String.format("%.6f", kfValue / maxScale))
                                     .append(",min(1,max(0,(t-").append(String.format("%.6f", timelinePrevTime)).append(")/(")
                                     .append(String.format("%.6f", timelineKfTime)).append("-").append(String.format("%.6f", timelinePrevTime)).append("))))");
                         }
                     }
                 } else {
-                    scaleExpr.append(String.format("%.6f", defaultScale));
+                    scaleExpr.append(String.format("%.6f", defaultScale / maxScale)); // Normalize by maxScale
                 }
 
                 // Apply transition scale multiplier
@@ -3004,7 +3017,21 @@ public class VideoEditingService {
         // Resolution multiplier for high-quality text (1.5 for 4K, 2.0 for 1080p)
         final double RESOLUTION_MULTIPLIER = canvasWidth >= 3840 ? 1.5 : 2.0;
         // Scaling factor for border width to match frontend's typical scaleFactor
-        final double BORDER_SCALE_FACTOR = canvasWidth >= 3840 ? 1.5 : 2.0;; // Adjusted to approximate frontend's scaleFactor
+        final double BORDER_SCALE_FACTOR = canvasWidth >= 3840 ? 1.5 : 2.0;
+
+        // Determine maximum scale from keyframes or default scale
+        double defaultScale = ts.getScale() != null ? ts.getScale() : 1.0;
+        List<Keyframe> scaleKeyframes = ts.getKeyframes().getOrDefault("scale", new ArrayList<>());
+        double maxScale = defaultScale;
+        if (!scaleKeyframes.isEmpty()) {
+            maxScale = Math.max(
+                    defaultScale,
+                    scaleKeyframes.stream()
+                            .mapToDouble(kf -> ((Number) kf.getValue()).doubleValue())
+                            .max()
+                            .orElse(defaultScale)
+            );
+        }
 
         // Parse colors
         Color fontColor = parseColor(ts.getFontColor(), Color.WHITE, "font", ts.getId());
@@ -3013,8 +3040,8 @@ public class VideoEditingService {
         Color borderColor = ts.getBackgroundBorderColor() != null && !ts.getBackgroundBorderColor().equals("transparent") ?
                 parseColor(ts.getBackgroundBorderColor(), null, "border", ts.getId()) : null;
 
-        // Load font with fixed base size of 24, scaled by user scale and resolution multiplier
-        double baseFontSize = 24.0 * (ts.getScale() != null ? ts.getScale() : 1.0) * RESOLUTION_MULTIPLIER;
+        // Load font with fixed base size of 24, scaled by maxScale and resolution multiplier
+        double baseFontSize = 24.0 * maxScale * RESOLUTION_MULTIPLIER;
         Font font;
         try {
             font = Font.createFont(Font.TRUETYPE_FONT, new File(getFontPathByFamily(ts.getFontFamily())))
@@ -3050,11 +3077,11 @@ public class VideoEditingService {
         g2d.dispose();
         tempImage.flush();
 
-        // Apply background dimensions and border (aligned with frontend logic)
-        int bgHeight = (int) ((ts.getBackgroundH() != null ? ts.getBackgroundH() : 0) * RESOLUTION_MULTIPLIER);
-        int bgWidth = (int) ((ts.getBackgroundW() != null ? ts.getBackgroundW() : 0) * RESOLUTION_MULTIPLIER);
-        int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * BORDER_SCALE_FACTOR);
-        int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * RESOLUTION_MULTIPLIER);
+        // Apply background dimensions and border (aligned with frontend logic, using maxScale)
+        int bgHeight = (int) ((ts.getBackgroundH() != null ? ts.getBackgroundH() : 0) * maxScale * RESOLUTION_MULTIPLIER);
+        int bgWidth = (int) ((ts.getBackgroundW() != null ? ts.getBackgroundW() : 0) * maxScale * RESOLUTION_MULTIPLIER);
+        int borderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
+        int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * maxScale * RESOLUTION_MULTIPLIER);
 
         // Calculate final image dimensions (text size + background dimensions + border)
         int contentWidth = maxTextWidth + bgWidth; // Background width without border
@@ -3110,6 +3137,7 @@ public class VideoEditingService {
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY); // Maximize rendering quality
         g2d.setFont(font);
         fm = g2d.getFontMetrics();
 

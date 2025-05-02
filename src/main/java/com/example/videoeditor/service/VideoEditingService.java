@@ -3107,9 +3107,9 @@ public class VideoEditingService {
         g2d.setFont(font);
         FontMetrics fm = g2d.getFontMetrics();
         String[] lines = ts.getText().split("\n");
-        int lineHeight = fm.getHeight();
-        double lineSpacing = 1.2;
-        int totalTextHeight = (int) (lineHeight * lines.length * lineSpacing);
+        double lineSpacing = 1.2; // Match frontend's lineHeight = fontSize * 1.2
+        int lineHeight = (int) (baseFontSize * lineSpacing); // Use font size directly for consistency
+        int totalTextHeight = lines.length * lineHeight;
         int maxTextWidth = 0;
         for (String line : lines) {
             int lineWidth = fm.stringWidth(line);
@@ -3117,12 +3117,10 @@ public class VideoEditingService {
                 maxTextWidth = lineWidth;
             }
         }
-        // Calculate text block height including ascent and descent for proper centering
-        int textBlockHeight = totalTextHeight - (int) (lineHeight * (lineSpacing - 1.0));
-        if (lines.length > 1) {
-            textBlockHeight += (int) (lineHeight * (lineSpacing - 1.0) * (lines.length - 1));
-        } else {
-            textBlockHeight = fm.getAscent() + fm.getDescent();
+        // Calculate text block height for centering
+        int textBlockHeight = totalTextHeight;
+        if (lines.length == 1) {
+            textBlockHeight = fm.getAscent() + fm.getDescent(); // Single line uses ascent + descent
         }
         g2d.dispose();
         tempImage.flush();
@@ -3133,31 +3131,28 @@ public class VideoEditingService {
         int bgBorderWidth = (int) ((ts.getBackgroundBorderWidth() != null ? ts.getBackgroundBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
         int borderRadius = (int) ((ts.getBackgroundBorderRadius() != null ? ts.getBackgroundBorderRadius() : 0) * maxScale * RESOLUTION_MULTIPLIER);
         int textBorderWidth = (int) ((ts.getTextBorderWidth() != null ? ts.getTextBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
-        float textBorderOpacity = ts.getTextBorderOpacity() != null ? ts.getTextBorderOpacity().floatValue() : 1.0f;
 
         // Calculate content dimensions (text size + background dimensions)
         int contentWidth = maxTextWidth + bgWidth;
-        int contentHeight = textBlockHeight + bgHeight;
+        int contentHeight = textBlockHeight + bgHeight; // Restore original additive logic
 
-        // Cap dimensions to prevent excessive memory usage, prioritizing text size
-        int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER * 1.5); // Increase threshold by 1.5x
+        // Cap dimensions to prevent excessive memory usage
+        int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER * 1.5);
         double scaleDown = 1.0;
-        if (contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth > maxDimension || contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth > maxDimension) {
-            // Calculate scaleDown based on content dimensions, but limit reduction to preserve text
+        if (contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth > maxDimension ||
+                contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth > maxDimension) {
             scaleDown = Math.min(
                     maxDimension / (double) (contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth),
                     maxDimension / (double) (contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth)
             );
-            // Cap scaleDown to prevent excessive reduction of text size
             scaleDown = Math.max(scaleDown, 0.5); // Ensure at least 50% of original size
             bgWidth = (int) (bgWidth * scaleDown);
             bgHeight = (int) (bgHeight * scaleDown);
             bgBorderWidth = (int) (bgBorderWidth * scaleDown);
             borderRadius = (int) (borderRadius * scaleDown);
             textBorderWidth = (int) (textBorderWidth * scaleDown);
-            // Recalculate content dimensions without scaling text
             contentWidth = maxTextWidth + bgWidth;
-            contentHeight = textBlockHeight + bgHeight;
+            contentHeight = textBlockHeight + bgHeight; // Recompute with scaled values
         }
 
         // Calculate final image dimensions
@@ -3222,11 +3217,14 @@ public class VideoEditingService {
 
         // Draw text with border (stroke) if specified
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
-        int y = bgBorderWidth + textBorderWidth + (contentHeight - textBlockHeight) / 2 + fm.getAscent();
+        // Center text vertically within contentHeight, accounting for background height
+        int textYStart = bgBorderWidth + textBorderWidth + (contentHeight - textBlockHeight) / 2 + fm.getAscent();
+        int y = textYStart;
         for (String line : lines) {
             int x = calculateXPosition(line, alignment, totalWidth, fm, 0, bgBorderWidth + textBorderWidth);
             if (textBorderColor != null && textBorderWidth > 0) {
                 // Draw text border (stroke)
+                float textBorderOpacity = ts.getTextBorderOpacity() != null ? ts.getTextBorderOpacity().floatValue() : 1.0f;
                 g2d.setColor(new Color(textBorderColor.getRed(), textBorderColor.getGreen(), textBorderColor.getBlue(), (int) (textBorderOpacity * 255)));
                 g2d.setStroke(new BasicStroke((float) textBorderWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 FontRenderContext frc = g2d.getFontRenderContext();
@@ -3237,7 +3235,7 @@ public class VideoEditingService {
             // Draw text fill
             g2d.setColor(fontColor);
             g2d.drawString(line, x, y);
-            y += (int) (lineHeight * lineSpacing);
+            y += lineHeight; // Use computed lineHeight for consistent spacing
         }
 
         g2d.dispose();

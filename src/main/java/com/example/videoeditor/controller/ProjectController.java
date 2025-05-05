@@ -1546,6 +1546,38 @@ public class ProjectController {
         }
     }
 
+    @GetMapping("/{projectId}/audio-duration/{filename:.+}")
+    public ResponseEntity<Double> getAudioDuration(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @PathVariable String filename) {
+        try {
+            String email = jwtUtil.extractEmail(token.substring(7));
+            User user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            // Verify project exists and user has access
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            if (!project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            double duration = videoEditingService.getAudioDuration(projectId, filename);
+            return ResponseEntity.ok(duration);
+
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(null);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(null);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(null);
+        }
+    }
+
     // Helper method to determine audio content type
     private String determineAudioContentType(String filename) {
         filename = filename.toLowerCase();

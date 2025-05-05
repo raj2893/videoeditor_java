@@ -2010,6 +2010,52 @@ public class VideoEditingService {
         return "audio/projects/" + projectId + "/waveforms/" + waveformFileName;
     }
 
+    public double getAudioDuration(Long projectId, String filename) throws IOException, InterruptedException {
+        String baseDir = System.getProperty("user.dir");
+        // Define both possible paths
+        String extractedPath = Paths.get(baseDir, "audio/projects", String.valueOf(projectId), "extracted", filename).toString();
+        String directPath = Paths.get(baseDir, "audio/projects", String.valueOf(projectId), filename).toString();
+
+        // Try extracted path first, then direct path
+        String[] possiblePaths = {extractedPath, directPath};
+        String validPath = null;
+
+        for (String path : possiblePaths) {
+            File audioFile = new File(path);
+            if (audioFile.exists()) {
+                validPath = path;
+                break;
+            }
+        }
+
+        if (validPath == null) {
+            throw new IOException("Audio file not found at either path for project ID: " + projectId + ", filename: " + filename);
+        }
+
+        ProcessBuilder builder = new ProcessBuilder(
+                "C:\\Users\\raj.p\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffprobe.exe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                validPath
+        );
+
+        System.out.println("Attempting to get duration for audio at path: " + validPath);
+
+        builder.redirectErrorStream(true);
+
+        Process process = builder.start();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        String duration = reader.readLine();
+        int exitCode = process.waitFor();
+
+        if (exitCode != 0 || duration == null) {
+            throw new IOException("Failed to get audio duration for file: " + filename);
+        }
+
+        return Double.parseDouble(duration);
+    }
+
     public File exportProject(String sessionId) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
 

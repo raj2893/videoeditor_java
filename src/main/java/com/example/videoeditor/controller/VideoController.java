@@ -150,9 +150,7 @@ public class VideoController {
             User user = userRepository.findByEmail(email)
                     .orElseThrow(() -> new RuntimeException("User not found"));
 
-            String videoPath = filename.startsWith("edited_")
-                    ? "edited_videos/" + filename
-                    : "videos/" + filename;
+            String videoPath = "videos/" + filename;
 
             double duration = videoService.getVideoDuration(videoPath);
             return ResponseEntity.ok(duration);

@@ -1639,6 +1639,62 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
+    public void updateKeyframeToSegment(String sessionId, String segmentId, String segmentType, String property, Keyframe keyframe) {
+        EditSession session = getSession(sessionId);
+        keyframe.setTime(roundToThreeDecimals(keyframe.getTime()));
+
+        // Validate keyframe time
+        if (keyframe.getTime() < 0) {
+            throw new IllegalArgumentException("Keyframe time must be non-negative");
+        }
+
+        switch (segmentType.toLowerCase()) {
+            case "video":
+                VideoSegment video = session.getTimelineState().getSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Video segment not found: " + segmentId));
+                if (keyframe.getTime() > (video.getTimelineEndTime() - video.getTimelineStartTime())) {
+                    throw new IllegalArgumentException("Keyframe time out of segment bounds for video segment");
+                }
+                video.updateKeyframe(property, keyframe);
+                break;
+            case "image":
+                ImageSegment image = session.getTimelineState().getImageSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Image segment not found: " + segmentId));
+                if (keyframe.getTime() > (image.getTimelineEndTime() - image.getTimelineStartTime())) {
+                    throw new IllegalArgumentException("Keyframe time out of segment bounds for image segment");
+                }
+                image.updateKeyframe(property, keyframe);
+                break;
+            case "text":
+                TextSegment text = session.getTimelineState().getTextSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Text segment not found: " + segmentId));
+                if (keyframe.getTime() > (text.getTimelineEndTime() - text.getTimelineStartTime())) {
+                    throw new IllegalArgumentException("Keyframe time out of segment bounds for text segment");
+                }
+                text.updateKeyframe(property, keyframe);
+                break;
+            case "audio":
+                AudioSegment audio = session.getTimelineState().getAudioSegments().stream()
+                        .filter(s -> s.getId().equals(segmentId))
+                        .findFirst()
+                        .orElseThrow(() -> new RuntimeException("Audio segment not found: " + segmentId));
+                if (keyframe.getTime() > (audio.getTimelineEndTime() - audio.getTimelineStartTime())) {
+                    throw new IllegalArgumentException("Keyframe time out of segment bounds for audio segment");
+                }
+                audio.updateKeyframe(property, keyframe);
+                break;
+            default:
+                throw new IllegalArgumentException("Invalid segment type: " + segmentType);
+        }
+        session.setLastAccessTime(System.currentTimeMillis());
+    }
+
     public void removeKeyframeFromSegment(String sessionId, String segmentId, String segmentType, String property, double time) {
         EditSession session = getSession(sessionId);
         // Round the time to three decimal places for consistency

@@ -2266,6 +2266,8 @@ public class VideoEditingService {
                                     filterComplex.append("hflip,");
                                 } else if (filterValue.equals("vertical")) {
                                     filterComplex.append("vflip,");
+                                } else if (filterValue.equals("both")) {
+                                    filterComplex.append("hflip,vflip,");
                                 }
                                 break;
                             default:
@@ -2617,6 +2619,8 @@ public class VideoEditingService {
                                     filterComplex.append("hflip,");
                                 } else if (filterValue.equals("vertical")) {
                                     filterComplex.append("vflip,");
+                                } else if (filterValue.equals("both")) {
+                                    filterComplex.append("hflip,vflip,");
                                 }
                                 break;
                             default:
@@ -3234,8 +3238,9 @@ public class VideoEditingService {
         int textBorderWidth = (int) ((ts.getTextBorderWidth() != null ? ts.getTextBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
 
         // Calculate content dimensions (text size + background dimensions)
-        int contentWidth = maxTextWidth + bgWidth;
-        int contentHeight = textBlockHeight + bgHeight; // Restore original additive logic
+        // Replace the existing calculations
+        int contentWidth = maxTextWidth + bgWidth + 2 * textBorderWidth; // Include text border width
+        int contentHeight = textBlockHeight + bgHeight + 2 * textBorderWidth; // Include text border height
 
         // Cap dimensions to prevent excessive memory usage
         int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER * 1.5);
@@ -3271,6 +3276,7 @@ public class VideoEditingService {
         fm = g2d.getFontMetrics();
 
         // Draw background
+        // Replace the background drawing logic
         if (bgColor != null) {
             float bgOpacity = ts.getBackgroundOpacity() != null ? ts.getBackgroundOpacity().floatValue() : 1.0f;
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
@@ -3278,8 +3284,8 @@ public class VideoEditingService {
                 g2d.fillRoundRect(
                         bgBorderWidth + textBorderWidth,
                         bgBorderWidth + textBorderWidth,
-                        contentWidth,
-                        contentHeight,
+                        contentWidth, // Updated to include textBorderWidth
+                        contentHeight, // Updated to include textBorderWidth
                         borderRadius,
                         borderRadius
                 );
@@ -3287,13 +3293,14 @@ public class VideoEditingService {
                 g2d.fillRect(
                         bgBorderWidth + textBorderWidth,
                         bgBorderWidth + textBorderWidth,
-                        contentWidth,
-                        contentHeight
+                        contentWidth, // Updated
+                        contentHeight // Updated
                 );
             }
         }
 
         // Draw background border
+        // Replace the background border drawing logic
         if (bgBorderColor != null && bgBorderWidth > 0) {
             g2d.setColor(bgBorderColor);
             g2d.setStroke(new BasicStroke((float) bgBorderWidth));
@@ -3301,8 +3308,8 @@ public class VideoEditingService {
                 g2d.drawRoundRect(
                         bgBorderWidth / 2 + textBorderWidth,
                         bgBorderWidth / 2 + textBorderWidth,
-                        contentWidth + bgBorderWidth,
-                        contentHeight + bgBorderWidth,
+                        contentWidth + bgBorderWidth, // Updated
+                        contentHeight + bgBorderWidth, // Updated
                         borderRadius + bgBorderWidth,
                         borderRadius + bgBorderWidth
                 );
@@ -3310,8 +3317,8 @@ public class VideoEditingService {
                 g2d.drawRect(
                         bgBorderWidth / 2 + textBorderWidth,
                         bgBorderWidth / 2 + textBorderWidth,
-                        contentWidth + bgBorderWidth,
-                        contentHeight + bgBorderWidth
+                        contentWidth + bgBorderWidth, // Updated
+                        contentHeight + bgBorderWidth // Updated
                 );
             }
         }

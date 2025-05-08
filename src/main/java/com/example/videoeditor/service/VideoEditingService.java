@@ -2173,7 +2173,7 @@ public class VideoEditingService {
 
         // Create JSON structure
         Map<String, Object> waveformData = new HashMap<>();
-        waveformData.put("sampleRate", 10);
+        waveformData.put("sampleRate", 100);
         waveformData.put("peaks", peaks);
 
         // Save to JSON file

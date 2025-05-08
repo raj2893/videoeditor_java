@@ -16,6 +16,7 @@ public class AudioSegment {
     private double timelineEndTime;
     private Double volume = 1.0; // Changed to Double for nullable static value
     private boolean isExtracted = false; // New field to indicate if audio is extracted
+    private String waveformJsonPath; // Changed from waveformJson
 
     // Keyframes for animatable properties
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
@@ -50,6 +51,18 @@ public class AudioSegment {
         }
         // Optionally throw an exception if no keyframe is found
         // throw new IllegalArgumentException("No keyframe found for property " + property + " at time " + updatedKeyframe.getTime());
+    }
+
+    public void setExtracted(boolean extracted) {
+        isExtracted = extracted;
+    }
+
+    public String getWaveformJsonPath() {
+        return waveformJsonPath;
+    }
+
+    public void setWaveformJsonPath(String waveformJsonPath) {
+        this.waveformJsonPath = waveformJsonPath;
     }
 
     public void removeKeyframe(String property, double time) {

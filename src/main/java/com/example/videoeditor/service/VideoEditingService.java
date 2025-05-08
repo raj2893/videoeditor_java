@@ -13,6 +13,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -161,13 +162,13 @@ public class VideoEditingService {
         });
     }
 
-    public void addAudio(Project project, String audioPath, String audioFileName, String waveformPath) throws JsonProcessingException {
+    public void addAudio(Project project, String audioPath, String audioFileName, String waveformJsonPath) throws JsonProcessingException {
         List<Map<String, String>> audioFiles = getAudio(project);
         Map<String, String> audioData = new HashMap<>();
         audioData.put("audioPath", audioPath);
         audioData.put("audioFileName", audioFileName);
-        if (waveformPath != null) {
-            audioData.put("waveformPath", waveformPath);
+        if (waveformJsonPath != null) {
+            audioData.put("waveformJsonPath", waveformJsonPath);
         }
         audioFiles.add(audioData);
         project.setAudioJson(objectMapper.writeValueAsString(audioFiles));
@@ -185,15 +186,14 @@ public class VideoEditingService {
         return objectMapper.readValue(project.getExtractedAudioJson(), new TypeReference<List<Map<String, String>>>() {});
     }
 
-    // Add extracted audio metadata to project
-    public void addExtractedAudio(Project project, String audioPath, String audioFileName, String sourceVideoPath, String waveformPath) throws JsonProcessingException {
+    public void addExtractedAudio(Project project, String audioPath, String audioFileName, String sourceVideoPath, String waveformJsonPath) throws JsonProcessingException {
         List<Map<String, String>> extractedAudio = getExtractedAudio(project);
         Map<String, String> audioData = new HashMap<>();
         audioData.put("audioPath", audioPath);
         audioData.put("audioFileName", audioFileName);
         audioData.put("sourceVideoPath", sourceVideoPath);
-        if (waveformPath != null) {
-            audioData.put("waveformPath", waveformPath);
+        if (waveformJsonPath != null) {
+            audioData.put("waveformJsonPath", waveformJsonPath);
         }
         extractedAudio.add(audioData);
         project.setExtractedAudioJson(objectMapper.writeValueAsString(extractedAudio));
@@ -451,15 +451,14 @@ public class VideoEditingService {
             throw new IOException("Video file not found: " + videoFile.getAbsolutePath());
         }
 
-        // Store audio in project-specific extracted folder: audio/projects/{projectId}/extracted/
+        // Store audio in project-specific extracted folder
         File audioDir = new File(baseDir, "audio/projects/" + projectId + "/extracted");
         if (!audioDir.exists()) {
             audioDir.mkdirs();
         }
 
-        // Remove the video file extension (e.g., .mp4) and append .mp3
         String videoFileName = new File(videoPath).getName();
-        String baseFileName = videoFileName.substring(0, videoFileName.lastIndexOf('.')); // Remove extension
+        String baseFileName = videoFileName.substring(0, videoFileName.lastIndexOf('.'));
         String cleanAudioFileName = "extracted_" + baseFileName.replaceAll("[^a-zA-Z0-9.]", "_") + ".mp3";
         File audioFile = new File(audioDir, cleanAudioFileName);
 
@@ -470,26 +469,27 @@ public class VideoEditingService {
         command.add("-vn"); // No video
         command.add("-acodec");
         command.add("mp3");
-        command.add("-y"); // Overwrite output file if it exists
+        command.add("-y");
         command.add(audioFile.getAbsolutePath());
 
         executeFFmpegCommand(command);
 
         String relativePath = "audio/projects/" + projectId + "/extracted/" + cleanAudioFileName;
 
-        // Generate waveform image
-        String waveformPath = generateWaveformImage(relativePath, projectId, cleanAudioFileName);
+        // Generate and save waveform JSON
+        String waveformJsonPath = generateAndSaveWaveformJson(relativePath, projectId);
 
-        // Update project with waveform path
+        // Update project
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
-        addExtractedAudio(project, relativePath, cleanAudioFileName, videoPath, waveformPath);
+        addExtractedAudio(project, relativePath, cleanAudioFileName, videoPath, waveformJsonPath);
+
         projectRepository.save(project);
 
-        // Return both audioPath and waveformPath
+        // Return audioPath and waveformJsonPath
         Map<String, String> result = new HashMap<>();
         result.put("audioPath", relativePath);
-        result.put("waveformPath", waveformPath);
+        result.put("waveformJsonPath", waveformJsonPath);
         return result;
     }
 
@@ -899,7 +899,6 @@ public class VideoEditingService {
         for (int i = 0; i < audioFiles.length; i++) {
             MultipartFile audioFile = audioFiles[i];
             String originalFileName = audioFile.getOriginalFilename();
-            // Use provided file name or generate a unique one
             String uniqueFileName = (audioFileNames != null && i < audioFileNames.length && audioFileNames[i] != null)
                     ? audioFileNames[i]
                     : projectId + "_" + System.currentTimeMillis() + "_" + originalFileName;
@@ -909,11 +908,11 @@ public class VideoEditingService {
 
             String relativePath = "audio/projects/" + projectId + "/" + uniqueFileName;
 
-            // Generate waveform image
-            String waveformPath = generateWaveformImage(relativePath, projectId, uniqueFileName);
+            // Generate and save waveform JSON
+            String waveformJsonPath = generateAndSaveWaveformJson(relativePath, projectId);
 
             try {
-                addAudio(project, relativePath, uniqueFileName, waveformPath);
+                addAudio(project, relativePath, uniqueFileName, waveformJsonPath);
             } catch (JsonProcessingException e) {
                 throw new IOException("Failed to process audio data for file: " + uniqueFileName, e);
             }
@@ -1005,7 +1004,6 @@ public class VideoEditingService {
         }
 
         double audioDuration = getAudioDuration(audioPath);
-        // Round all input times
         startTime = roundToThreeDecimals(startTime);
         endTime = roundToThreeDecimals(endTime);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
@@ -1027,30 +1025,30 @@ public class VideoEditingService {
         audioSegment.setTimelineStartTime(timelineStartTime);
         audioSegment.setTimelineEndTime(timelineEndTime);
         audioSegment.setVolume(1.0);
-        audioSegment.setExtracted(false); // Explicitly set isExtracted to false
+        audioSegment.setExtracted(false);
 
-        // Retrieve waveformPath from audioJson or extractedAudioJson
+        // Retrieve waveformJsonPath from audioJson or extractedAudioJson
         Project project = projectRepository.findById(session.getProjectId())
                 .orElseThrow(() -> new RuntimeException("Project not found"));
-        String waveformPath = null;
+        String waveformJsonPath = null;
         List<Map<String, String>> audioFiles = getAudio(project);
-        waveformPath = audioFiles.stream()
+        waveformJsonPath = audioFiles.stream()
                 .filter(audio -> audio.get("audioPath").equals(audioPath))
-                .map(audio -> audio.get("waveformPath"))
+                .map(audio -> audio.get("waveformJsonPath"))
                 .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
-        if (waveformPath == null) {
+        if (waveformJsonPath == null) {
             List<Map<String, String>> extractedAudio = getExtractedAudio(project);
-            waveformPath = extractedAudio.stream()
+            waveformJsonPath = extractedAudio.stream()
                     .filter(audio -> audio.get("audioPath").equals(audioPath))
-                    .map(audio -> audio.get("waveformPath"))
+                    .map(audio -> audio.get("waveformJsonPath"))
                     .filter(Objects::nonNull)
                     .findFirst()
                     .orElse(null);
         }
 
-        audioSegment.setWaveformPath(waveformPath);
+        audioSegment.setWaveformJsonPath(waveformJsonPath);
 
         timelineState.getAudioSegments().add(audioSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -1735,24 +1733,28 @@ public class VideoEditingService {
     }
 
     public void deleteProjectFiles(Long projectId) throws IOException {
-        // Define directories
+        // Delete videos
         File videoDir = new File(baseDir, "videos/projects/" + projectId);
-        File imageDir = new File(baseDir, "images/projects/" + projectId);
-        File audioDir = new File(baseDir, "audio/projects/" + projectId);
-        File waveformDir = new File(baseDir, "audio/projects/" + projectId + "/waveforms");
-
-        // Delete directories if they exist
         if (videoDir.exists()) {
-            deleteDirectory(videoDir);
+            FileUtils.deleteDirectory(videoDir);
         }
-        if (imageDir.exists()) {
-            deleteDirectory(imageDir);
-        }
+
+        // Delete audio and waveform JSON
+        File audioDir = new File(baseDir, "audio/projects/" + projectId);
         if (audioDir.exists()) {
-            deleteDirectory(audioDir);
+            FileUtils.deleteDirectory(audioDir);
         }
-        if (waveformDir.exists()) {
-            deleteDirectory(waveformDir);
+
+        // Delete images
+        File imageDir = new File(baseDir, "images/projects/" + projectId);
+        if (imageDir.exists()) {
+            FileUtils.deleteDirectory(imageDir);
+        }
+
+        // Delete exported videos
+        File exportDir = new File(baseDir, "exports/" + projectId);
+        if (exportDir.exists()) {
+            FileUtils.deleteDirectory(exportDir);
         }
     }
 
@@ -2110,6 +2112,81 @@ public class VideoEditingService {
         }
 
         return Double.parseDouble(duration);
+    }
+
+    private String generateAndSaveWaveformJson(String audioPath, Long projectId) throws IOException, InterruptedException {
+        File audioFile = new File(baseDir, audioPath);
+        if (!audioFile.exists()) {
+            throw new IOException("Audio file not found: " + audioFile.getAbsolutePath());
+        }
+
+        // Use FFmpeg to extract raw PCM data
+        File tempPcmFile = new File(baseDir, "temp/waveform_" + projectId + "_" + System.currentTimeMillis() + ".pcm");
+        File tempDir = new File(baseDir, "temp");
+        if (!tempDir.exists()) {
+            tempDir.mkdirs();
+        }
+
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegPath);
+        command.add("-i");
+        command.add(audioFile.getAbsolutePath());
+        command.add("-f");
+        command.add("s16le"); // 16-bit PCM
+        command.add("-ac");
+        command.add("1"); // Mono
+        command.add("-ar");
+        command.add("44100"); // Sample rate
+        command.add("-y");
+        command.add(tempPcmFile.getAbsolutePath());
+
+        executeFFmpegCommand(command);
+
+        // Read PCM data and compute amplitude peaks
+        List<Float> peaks = new ArrayList<>();
+        try (FileInputStream fis = new FileInputStream(tempPcmFile)) {
+            byte[] buffer = new byte[4096]; // Read 4KB at a time
+            int samplesPerPeak = 44100 / 100; // Aim for ~100 peaks per second
+            int sampleCount = 0;
+            float maxAmplitude = 0;
+
+            while (fis.read(buffer) != -1) {
+                for (int i = 0; i < buffer.length; i += 2) {
+                    short sample = (short) ((buffer[i] & 0xFF) | (buffer[i + 1] << 8));
+                    float amplitude = Math.abs(sample / 32768.0f); // Normalize to 0-1
+                    maxAmplitude = Math.max(maxAmplitude, amplitude);
+                    sampleCount++;
+
+                    if (sampleCount >= samplesPerPeak) {
+                        peaks.add(maxAmplitude);
+                        maxAmplitude = 0;
+                        sampleCount = 0;
+                    }
+                }
+            }
+            if (sampleCount > 0) {
+                peaks.add(maxAmplitude);
+            }
+        } finally {
+            tempPcmFile.delete(); // Clean up
+        }
+
+        // Create JSON structure
+        Map<String, Object> waveformData = new HashMap<>();
+        waveformData.put("sampleRate", 10);
+        waveformData.put("peaks", peaks);
+
+        // Save to JSON file
+        File waveformDir = new File(baseDir, "audio/projects/" + projectId + "/waveforms");
+        if (!waveformDir.exists()) {
+            waveformDir.mkdirs();
+        }
+        String waveformFileName = "waveform_" + audioFile.getName().replaceAll("[^a-zA-Z0-9.]", "_") + ".json";
+        File waveformFile = new File(waveformDir, waveformFileName);
+        objectMapper.writeValue(waveformFile, waveformData);
+
+        // Return relative path
+        return "audio/projects/" + projectId + "/waveforms/" + waveformFileName;
     }
 
     public File exportProject(String sessionId) throws IOException, InterruptedException {

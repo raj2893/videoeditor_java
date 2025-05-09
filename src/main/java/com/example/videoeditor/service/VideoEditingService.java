@@ -355,16 +355,16 @@ public class VideoEditingService {
                     .findFirst()
                     .orElse(null);
 
-            String waveformPath = null;
+            String waveformJsonPath = null;
             if (existingAudio != null && audioFile.exists()) {
                 System.out.println("Reusing existing audio file: " + audioFile.getAbsolutePath());
                 audioPath = existingAudio.get("audioPath");
-                waveformPath = existingAudio.get("waveformPath");
+                waveformJsonPath = existingAudio.get("waveformJsonPath");
             } else {
                 Map<String, String> extractionResult = extractAudioFromVideo(videoPath, session.getProjectId(), audioFileName);
                 audioPath = extractionResult.get("audioPath");
-                waveformPath = extractionResult.get("waveformPath");
-                System.out.println("Extracted new audio file: " + audioPath + ", waveform: " + waveformPath);
+                waveformJsonPath = extractionResult.get("waveformJsonPath");
+                System.out.println("Extracted new audio file: " + audioPath + ", waveform: " + waveformJsonPath);
             }
 
             List<Map<String, String>> videos = getVideos(project);
@@ -385,7 +385,7 @@ public class VideoEditingService {
 
             audioSegment = new AudioSegment();
             audioSegment.setAudioPath(audioPath);
-            audioSegment.setWaveformPath(waveformPath);
+            audioSegment.setWaveformJsonPath(waveformJsonPath);
             int audioLayer = findAvailableAudioLayer(session.getTimelineState(), timelineStartTime, timelineEndTime);
             audioSegment.setLayer(audioLayer);
             audioSegment.setStartTime(startTime);

@@ -8,7 +8,6 @@ import java.util.*;
 public class AudioSegment {
     private String id = UUID.randomUUID().toString();
     private String audioPath;
-    private String waveformPath; // Field for waveform image path
     private int layer; // Will be negative (-1, -2, -3, etc.)
     private double startTime;
     private double endTime;
@@ -77,8 +76,6 @@ public class AudioSegment {
     public void setId(String id) { this.id = id; }
     public String getAudioPath() { return audioPath; }
     public void setAudioPath(String audioPath) { this.audioPath = audioPath; }
-    public String getWaveformPath() { return waveformPath; }
-    public void setWaveformPath(String waveformPath) { this.waveformPath = waveformPath; }
     public int getLayer() { return layer; }
     public void setLayer(int layer) { this.layer = layer; }
     public double getStartTime() { return startTime; }

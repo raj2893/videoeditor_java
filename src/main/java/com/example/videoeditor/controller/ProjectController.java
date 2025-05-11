@@ -679,6 +679,7 @@ public class ProjectController {
             response.put("volume", addedAudioSegment.getVolume());
             response.put("audioPath", addedAudioSegment.getAudioPath());
             response.put("waveformJsonPath", addedAudioSegment.getWaveformJsonPath());
+            response.put("isExtracted", addedAudioSegment.isExtracted()); // Include isExtracted
             response.put("keyframes", addedAudioSegment.getKeyframes() != null ? addedAudioSegment.getKeyframes() : new HashMap<>());
 
             return ResponseEntity.ok(response);
@@ -762,6 +763,7 @@ public class ProjectController {
             response.put("volume", updatedAudioSegment.getVolume());
             response.put("audioPath", updatedAudioSegment.getAudioPath());
             response.put("waveformJsonPath", updatedAudioSegment.getWaveformJsonPath());
+            response.put("isExtracted", updatedAudioSegment.isExtracted()); // Include isExtracted
             response.put("keyframes", updatedAudioSegment.getKeyframes() != null ? updatedAudioSegment.getKeyframes() : new HashMap<>());
 
             return ResponseEntity.ok(response);

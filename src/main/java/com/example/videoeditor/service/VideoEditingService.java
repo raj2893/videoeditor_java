@@ -944,6 +944,7 @@ public class VideoEditingService {
         }
 
         String audioPath = null;
+        boolean isExtracted = false;
 
         // First, try to find the audio in audioJson
         List<Map<String, String>> audioFiles = getAudio(project);
@@ -970,6 +971,7 @@ public class VideoEditingService {
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("No audio found with filename: " + audioFileName));
             audioPath = extractedAudio.get("audioPath");
+            isExtracted = true; // Set isExtracted to true for extracted audio
         }
 
         // Round time fields to three decimal places
@@ -980,7 +982,7 @@ public class VideoEditingService {
         double calculatedTimelineEndTime = timelineEndTime != null ? roundToThreeDecimals(timelineEndTime) :
                 roundToThreeDecimals(timelineStartTime + (calculatedEndTime - startTime));
 
-        addAudioToTimeline(sessionId, audioPath, layer, startTime, calculatedEndTime, timelineStartTime, calculatedTimelineEndTime);
+        addAudioToTimeline(sessionId, audioPath, layer, startTime, calculatedEndTime, timelineStartTime, calculatedTimelineEndTime, isExtracted);
     }
 
     public void addAudioToTimeline(
@@ -990,7 +992,8 @@ public class VideoEditingService {
             double startTime,
             double endTime,
             double timelineStartTime,
-            Double timelineEndTime) throws IOException, InterruptedException {
+            Double timelineEndTime,
+            boolean isExtracted) throws IOException, InterruptedException {
         if (layer >= 0) {
             throw new RuntimeException("Audio layers must be negative (e.g., -1, -2, -3)");
         }
@@ -1026,6 +1029,7 @@ public class VideoEditingService {
         audioSegment.setTimelineEndTime(timelineEndTime);
         audioSegment.setVolume(1.0);
         audioSegment.setExtracted(false);
+        audioSegment.setExtracted(isExtracted); // Set isExtracted based on parameter
 
         // Retrieve waveformJsonPath from audioJson or extractedAudioJson
         Project project = projectRepository.findById(session.getProjectId())
@@ -1101,6 +1105,9 @@ public class VideoEditingService {
         boolean timelineChanged = false;
         if (timelineStartTime != null) {
             timelineStartTime = roundToThreeDecimals(timelineStartTime);
+            if (timelineStartTime < 0) {
+                throw new RuntimeException("Timeline start time cannot be negative");
+            }
             targetSegment.setTimelineStartTime(timelineStartTime);
             timelineChanged = true;
         }
@@ -1119,58 +1126,50 @@ public class VideoEditingService {
         }
 
         if (startTime != null || endTime != null || timelineChanged) {
+            double newStartTime = startTime != null ? roundToThreeDecimals(startTime) : originalStartTime;
+            double newEndTime = endTime != null ? roundToThreeDecimals(endTime) : originalEndTime;
+
+            // Validate startTime and endTime
             if (startTime != null) {
-                startTime = roundToThreeDecimals(startTime);
-                if (startTime < 0 || startTime >= audioDuration) {
-                    throw new RuntimeException("Start time out of bounds");
+                if (newStartTime < 0 || newStartTime >= audioDuration) {
+                    throw new RuntimeException("Start time out of bounds: " + newStartTime);
                 }
-                targetSegment.setStartTime(startTime);
+                targetSegment.setStartTime(newStartTime);
             }
             if (endTime != null) {
-                endTime = roundToThreeDecimals(endTime);
-                if (endTime <= targetSegment.getStartTime() || endTime > audioDuration) {
-                    throw new RuntimeException("End time out of bounds");
+                if (newEndTime <= newStartTime || newEndTime > audioDuration) {
+                    throw new RuntimeException("End time out of bounds: " + newEndTime + ", audioDuration: " + audioDuration);
                 }
-                targetSegment.setEndTime(endTime);
+                targetSegment.setEndTime(newEndTime);
             }
 
-            if (!timelineChanged) {
-                double newStartTime = startTime != null ? startTime : originalStartTime;
-                double newEndTime = endTime != null ? endTime : originalEndTime;
-
-                if (startTime != null && timelineStartTime == null) {
+            // Adjust timeline times based on audio clip duration
+            double clipDuration = roundToThreeDecimals(targetSegment.getEndTime() - targetSegment.getStartTime());
+            if (timelineChanged) {
+                // If timeline times are provided, validate them
+                double providedTimelineDuration = roundToThreeDecimals(targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime());
+                if (Math.abs(providedTimelineDuration - clipDuration) > 0.001) {
+                    // Adjust timelineEndTime to match clip duration
+                    targetSegment.setTimelineEndTime(roundToThreeDecimals(targetSegment.getTimelineStartTime() + clipDuration));
+                }
+            } else {
+                // If timeline times are not provided, derive them from audio times
+                if (startTime != null) {
                     double startTimeShift = newStartTime - originalStartTime;
-                    targetSegment.setTimelineStartTime(originalTimelineStartTime + startTimeShift);
+                    targetSegment.setTimelineStartTime(roundToThreeDecimals(originalTimelineStartTime + startTimeShift));
                 }
-                if (endTime != null && timelineEndTime == null) {
-                    double audioDurationUsed = newEndTime - targetSegment.getStartTime();
-                    targetSegment.setTimelineEndTime(targetSegment.getTimelineStartTime() + audioDurationUsed);
-                }
-            } else if (startTime == null && endTime == null) {
-                double newTimelineDuration = roundToThreeDecimals(targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime());
-                double originalTimelineDuration = roundToThreeDecimals(originalTimelineEndTime - originalTimelineStartTime);
-                double originalAudioDuration = roundToThreeDecimals(originalEndTime - originalStartTime);
-
-                if (newTimelineDuration != originalTimelineDuration) {
-                    double timelineShift = targetSegment.getTimelineStartTime() - originalTimelineStartTime;
-                    double newStartTime = roundToThreeDecimals(originalStartTime + timelineShift);
-                    if (newStartTime < 0) newStartTime = 0;
-                    double newEndTime = roundToThreeDecimals(newStartTime + Math.min(newTimelineDuration, originalAudioDuration));
-                    if (newEndTime > audioDuration) {
-                        newEndTime = roundToThreeDecimals(audioDuration);
-                        newStartTime = roundToThreeDecimals(newEndTime - newTimelineDuration);
-                    }
-                    targetSegment.setStartTime(newStartTime);
-                    targetSegment.setEndTime(newEndTime);
-                }
+                targetSegment.setTimelineEndTime(roundToThreeDecimals(targetSegment.getTimelineStartTime() + clipDuration));
             }
         }
 
-        // Ensure timeline duration reflects rounded values
+        // Final validation
         double newTimelineDuration = roundToThreeDecimals(targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime());
         double newClipDuration = roundToThreeDecimals(targetSegment.getEndTime() - targetSegment.getStartTime());
-        if (newTimelineDuration < newClipDuration) {
-            targetSegment.setTimelineEndTime(roundToThreeDecimals(targetSegment.getTimelineStartTime() + newClipDuration));
+        if (Math.abs(newTimelineDuration - newClipDuration) > 0.001) {
+            throw new RuntimeException("Timeline duration (" + newTimelineDuration + ") does not match clip duration (" + newClipDuration + ")");
+        }
+        if (newTimelineDuration <= 0) {
+            throw new RuntimeException("Invalid timeline duration: " + newTimelineDuration);
         }
 
         timelineState.getAudioSegments().remove(targetSegment);
@@ -3182,8 +3181,26 @@ public class VideoEditingService {
         List<String> audioOutputs = new ArrayList<>();
         int audioCount = 0;
 
+// Find the earliest timelineStartTime to check if we need initial silence
+        double earliestTimelineStart = timelineState.getAudioSegments().stream()
+                .mapToDouble(AudioSegment::getTimelineStartTime)
+                .min()
+                .orElse(Double.MAX_VALUE);
+
+// Add silence if the first audio segment doesn't start at 0
+        if (earliestTimelineStart > 0) {
+            String audioOutput = "aa" + audioCount++;
+            filterComplex.append("anullsrc=r=44100:cl=stereo:duration=").append(String.format("%.6f", earliestTimelineStart));
+            filterComplex.append("[").append(audioOutput).append("];");
+            audioOutputs.add(audioOutput);
+        }
+
         for (AudioSegment as : timelineState.getAudioSegments()) {
             String inputIdx = audioInputIndices.get(as.getId());
+            if (inputIdx == null) {
+                System.err.println("No input index found for audio segment " + as.getId());
+                continue;
+            }
             String audioOutput = "aa" + audioCount++;
             double audioStart = as.getStartTime();
             double audioEnd = as.getEndTime();
@@ -3198,99 +3215,98 @@ public class VideoEditingService {
                         ", end=" + audioEnd + ", timelineStart=" + timelineStart + ", timelineEnd=" + timelineEnd);
                 continue;
             }
+            if (Math.abs(sourceDuration - timelineDuration) > 0.001) {
+                System.err.println("Warning: Audio segment " + as.getId() + " has mismatched durations: " +
+                        "sourceDuration=" + sourceDuration + ", timelineDuration=" + timelineDuration);
+                timelineEnd = timelineStart + sourceDuration;
+                timelineDuration = sourceDuration;
+            }
 
             filterComplex.append("[").append(inputIdx).append(":a]");
+            // Trim the audio to the source start and end times
             filterComplex.append("atrim=").append(String.format("%.6f", audioStart)).append(":").append(String.format("%.6f", audioEnd)).append(",");
-            filterComplex.append("asetpts=PTS-STARTPTS,");
+            // Reset PTS to start at 0 for the trimmed clip
+            filterComplex.append("asetpts=PTS-STARTPTS");
 
-            // Handle volume with keyframes
+            // Apply volume with keyframes
             List<Keyframe> volumeKeyframes = as.getKeyframes().getOrDefault("volume", new ArrayList<>());
             double defaultVolume = as.getVolume() != null ? as.getVolume() : 1.0;
 
-            // Debug keyframes
-            System.out.println("Processing audio segment " + as.getId() + " with " + volumeKeyframes.size() + " volume keyframes:");
-            for (Keyframe kf : volumeKeyframes) {
-                System.out.println("  Keyframe: time=" + kf.getTime() + ", value=" + kf.getValue());
-            }
-
+            System.out.println("Processing audio segment " + as.getId() + " with " + volumeKeyframes.size() + " volume keyframes");
             if (!volumeKeyframes.isEmpty()) {
-                // Sort and validate keyframes
                 Collections.sort(volumeKeyframes, Comparator.comparingDouble(Keyframe::getTime));
-                double segmentDuration = timelineEnd - timelineStart;
+                double finalTimelineDuration = timelineDuration;
+                List<Keyframe> validKeyframes = volumeKeyframes.stream()
+                        .filter(kf -> {
+                            double time = kf.getTime();
+                            double value = ((Number) kf.getValue()).doubleValue();
+                            boolean valid = time >= 0 && time <= finalTimelineDuration && value >= 0;
+                            if (!valid) {
+                                System.err.println("Invalid keyframe for audio segment " + as.getId() + ": time=" + time + ", value=" + value);
+                            }
+                            return valid;
+                        })
+                        .collect(Collectors.toList());
 
-                for (Keyframe kf : volumeKeyframes) {
-                    double kfTime = kf.getTime();
-                    double kfValue = ((Number) kf.getValue()).doubleValue();
-                    if (kfTime < 0 || kfTime > segmentDuration) {
-                        System.err.println("Invalid keyframe time for audio segment " + as.getId() + ": time=" + kfTime +
-                                ", segmentDuration=" + segmentDuration);
-                        continue;
-                    }
-                    if (kfValue < 0 || kfValue > 1) {
-                        System.err.println("Invalid keyframe value for audio segment " + as.getId() + ": value=" + kfValue);
-                        continue;
-                    }
-                }
+                if (!validKeyframes.isEmpty()) {
+                    StringBuilder volumeExpr = new StringBuilder("volume=");
+                    if (validKeyframes.size() == 1) {
+                        double value = ((Number) validKeyframes.get(0).getValue()).doubleValue();
+                        volumeExpr.append(String.format("%.6f", value));
+                    } else {
+                        volumeExpr.append("'");
+                        for (int j = 0; j < validKeyframes.size() - 1; j++) {
+                            Keyframe currentKf = validKeyframes.get(j);
+                            Keyframe nextKf = validKeyframes.get(j + 1);
+                            double currentTime = currentKf.getTime();
+                            double nextTime = nextKf.getTime();
+                            double currentValue = ((Number) currentKf.getValue()).doubleValue();
+                            double nextValue = ((Number) nextKf.getValue()).doubleValue();
 
-                // Build simplified volume expression
-                StringBuilder volumeExpr = new StringBuilder();
-                if (volumeKeyframes.size() == 1) {
-                    double kfValue = ((Number) volumeKeyframes.get(0).getValue()).doubleValue();
-                    volumeExpr.append(String.format("%.6f", kfValue));
-                } else {
-                    volumeExpr.append("'");
-                    for (int j = 0; j < volumeKeyframes.size() - 1; j++) {
-                        Keyframe currentKf = volumeKeyframes.get(j);
-                        Keyframe nextKf = volumeKeyframes.get(j + 1);
-                        double currentTime = currentKf.getTime();
-                        double nextTime = nextKf.getTime();
-                        double currentValue = ((Number) currentKf.getValue()).doubleValue();
-                        double nextValue = ((Number) nextKf.getValue()).doubleValue();
-
-                        if (nextTime > currentTime) {
-                            String progress = String.format("(t-%.6f)/(%.6f-%.6f)", currentTime, nextTime, currentTime);
-                            String interpolatedValue = String.format("%.6f+(%.6f-%.6f)*%s", currentValue, nextValue, currentValue, progress);
-                            volumeExpr.append(String.format("if(between(t,%.6f,%.6f),%s,", currentTime, nextTime, interpolatedValue));
+                            if (nextTime > currentTime) {
+                                String progress = String.format("(t-%.6f)/(%.6f-%.6f)", currentTime, nextTime, currentTime);
+                                String interpolatedValue = String.format("%.6f+(%.6f-%.6f)*min(1,max(0,%s))", currentValue, nextValue, currentValue, progress);
+                                volumeExpr.append(String.format("if(between(t,%.6f,%.6f),%s,", currentTime, nextTime, interpolatedValue));
+                            }
                         }
+                        double lastValue = ((Number) validKeyframes.get(validKeyframes.size() - 1).getValue()).doubleValue();
+                        volumeExpr.append(String.format("%.6f", lastValue));
+                        for (int j = 0; j < validKeyframes.size() - 1; j++) {
+                            volumeExpr.append(")");
+                        }
+                        volumeExpr.append("'");
                     }
-                    Keyframe lastKf = volumeKeyframes.get(volumeKeyframes.size() - 1);
-                    volumeExpr.append(String.format("%.6f", ((Number) lastKf.getValue()).doubleValue()));
-                    for (int j = 0; j < volumeKeyframes.size() - 1; j++) {
-                        volumeExpr.append(")");
-                    }
-                    volumeExpr.append("'");
+                    volumeExpr.append(":eval=frame");
+                    filterComplex.append(",").append(volumeExpr);
+                    System.out.println("Volume expression for audio segment " + as.getId() + ": " + volumeExpr);
+                } else {
+                    filterComplex.append(",").append("volume=").append(String.format("%.6f", defaultVolume));
                 }
-
-                filterComplex.append("volume=").append(volumeExpr).append(":eval=frame,");
-                System.out.println("Volume expression for audio segment " + as.getId() + ": " + volumeExpr);
             } else {
-                filterComplex.append("volume=").append(String.format("%.6f", defaultVolume)).append(",");
+                filterComplex.append(",").append("volume=").append(String.format("%.6f", defaultVolume));
             }
 
-            // Apply delay
-            filterComplex.append("adelay=").append((int)(timelineStart * 1000)).append("|").append((int)(timelineStart * 1000)).append(",");
-
-            // Handle duration
-            if (sourceDuration < timelineDuration) {
-                filterComplex.append("apad=pad_dur=").append(String.format("%.6f", timelineDuration - sourceDuration)).append(",");
-            } else if (sourceDuration > timelineDuration) {
-                filterComplex.append("atrim=0:").append(String.format("%.6f", timelineDuration)).append(",");
+            // Apply delay to align with timelineStartTime
+            if (timelineStart > 0) {
+                filterComplex.append(",").append("adelay=").append((int)(timelineStart * 1000)).append("|").append((int)(timelineStart * 1000));
             }
 
-            // Ensure audio extends to the end of the video
-            filterComplex.append("apad=pad_dur=").append(String.format("%.6f", totalDuration - timelineEnd)).append(",");
-            filterComplex.append("asetpts=PTS-STARTPTS");
+            // Pad to ensure audio extends to total video duration if necessary
+            if (timelineEnd < totalDuration) {
+                filterComplex.append(",").append("apad=pad_dur=").append(String.format("%.6f", totalDuration - timelineEnd));
+            }
 
             filterComplex.append("[").append(audioOutput).append("];");
             audioOutputs.add(audioOutput);
         }
 
         if (!audioOutputs.isEmpty()) {
-            for (String audioOutput : audioOutputs) {
-                filterComplex.append("[").append(audioOutput).append("]");
-            }
-            filterComplex.append("amix=inputs=").append(audioOutputs.size()).append(":duration=longest[aout];");
+            filterComplex.append("[").append(String.join("][", audioOutputs)).append("]");
+            filterComplex.append("amix=inputs=").append(audioOutputs.size()).append(":duration=longest:dropout_transition=0:normalize=0[aout];");
         }
+
+// Debug the filter complex before adding video output
+        System.out.println("Constructed filter_complex: " + filterComplex.toString());
 
         filterComplex.append("[").append(lastOutput).append("]setpts=PTS-STARTPTS[vout]");
 
@@ -3302,6 +3318,9 @@ public class VideoEditingService {
         if (!audioOutputs.isEmpty()) {
             command.add("-map");
             command.add("[aout]");
+        } else {
+            // Ensure no audio track if no audio segments
+            command.add("-an");
         }
 
         command.add("-c:v");
@@ -3312,6 +3331,8 @@ public class VideoEditingService {
         command.add(canvasWidth >= 3840 ? "10M" : "5M"); // Dynamic bitrate for 4K vs. 1080p
         command.add("-pix_fmt");
         command.add("yuv420p"); // Ensure compatibility with most players
+        command.add("-color_range");
+        command.add("tv"); // Set color range to TV (limited) to avoid swscaler warning
         command.add("-c:a");
         command.add("aac");
         command.add("-b:a");

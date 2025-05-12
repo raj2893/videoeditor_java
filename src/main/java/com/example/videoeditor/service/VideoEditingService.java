@@ -3181,18 +3181,22 @@ public class VideoEditingService {
         List<String> audioOutputs = new ArrayList<>();
         int audioCount = 0;
 
-// Find the earliest timelineStartTime to check if we need initial silence
+        // Find the earliest timelineStartTime to check if we need initial silence
         double earliestTimelineStart = timelineState.getAudioSegments().stream()
+                .filter(as -> as.getTimelineStartTime() >= 0 && as.getTimelineEndTime() > as.getTimelineStartTime())
                 .mapToDouble(AudioSegment::getTimelineStartTime)
                 .min()
-                .orElse(Double.MAX_VALUE);
+                .orElse(totalDuration); // Fallback to totalDuration if no valid audio segments
 
-// Add silence if the first audio segment doesn't start at 0
-        if (earliestTimelineStart > 0) {
+        // Add silence only if the earliest audio start is greater than 0 and less than totalDuration
+        if (earliestTimelineStart > 0 && earliestTimelineStart < totalDuration && !timelineState.getAudioSegments().isEmpty()) {
             String audioOutput = "aa" + audioCount++;
-            filterComplex.append("anullsrc=r=44100:cl=stereo:duration=").append(String.format("%.6f", earliestTimelineStart));
+            // Cap the silence duration to prevent overflow
+            double silenceDuration = Math.min(earliestTimelineStart, totalDuration);
+            filterComplex.append("anullsrc=r=44100:cl=stereo:duration=").append(String.format("%.6f", silenceDuration));
             filterComplex.append("[").append(audioOutput).append("];");
             audioOutputs.add(audioOutput);
+            System.out.println("Added initial silence of duration: " + silenceDuration + " seconds");
         }
 
         for (AudioSegment as : timelineState.getAudioSegments()) {

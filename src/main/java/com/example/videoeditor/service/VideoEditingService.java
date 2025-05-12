@@ -340,7 +340,7 @@ public class VideoEditingService {
 
         Project project = projectRepository.findById(session.getProjectId())
                 .orElseThrow(() -> new RuntimeException("Project not found"));
-        String audioPath;
+        String audioPath = null;
         AudioSegment audioSegment = null;
 
         if (createAudioSegment) {
@@ -364,38 +364,41 @@ public class VideoEditingService {
                 Map<String, String> extractionResult = extractAudioFromVideo(videoPath, session.getProjectId(), audioFileName);
                 audioPath = extractionResult.get("audioPath");
                 waveformJsonPath = extractionResult.get("waveformJsonPath");
-                System.out.println("Extracted new audio file: " + audioPath + ", waveform: " + waveformJsonPath);
+                System.out.println("Extracted audio file: " + audioPath + ", waveform: " + waveformJsonPath);
             }
 
-            List<Map<String, String>> videos = getVideos(project);
-            boolean videoExists = false;
-            for (Map<String, String> video : videos) {
-                if (video.get("videoPath").equals(videoPath)) {
-                    video.put("audioPath", audioPath);
-                    videoExists = true;
-                    break;
+            // Only create audio segment if audio was successfully extracted
+            if (audioPath != null) {
+                List<Map<String, String>> videos = getVideos(project);
+                boolean videoExists = false;
+                for (Map<String, String> video : videos) {
+                    if (video.get("videoPath").equals(videoPath)) {
+                        video.put("audioPath", audioPath);
+                        videoExists = true;
+                        break;
+                    }
                 }
-            }
-            if (!videoExists) {
-                addVideo(project, videoPath, videoFileName, audioPath);
-            } else {
-                project.setVideosJson(objectMapper.writeValueAsString(videos));
-            }
-            projectRepository.save(project);
+                if (!videoExists) {
+                    addVideo(project, videoPath, videoFileName, audioPath);
+                } else {
+                    project.setVideosJson(objectMapper.writeValueAsString(videos));
+                }
+                projectRepository.save(project);
 
-            audioSegment = new AudioSegment();
-            audioSegment.setAudioPath(audioPath);
-            audioSegment.setWaveformJsonPath(waveformJsonPath);
-            int audioLayer = findAvailableAudioLayer(session.getTimelineState(), timelineStartTime, timelineEndTime);
-            audioSegment.setLayer(audioLayer);
-            audioSegment.setStartTime(startTime);
-            audioSegment.setEndTime(endTime);
-            audioSegment.setTimelineStartTime(timelineStartTime);
-            audioSegment.setTimelineEndTime(timelineEndTime);
-            audioSegment.setVolume(1.0);
-            audioSegment.setExtracted(true); // Set isExtracted to true
-        } else {
-            audioPath = null;
+                audioSegment = new AudioSegment();
+                audioSegment.setAudioPath(audioPath);
+                audioSegment.setWaveformJsonPath(waveformJsonPath);
+                int audioLayer = findAvailableAudioLayer(session.getTimelineState(), timelineStartTime, timelineEndTime);
+                audioSegment.setLayer(audioLayer);
+                audioSegment.setStartTime(startTime);
+                audioSegment.setEndTime(endTime);
+                audioSegment.setTimelineStartTime(timelineStartTime);
+                audioSegment.setTimelineEndTime(timelineEndTime);
+                audioSegment.setVolume(1.0);
+                audioSegment.setExtracted(true);
+            } else {
+                System.out.println("No audio extracted for video: " + videoPath + ", skipping audio segment creation");
+            }
         }
 
         VideoSegment segment = new VideoSegment();
@@ -450,18 +453,72 @@ public class VideoEditingService {
         if (!videoFile.exists()) {
             throw new IOException("Video file not found: " + videoFile.getAbsolutePath());
         }
+        if (!videoFile.canRead()) {
+            throw new IOException("Video file is not readable: " + videoFile.getAbsolutePath());
+        }
 
         // Store audio in project-specific extracted folder
         File audioDir = new File(baseDir, "audio/projects/" + projectId + "/extracted");
-        if (!audioDir.exists()) {
-            audioDir.mkdirs();
+        if (!audioDir.exists() && !audioDir.mkdirs()) {
+            throw new IOException("Failed to create audio directory: " + audioDir.getAbsolutePath());
         }
 
         String videoFileName = new File(videoPath).getName();
         String baseFileName = videoFileName.substring(0, videoFileName.lastIndexOf('.'));
         String cleanAudioFileName = "extracted_" + baseFileName.replaceAll("[^a-zA-Z0-9.]", "_") + ".mp3";
         File audioFile = new File(audioDir, cleanAudioFileName);
+        String relativePath = "audio/projects/" + projectId + "/extracted/" + cleanAudioFileName;
+        String waveformJsonPath = null;
 
+        // Check if audio stream exists using ffprobe
+        List<String> probeCommand = new ArrayList<>();
+        probeCommand.add(ffmpegPath.replace("ffmpeg.exe", "ffprobe.exe"));
+        probeCommand.add("-v");
+        probeCommand.add("error");
+        probeCommand.add("-show_streams");
+        probeCommand.add("-select_streams");
+        probeCommand.add("a");
+        probeCommand.add("-of");
+        probeCommand.add("json");
+        probeCommand.add(videoFile.getAbsolutePath());
+
+        ProcessBuilder probeBuilder = new ProcessBuilder(probeCommand);
+        probeBuilder.redirectErrorStream(true);
+        Process probeProcess = probeBuilder.start();
+        StringBuilder probeOutput = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(probeProcess.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                probeOutput.append(line);
+            }
+        }
+        int probeExitCode = probeProcess.waitFor();
+        if (probeExitCode != 0) {
+            // Log the probe command output for debugging
+            System.err.println("ffprobe command failed: " + String.join(" ", probeCommand));
+            System.err.println("ffprobe output: " + probeOutput.toString());
+            throw new IOException("Failed to probe video for audio streams: " + videoPath + ", ffprobe exit code: " + probeExitCode);
+        }
+
+        // Parse ffprobe output
+        Map<String, Object> probeData;
+        try {
+            probeData = objectMapper.readValue(probeOutput.toString(), new TypeReference<Map<String, Object>>() {});
+        } catch (JsonProcessingException e) {
+            System.err.println("Failed to parse ffprobe output: " + probeOutput.toString());
+            throw new IOException("Invalid ffprobe output for video: " + videoPath, e);
+        }
+        List<Map<String, Object>> streams = (List<Map<String, Object>>) probeData.getOrDefault("streams", new ArrayList<>());
+        if (streams.isEmpty()) {
+            System.out.println("No audio stream found in video: " + videoPath);
+            // Return without extracting audio
+            Map<String, String> result = new HashMap<>();
+            result.put("audioPath", null);
+            result.put("waveformJsonPath", null);
+            return result;
+        }
+
+        // Proceed with audio extraction
         List<String> command = new ArrayList<>();
         command.add(ffmpegPath);
         command.add("-i");
@@ -472,18 +529,29 @@ public class VideoEditingService {
         command.add("-y");
         command.add(audioFile.getAbsolutePath());
 
-        executeFFmpegCommand(command);
+        try {
+            executeFFmpegCommand(command);
+        } catch (RuntimeException e) {
+            System.err.println("Audio extraction failed for video: " + videoPath);
+            throw new IOException("Failed to extract audio from video: " + videoPath, e);
+        }
 
-        String relativePath = "audio/projects/" + projectId + "/extracted/" + cleanAudioFileName;
-
-        // Generate and save waveform JSON
-        String waveformJsonPath = generateAndSaveWaveformJson(relativePath, projectId);
+        // Generate and save waveform JSON if audio was extracted
+        if (audioFile.exists()) {
+            waveformJsonPath = generateAndSaveWaveformJson(relativePath, projectId);
+        } else {
+            System.out.println("Audio file was not created: " + audioFile.getAbsolutePath());
+            // Return without waveform if extraction failed
+            Map<String, String> result = new HashMap<>();
+            result.put("audioPath", null);
+            result.put("waveformJsonPath", null);
+            return result;
+        }
 
         // Update project
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
         addExtractedAudio(project, relativePath, cleanAudioFileName, videoPath, waveformJsonPath);
-
         projectRepository.save(project);
 
         // Return audioPath and waveformJsonPath

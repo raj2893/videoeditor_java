@@ -297,7 +297,8 @@ public class VideoEditingService {
             Double timelineEndTime,
             Double startTime,
             Double endTime,
-            boolean createAudioSegment
+            boolean createAudioSegment,
+            Double speed
     ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
         if (session == null) {
@@ -325,8 +326,11 @@ public class VideoEditingService {
         endTime = roundToThreeDecimals(endTime);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
 
+        // Calculate clip duration
+        double clipDuration = endTime - startTime;
+
         if (timelineEndTime == null) {
-            timelineEndTime = timelineStartTime + (endTime - startTime);
+            timelineEndTime = timelineStartTime + (clipDuration / speed);
         }
         timelineEndTime = roundToThreeDecimals(timelineEndTime);
 
@@ -416,6 +420,7 @@ public class VideoEditingService {
         segment.setCropL(0.0);
         segment.setCropR(0.0);
         segment.setCropT(0.0);
+        segment.setSpeed(speed); // Set default speed
 
         if (audioSegment != null) {
             segment.setAudioId(audioSegment.getId());
@@ -606,10 +611,11 @@ public class VideoEditingService {
             Double timelineEndTime,
             Double startTime,
             Double endTime,
-            Double cropL, // New parameter
-            Double cropR, // New parameter
-            Double cropT, // New parameter
-            Double cropB, // New parameter
+            Double cropL,
+            Double cropR,
+            Double cropT,
+            Double cropB,
+            Double speed, // New parameter
             Map<String, List<Keyframe>> keyframes
     ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
@@ -634,6 +640,7 @@ public class VideoEditingService {
         Double originalCropR = segmentToUpdate.getCropR();
         Double originalCropT = segmentToUpdate.getCropT();
         Double originalCropB = segmentToUpdate.getCropB();
+        Double originalSpeed = segmentToUpdate.getSpeed();
 
         boolean timelineOrLayerChanged = false;
 
@@ -659,6 +666,14 @@ public class VideoEditingService {
         }
         if (effectiveCropT + effectiveCropB >= 100) {
             throw new IllegalArgumentException("Total crop percentage (top + bottom) must be less than 100");
+        }
+
+        // Validate speed
+        if (speed != null) {
+            if (speed < 0.1 || speed > 5.0) {
+                throw new IllegalArgumentException("Speed must be between 0.1 and 5.0");
+            }
+            segmentToUpdate.setSpeed(speed);
         }
 
         if (keyframes != null && !keyframes.isEmpty()) {
@@ -724,13 +739,33 @@ public class VideoEditingService {
         if (cropT != null) segmentToUpdate.setCropT(cropT);
         if (cropB != null) segmentToUpdate.setCropB(cropB);
 
-        // Ensure timeline duration reflects rounded values
-        double newTimelineDuration = roundToThreeDecimals(segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime());
-        double newClipDuration = roundToThreeDecimals(segmentToUpdate.getEndTime() - segmentToUpdate.getStartTime());
-        if (newTimelineDuration < newClipDuration) {
-            segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newClipDuration));
-        }
+        // Adjust timelineEndTime based on speed
+        double newStartTime = startTime != null ? startTime : segmentToUpdate.getStartTime();
+        double newEndTime = endTime != null ? endTime : segmentToUpdate.getEndTime();
+        double newClipDuration = roundToThreeDecimals(newEndTime - newStartTime);
+        double effectiveSpeed = speed != null ? speed : originalSpeed;
 
+        // Update timelineEndTime only when speed is increasing
+        if (speed != null && speed > originalSpeed && originalSpeed >= 1.0) {
+            // Update timelineEndTime when speed increases
+            double newTimelineDuration = roundToThreeDecimals(newClipDuration / effectiveSpeed);
+            if (timelineEndTime == null) {
+                segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newTimelineDuration));
+            } else {
+                // Ensure provided timelineEndTime matches the expected duration
+                double providedTimelineDuration = roundToThreeDecimals(timelineEndTime - segmentToUpdate.getTimelineStartTime());
+                if (Math.abs(providedTimelineDuration - newTimelineDuration) > 0.001) {
+                    segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newTimelineDuration));
+                }
+            }
+        } else {
+            // When speed decreases or stays the same, keep timelineEndTime unless explicitly provided
+            if (timelineEndTime == null && (startTime != null || endTime != null)) {
+                // Recalculate timelineEndTime based on new clip duration only if startTime or endTime changed
+                double newTimelineDuration = roundToThreeDecimals(newClipDuration / effectiveSpeed);
+                segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newTimelineDuration));
+            }
+        }
 
         // Validate timeline position with rounded values
         TimelineState timelineState = session.getTimelineState();
@@ -751,6 +786,7 @@ public class VideoEditingService {
             segmentToUpdate.setCropR(originalCropR);
             segmentToUpdate.setCropT(originalCropT);
             segmentToUpdate.setCropB(originalCropB);
+            segmentToUpdate.setSpeed(originalSpeed);
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + segmentToUpdate.getLayer());
         }
 
@@ -767,6 +803,7 @@ public class VideoEditingService {
 
         session.setLastAccessTime(System.currentTimeMillis());
     }
+
     public VideoSegment getVideoSegment(String sessionId, String segmentId) {
         EditSession session = getSession(sessionId);
         for (VideoSegment segment : session.getTimelineState().getSegments()) {
@@ -1189,7 +1226,7 @@ public class VideoEditingService {
             targetSegment.setLayer(layer);
         }
         if (volume != null) {
-            if (volume < 0 || volume > 1) throw new RuntimeException("Volume must be between 0.0 and 1.0");
+            if (volume < 0 || volume > 15) throw new RuntimeException("Volume must be between 0.0 and 15.0");
             targetSegment.setVolume(volume);
         }
 
@@ -2397,6 +2434,10 @@ public class VideoEditingService {
 
                 filterComplex.append("[").append(inputIdx).append(":v]");
                 filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
+                // Apply speed adjustment
+                double speed = vs.getSpeed() != null ? vs.getSpeed() : 1.0;
+                double speedFactor = 1.0 / speed; // Inverse for setpts: speed > 1 means faster (shorter), speed < 1 means slower (longer)
+                filterComplex.append("setpts=").append(String.format("%.6f", speedFactor)).append("*PTS,");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
 
                 // Store crop values before applying crop
@@ -2417,6 +2458,9 @@ public class VideoEditingService {
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(vs.getId()))
                         .collect(Collectors.toList());
+                boolean hasVignette = false;
+                double vignetteValue = 0.0;
+
                 for (Filter filter : segmentFilters) {
                     if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
                         System.err.println("Skipping invalid filter for segment " + vs.getId() + ": null or empty filter name");
@@ -2516,6 +2560,13 @@ public class VideoEditingService {
                                     filterComplex.append("hflip,vflip,");
                                 }
                                 break;
+                            case "vignette":
+                                double vignette = Double.parseDouble(filterValue);
+                                if (vignette >= 0 && vignette <= 1 && vignette > 0.01) {
+                                    hasVignette = true;
+                                    vignetteValue = vignette;
+                                }
+                                break;
                             default:
                                 System.err.println("Unsupported filter: " + filterName + " for segment " + vs.getId());
                                 break;
@@ -2524,6 +2575,27 @@ public class VideoEditingService {
                         System.err.println("Invalid filter value for " + filterName + " in segment " + vs.getId() + ": " + filterValue);
                     }
                 }
+
+// Apply vignette filter if present
+                // With this:
+                if (hasVignette) {
+                    // Map vignetteValue (0 to 1) to darkening intensity
+                    double intensity = vignetteValue; // 0 (no effect) to 1 (max darkening)
+                    // Compute vignette mask: darken edges based on distance from center
+                    filterComplex.append("format=rgb24,");
+                    filterComplex.append("geq=")
+                            .append("lum='lum(X,Y)*")
+                            .append("(1-").append(String.format("%.6f", intensity)).append("*(1-sqrt(4*((X/W-0.5)^2+(Y/H-0.5)^2))))'")
+                            .append(":cb='cb(X,Y)':cr='cr(X,Y)',");
+                    filterComplex.append("format=yuv420p,");
+                    filterComplex.append("enable='between(t,")
+                            .append(String.format("%.6f", vs.getTimelineStartTime())).append(",")
+                            .append(String.format("%.6f", vs.getTimelineEndTime())).append(")',");
+                    System.out.println("Custom vignette filter applied to video segment " + vs.getId() + ": intensity=" + intensity);
+                }
+
+// Ensure consistent pixel format before scaling
+                filterComplex.append("format=yuv420p,");
 
                 // Apply transitions and get position and crop parameters
                 List<Transition> relevantTransitions = timelineState.getTransitions().stream()
@@ -2770,6 +2842,9 @@ public class VideoEditingService {
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(is.getId()))
                         .collect(Collectors.toList());
+                boolean hasVignette = false;
+                double vignetteValue = 0.0;
+
                 for (Filter filter : segmentFilters) {
                     if (filter == null || filter.getFilterName() == null || filter.getFilterName().trim().isEmpty()) {
                         System.err.println("Skipping invalid filter for segment " + is.getId() + ": null or empty filter name");
@@ -2869,6 +2944,13 @@ public class VideoEditingService {
                                     filterComplex.append("hflip,vflip,");
                                 }
                                 break;
+                            case "vignette":
+                                double vignette = Double.parseDouble(filterValue);
+                                if (vignette >= 0 && vignette <= 1 && vignette > 0.01) {
+                                    hasVignette = true;
+                                    vignetteValue = vignette;
+                                }
+                                break;
                             default:
                                 System.err.println("Unsupported filter: " + filterName + " for segment " + is.getId());
                                 break;
@@ -2877,6 +2959,26 @@ public class VideoEditingService {
                         System.err.println("Invalid filter value for " + filterName + " in segment " + is.getId() + ": " + filterValue);
                     }
                 }
+
+// Apply vignette filter if present
+                if (hasVignette) {
+                    // Map vignetteValue (0 to 1) to darkening intensity
+                    double intensity = vignetteValue; // 0 (no effect) to 1 (max darkening)
+                    // Compute vignette mask: darken edges based on distance from center
+                    filterComplex.append("format=rgb24,");
+                    filterComplex.append("geq=")
+                            .append("lum='lum(X,Y)*")
+                            .append("(1-").append(String.format("%.6f", intensity)).append("*(1-sqrt(4*((X/W-0.5)^2+(Y/H-0.5)^2))))'")
+                            .append(":cb='cb(X,Y)':cr='cr(X,Y)',");
+                    filterComplex.append("format=yuv420p,");
+                    filterComplex.append("enable='between(t,")
+                            .append(String.format("%.6f", is.getTimelineStartTime())).append(",")
+                            .append(String.format("%.6f", is.getTimelineEndTime())).append(")',");
+                    System.out.println("Custom vignette filter applied to image segment " + is.getId() + ": intensity=" + intensity);
+                }
+
+// Ensure consistent pixel format before scaling
+                filterComplex.append("format=yuv420p,");
 
                 // Apply transitions and get position and crop parameters
                 List<Transition> relevantTransitions = timelineState.getTransitions().stream()
@@ -3312,7 +3414,7 @@ public class VideoEditingService {
                         .filter(kf -> {
                             double time = kf.getTime();
                             double value = ((Number) kf.getValue()).doubleValue();
-                            boolean valid = time >= 0 && time <= finalTimelineDuration && value >= 0;
+                            boolean valid = time >= 0 && time <= finalTimelineDuration && value >= 0 && value <= 15;
                             if (!valid) {
                                 System.err.println("Invalid keyframe for audio segment " + as.getId() + ": time=" + time + ", value=" + value);
                             }
@@ -3322,32 +3424,52 @@ public class VideoEditingService {
 
                 if (!validKeyframes.isEmpty()) {
                     StringBuilder volumeExpr = new StringBuilder("volume=");
-                    if (validKeyframes.size() == 1) {
-                        double value = ((Number) validKeyframes.get(0).getValue()).doubleValue();
-                        volumeExpr.append(String.format("%.6f", value));
-                    } else {
-                        volumeExpr.append("'");
-                        for (int j = 0; j < validKeyframes.size() - 1; j++) {
-                            Keyframe currentKf = validKeyframes.get(j);
-                            Keyframe nextKf = validKeyframes.get(j + 1);
-                            double currentTime = currentKf.getTime();
-                            double nextTime = nextKf.getTime();
-                            double currentValue = ((Number) currentKf.getValue()).doubleValue();
-                            double nextValue = ((Number) nextKf.getValue()).doubleValue();
+                    double lastValue = ((Number) validKeyframes.get(validKeyframes.size() - 1).getValue()).doubleValue();
+                    double lastTime = validKeyframes.get(validKeyframes.size() - 1).getTime();
 
-                            if (nextTime > currentTime) {
-                                String progress = String.format("(t-%.6f)/(%.6f-%.6f)", currentTime, nextTime, currentTime);
-                                String interpolatedValue = String.format("%.6f+(%.6f-%.6f)*min(1,max(0,%s))", currentValue, nextValue, currentValue, progress);
-                                volumeExpr.append(String.format("if(between(t,%.6f,%.6f),%s,", currentTime, nextTime, interpolatedValue));
+                    volumeExpr.append("'");
+
+                    // Generate conditions for each time range
+                    int conditionCount = 0;
+                    for (int j = 0; j < validKeyframes.size(); j++) {
+                        double startTime, endTime, startValue, endValue;
+
+                        Keyframe currentKf = validKeyframes.get(j);
+                        startTime = currentKf.getTime();
+                        startValue = ((Number) currentKf.getValue()).doubleValue();
+
+                        if (j < validKeyframes.size() - 1) {
+                            Keyframe nextKf = validKeyframes.get(j + 1);
+                            endTime = nextKf.getTime();
+                            endValue = ((Number) nextKf.getValue()).doubleValue();
+                        } else {
+                            endTime = finalTimelineDuration;
+                            endValue = startValue; // Last keyframe value extends to end
+                        }
+
+                        if (startTime < endTime) {
+                            String condition = String.format("between(t,%.6f,%.6f)", startTime, endTime);
+                            String valueExpr;
+                            if (Math.abs(startValue - endValue) < 0.000001) {
+                                valueExpr = String.format("%.6f", startValue);
+                            } else {
+                                String progress = String.format("(t-%.6f)/(%.6f-%.6f)", startTime, endTime, startTime);
+                                valueExpr = String.format("%.6f+(%.6f-%.6f)*min(1,max(0,%s))", startValue, endValue, startValue, progress);
                             }
+                            volumeExpr.append(String.format("if(%s,%s,", condition, valueExpr));
+                            conditionCount++;
                         }
-                        double lastValue = ((Number) validKeyframes.get(validKeyframes.size() - 1).getValue()).doubleValue();
-                        volumeExpr.append(String.format("%.6f", lastValue));
-                        for (int j = 0; j < validKeyframes.size() - 1; j++) {
-                            volumeExpr.append(")");
-                        }
-                        volumeExpr.append("'");
                     }
+
+                    // Default value
+                    volumeExpr.append(String.format("%.6f", lastValue));
+
+                    // Close all if statements
+                    for (int j = 0; j < conditionCount; j++) {
+                        volumeExpr.append(")");
+                    }
+
+                    volumeExpr.append("'");
                     volumeExpr.append(":eval=frame");
                     filterComplex.append(",").append(volumeExpr);
                     System.out.println("Volume expression for audio segment " + as.getId() + ": " + volumeExpr);

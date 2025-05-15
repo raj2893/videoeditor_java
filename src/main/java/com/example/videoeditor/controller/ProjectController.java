@@ -158,6 +158,7 @@ public class ProjectController {
             Double startTime = request.get("startTime") != null ? ((Number) request.get("startTime")).doubleValue() : null;
             Double endTime = request.get("endTime") != null ? ((Number) request.get("endTime")).doubleValue() : null;
             Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null;
+            Double speed = request.get("speed") != null ? ((Number) request.get("speed")).doubleValue() : null; // New parameter
             Boolean createAudioSegment = request.get("createAudioSegment") != null ?
                     Boolean.valueOf(request.get("createAudioSegment").toString()) :
                     (request.get("skipAudio") != null ? !Boolean.valueOf(request.get("skipAudio").toString()) : true);
@@ -169,6 +170,9 @@ public class ProjectController {
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
+            if (speed != null && (speed < 0.1 || speed > 5.0)) { // Validate speed
+                return ResponseEntity.badRequest().body("Speed must be between 0.1 and 5.0");
+            }
 
             // Call the service method with updated parameters
             videoEditingService.addVideoToTimeline(
@@ -179,7 +183,8 @@ public class ProjectController {
                     timelineEndTime,
                     startTime,
                     endTime,
-                    createAudioSegment
+                    createAudioSegment,
+                    speed // Pass speed to service
             );
 
             // Retrieve the newly added video and audio segments
@@ -199,6 +204,7 @@ public class ProjectController {
             Map<String, Object> response = new HashMap<>();
             response.put("videoSegmentId", addedVideoSegment.getId());
             response.put("layer", addedVideoSegment.getLayer());
+            response.put("speed", addedVideoSegment.getSpeed()); // Include speed in response
             if (addedAudioSegment != null) {
                 response.put("audioSegmentId", addedAudioSegment.getId());
                 response.put("audioLayer", addedAudioSegment.getLayer());
@@ -245,6 +251,7 @@ public class ProjectController {
             Double cropR = request.containsKey("cropR") ? Double.valueOf(request.get("cropR").toString()) : null;
             Double cropT = request.containsKey("cropT") ? Double.valueOf(request.get("cropT").toString()) : null;
             Double cropB = request.containsKey("cropB") ? Double.valueOf(request.get("cropB").toString()) : null;
+            Double speed = request.containsKey("speed") ? Double.valueOf(request.get("speed").toString()) : null; // New parameter
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
@@ -282,6 +289,9 @@ public class ProjectController {
             if (cropB != null && (cropB < 0 || cropB > 100)) {
                 return ResponseEntity.badRequest().body("cropB must be between 0 and 100");
             }
+            if (speed != null && (speed < 0.1 || speed > 5.0)) { // Validate speed
+                return ResponseEntity.badRequest().body("Speed must be between 0.1 and 5.0");
+            }
             // Validate total crop if static values are provided (not keyframed)
             if (parsedKeyframes == null ||
                     (!parsedKeyframes.containsKey("cropL") && !parsedKeyframes.containsKey("cropR") &&
@@ -298,7 +308,7 @@ public class ProjectController {
 
             videoEditingService.updateVideoSegment(
                     sessionId, segmentId, positionX, positionY, scale, opacity, timelineStartTime, layer,
-                    timelineEndTime, startTime, endTime, cropL, cropR, cropT, cropB, parsedKeyframes);
+                    timelineEndTime, startTime, endTime, cropL, cropR, cropT, cropB, speed, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -735,8 +745,8 @@ public class ProjectController {
             if (timelineStartTime != null && timelineStartTime < 0) {
                 return ResponseEntity.badRequest().body("Timeline start time must be non-negative");
             }
-            if (volume != null && (volume < 0 || volume > 1)) {
-                return ResponseEntity.badRequest().body("Volume must be between 0 and 1");
+            if (volume != null && (volume < 0 || volume > 15)) {
+                return ResponseEntity.badRequest().body("Volume must be between 0 and 15");
             }
             if (layer != null && layer >= 0) {
                 return ResponseEntity.badRequest().body("Audio layer must be negative");

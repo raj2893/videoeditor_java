@@ -95,6 +95,7 @@ public class AuthService {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setGoogleAuth(false);
         user.setEmailVerified(false);
+        user.setRole(User.Role.BASIC); // Explicitly set the default role
         userRepository.save(user);
 
         // Generate and save verification token
@@ -296,6 +297,7 @@ public class AuthService {
             user.setPassword(passwordEncoder.encode("GOOGLE_AUTH_" + System.currentTimeMillis()));
             user.setGoogleAuth(true);
             user.setEmailVerified(true);
+            user.setRole(User.Role.BASIC); // Set default role for new Google users
             userRepository.save(user);
         }
 

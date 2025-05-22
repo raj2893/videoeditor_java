@@ -26,6 +26,16 @@ public class ImageSegment implements Segment {
     private Double cropT = 0.0; // Crop percentage from top (0 to 100)
     private Double cropB = 0.0; // Crop percentage from bottom (0 to 100)
 
+    private Double rotation = 0.0; // Rotation in degrees, default to 0
+
+    public Double getRotation() {
+        return rotation;
+    }
+
+    public void setRotation(Double rotation) {
+        this.rotation = rotation;
+    }
+
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
 
     public boolean isElement() {
@@ -128,4 +138,6 @@ public class ImageSegment implements Segment {
     public void setCropT(Double cropT) { this.cropT = cropT; }
     public Double getCropB() { return cropB; }
     public void setCropB(Double cropB) { this.cropB = cropB; }
+
+
 }

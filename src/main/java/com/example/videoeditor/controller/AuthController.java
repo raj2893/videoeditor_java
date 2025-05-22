@@ -65,14 +65,15 @@ public class AuthController {
                     user.getEmail(),
                     user.getName() != null ? user.getName() : "",
                     user.getProfilePicture() != null ? user.getProfilePicture() : "",
-                    user.isGoogleAuth()
+                    user.isGoogleAuth(),
+                    user.getRole().name()
             );
 
             return ResponseEntity.ok(profileResponse);
         } catch (Exception e) {
             logger.error("Error fetching user profile: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new UserProfileResponse(null, null, null, false));
+                    .body(new UserProfileResponse(null, null, null, false, null));
         }
     }
 

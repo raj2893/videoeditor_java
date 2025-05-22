@@ -158,7 +158,8 @@ public class ProjectController {
             Double startTime = request.get("startTime") != null ? ((Number) request.get("startTime")).doubleValue() : null;
             Double endTime = request.get("endTime") != null ? ((Number) request.get("endTime")).doubleValue() : null;
             Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null;
-            Double speed = request.get("speed") != null ? ((Number) request.get("speed")).doubleValue() : null; // New parameter
+            Double speed = request.get("speed") != null ? ((Number) request.get("speed")).doubleValue() : null;
+            Double rotation = request.get("rotation") != null ? ((Number) request.get("rotation")).doubleValue() : null; // New parameter
             Boolean createAudioSegment = request.get("createAudioSegment") != null ?
                     Boolean.valueOf(request.get("createAudioSegment").toString()) :
                     (request.get("skipAudio") != null ? !Boolean.valueOf(request.get("skipAudio").toString()) : true);
@@ -170,8 +171,11 @@ public class ProjectController {
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
-            if (speed != null && (speed < 0.1 || speed > 5.0)) { // Validate speed
+            if (speed != null && (speed < 0.1 || speed > 5.0)) {
                 return ResponseEntity.badRequest().body("Speed must be between 0.1 and 5.0");
+            }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
             }
 
             // Call the service method with updated parameters
@@ -184,7 +188,8 @@ public class ProjectController {
                     startTime,
                     endTime,
                     createAudioSegment,
-                    speed // Pass speed to service
+                    speed,
+                    rotation // Pass rotation to service
             );
 
             // Retrieve the newly added video and audio segments
@@ -204,7 +209,8 @@ public class ProjectController {
             Map<String, Object> response = new HashMap<>();
             response.put("videoSegmentId", addedVideoSegment.getId());
             response.put("layer", addedVideoSegment.getLayer());
-            response.put("speed", addedVideoSegment.getSpeed()); // Include speed in response
+            response.put("speed", addedVideoSegment.getSpeed());
+            response.put("rotation", addedVideoSegment.getRotation()); // Include rotation in response
             if (addedAudioSegment != null) {
                 response.put("audioSegmentId", addedAudioSegment.getId());
                 response.put("audioLayer", addedAudioSegment.getLayer());
@@ -251,7 +257,8 @@ public class ProjectController {
             Double cropR = request.containsKey("cropR") ? Double.valueOf(request.get("cropR").toString()) : null;
             Double cropT = request.containsKey("cropT") ? Double.valueOf(request.get("cropT").toString()) : null;
             Double cropB = request.containsKey("cropB") ? Double.valueOf(request.get("cropB").toString()) : null;
-            Double speed = request.containsKey("speed") ? Double.valueOf(request.get("speed").toString()) : null; // New parameter
+            Double speed = request.containsKey("speed") ? Double.valueOf(request.get("speed").toString()) : null;
+            Double rotation = request.containsKey("rotation") ? Double.valueOf(request.get("rotation").toString()) : null; // New parameter
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
@@ -264,6 +271,11 @@ public class ProjectController {
                         double time = Double.valueOf(kfData.get("time").toString());
                         Object value = kfData.get("value");
                         String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        // Validate keyframe value based on property
+                        String property = entry.getKey();
+                        if (property.equals("rotation") && value instanceof Number && !Double.isFinite(((Number) value).doubleValue())) {
+                            return ResponseEntity.badRequest().body("Rotation keyframe value must be a valid number");
+                        }
                         kfList.add(new Keyframe(time, value, interpolation));
                     }
                     parsedKeyframes.put(entry.getKey(), kfList);
@@ -289,8 +301,11 @@ public class ProjectController {
             if (cropB != null && (cropB < 0 || cropB > 100)) {
                 return ResponseEntity.badRequest().body("cropB must be between 0 and 100");
             }
-            if (speed != null && (speed < 0.1 || speed > 5.0)) { // Validate speed
+            if (speed != null && (speed < 0.1 || speed > 5.0)) {
                 return ResponseEntity.badRequest().body("Speed must be between 0.1 and 5.0");
+            }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
             }
             // Validate total crop if static values are provided (not keyframed)
             if (parsedKeyframes == null ||
@@ -308,7 +323,7 @@ public class ProjectController {
 
             videoEditingService.updateVideoSegment(
                     sessionId, segmentId, positionX, positionY, scale, opacity, timelineStartTime, layer,
-                    timelineEndTime, startTime, endTime, cropL, cropR, cropT, cropB, speed, parsedKeyframes);
+                    timelineEndTime, startTime, endTime, cropL, cropR, cropT, cropB, speed, rotation, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -379,8 +394,9 @@ public class ProjectController {
             Integer positionY = request.get("positionY") != null ? Integer.valueOf(request.get("positionY").toString()) : null;
             Double opacity = request.get("opacity") != null ? Double.valueOf(request.get("opacity").toString()) : null;
             String alignment = (String) request.get("alignment");
+            Double rotation = request.get("rotation") != null ? Double.valueOf(request.get("rotation").toString()) : null; // New parameter
 
-            // New background parameters
+            // Background parameters
             Double backgroundOpacity = request.get("backgroundOpacity") != null ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
             Integer backgroundBorderWidth = request.get("backgroundBorderWidth") != null ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
@@ -388,10 +404,16 @@ public class ProjectController {
             Integer backgroundW = request.get("backgroundW") != null ? Integer.valueOf(request.get("backgroundW").toString()) : null;
             Integer backgroundBorderRadius = request.get("backgroundBorderRadius") != null ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
 
-            // New text border parameters
+            // Text border parameters
             String textBorderColor = (String) request.get("textBorderColor");
             Integer textBorderWidth = request.get("textBorderWidth") != null ? Integer.valueOf(request.get("textBorderWidth").toString()) : null;
             Double textBorderOpacity = request.get("textBorderOpacity") != null ? Double.valueOf(request.get("textBorderOpacity").toString()) : null;
+
+            // Letter spacing parameter
+            Double letterSpacing = request.get("letterSpacing") != null ? Double.valueOf(request.get("letterSpacing").toString()) : null;
+
+            // Line spacing parameter
+            Double lineSpacing = request.get("lineSpacing") != null ? Double.valueOf(request.get("lineSpacing").toString()) : null;
 
             // Existing validation
             if (text == null || layer == null || timelineStartTime == null || timelineEndTime == null) {
@@ -403,8 +425,11 @@ public class ProjectController {
             if (alignment != null && !Arrays.asList("left", "right", "center").contains(alignment)) {
                 return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
             }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
+            }
 
-            // New background validation
+            // Background validation
             if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
                 return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
             }
@@ -421,12 +446,22 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
 
-            // New text border validation
+            // Text border validation
             if (textBorderWidth != null && textBorderWidth < 0) {
                 return ResponseEntity.badRequest().body("Text border width must be non-negative");
             }
             if (textBorderOpacity != null && (textBorderOpacity < 0 || textBorderOpacity > 1)) {
                 return ResponseEntity.badRequest().body("Text border opacity must be between 0 and 1");
+            }
+
+            // Letter spacing validation
+            if (letterSpacing != null && letterSpacing < 0) {
+                return ResponseEntity.badRequest().body("Letter spacing must be non-negative");
+            }
+
+            // Line spacing validation
+            if (lineSpacing != null && lineSpacing < 0) {
+                return ResponseEntity.badRequest().body("Line spacing must be non-negative");
             }
 
             // Add text to timeline
@@ -435,7 +470,8 @@ public class ProjectController {
                     fontFamily, scale, fontColor, backgroundColor, positionX, positionY, opacity, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
                     backgroundW, backgroundBorderRadius,
-                    textBorderColor, textBorderWidth, textBorderOpacity);
+                    textBorderColor, textBorderWidth, textBorderOpacity,
+                    letterSpacing, lineSpacing, rotation); // Added rotation
 
             // Retrieve the newly added text segment from TimelineState
             TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
@@ -471,6 +507,9 @@ public class ProjectController {
             response.put("textBorderColor", addedTextSegment.getTextBorderColor());
             response.put("textBorderWidth", addedTextSegment.getTextBorderWidth());
             response.put("textBorderOpacity", addedTextSegment.getTextBorderOpacity());
+            response.put("letterSpacing", addedTextSegment.getLetterSpacing());
+            response.put("lineSpacing", addedTextSegment.getLineSpacing());
+            response.put("rotation", addedTextSegment.getRotation()); // Added rotation
             response.put("keyframes", addedTextSegment.getKeyframes() != null ? addedTextSegment.getKeyframes() : new HashMap<>());
 
             return ResponseEntity.ok(response);
@@ -503,10 +542,11 @@ public class ProjectController {
             Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
             Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
             String alignment = (String) request.get("alignment");
+            Double rotation = request.containsKey("rotation") ? Double.valueOf(request.get("rotation").toString()) : null; // New parameter
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
 
-            // New background parameters
+            // Background parameters
             Double backgroundOpacity = request.containsKey("backgroundOpacity") ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
             Integer backgroundBorderWidth = request.containsKey("backgroundBorderWidth") ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
             String backgroundBorderColor = (String) request.get("backgroundBorderColor");
@@ -514,10 +554,16 @@ public class ProjectController {
             Integer backgroundW = request.containsKey("backgroundW") ? Integer.valueOf(request.get("backgroundW").toString()) : null;
             Integer backgroundBorderRadius = request.containsKey("backgroundBorderRadius") ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
 
-            // New text border parameters
+            // Text border parameters
             String textBorderColor = (String) request.get("textBorderColor");
             Integer textBorderWidth = request.containsKey("textBorderWidth") ? Integer.valueOf(request.get("textBorderWidth").toString()) : null;
             Double textBorderOpacity = request.containsKey("textBorderOpacity") ? Double.valueOf(request.get("textBorderOpacity").toString()) : null;
+
+            // Letter spacing parameter
+            Double letterSpacing = request.containsKey("letterSpacing") ? Double.valueOf(request.get("letterSpacing").toString()) : null;
+
+            // Line spacing parameter
+            Double lineSpacing = request.containsKey("lineSpacing") ? Double.valueOf(request.get("lineSpacing").toString()) : null;
 
             // Parse keyframes
             Map<String, List<Keyframe>> parsedKeyframes = null;
@@ -530,6 +576,10 @@ public class ProjectController {
                         double time = Double.valueOf(kfData.get("time").toString());
                         Object value = kfData.get("value");
                         String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        // Validate keyframe value based on property
+                        if (property.equals("rotation") && value instanceof Number && !Double.isFinite(((Number) value).doubleValue())) {
+                            return ResponseEntity.badRequest().body("Rotation keyframe value must be a valid number");
+                        }
                         kfList.add(new Keyframe(time, value, interpolation));
                     }
                     parsedKeyframes.put(entry.getKey(), kfList);
@@ -549,8 +599,11 @@ public class ProjectController {
             if (alignment != null && !Arrays.asList("left", "right", "center").contains(alignment)) {
                 return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
             }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
+            }
 
-            // New background validation
+            // Background validation
             if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
                 return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
             }
@@ -567,7 +620,7 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Background border radius must be non-negative");
             }
 
-            // New text border validation
+            // Text border validation
             if (textBorderWidth != null && textBorderWidth < 0) {
                 return ResponseEntity.badRequest().body("Text border width must be non-negative");
             }
@@ -575,13 +628,24 @@ public class ProjectController {
                 return ResponseEntity.badRequest().body("Text border opacity must be between 0 and 1");
             }
 
+            // Letter spacing validation
+            if (letterSpacing != null && letterSpacing < 0) {
+                return ResponseEntity.badRequest().body("Letter spacing must be non-negative");
+            }
+
+            // Line spacing validation
+            if (lineSpacing != null && lineSpacing < 0) {
+                return ResponseEntity.badRequest().body("Line spacing must be non-negative");
+            }
+
+            // Update text segment
             videoEditingService.updateTextSegment(
                     sessionId, segmentId, text, fontFamily, scale,
                     fontColor, backgroundColor, positionX, positionY, opacity, timelineStartTime, timelineEndTime, layer, alignment,
                     backgroundOpacity, backgroundBorderWidth, backgroundBorderColor, backgroundH,
                     backgroundW, backgroundBorderRadius,
                     textBorderColor, textBorderWidth, textBorderOpacity,
-                    parsedKeyframes);
+                    letterSpacing, lineSpacing, rotation, parsedKeyframes);
 
             return ResponseEntity.ok().build();
         } catch (Exception e) {
@@ -938,6 +1002,7 @@ public class ProjectController {
                     ((Number) request.get("timelineEndTime")).doubleValue() : null;
             String imageFileName = (String) request.get("imageFileName");
             Double opacity = request.get("opacity") != null ? ((Number) request.get("opacity")).doubleValue() : null;
+            Double rotation = request.get("rotation") != null ? ((Number) request.get("rotation")).doubleValue() : null; // New parameter
             Boolean isElement = request.get("isElement") != null ? Boolean.valueOf(request.get("isElement").toString()) : false;
 
             if (layer < 0) {
@@ -955,9 +1020,12 @@ public class ProjectController {
             if (opacity != null && (opacity < 0 || opacity > 1)) {
                 return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
             }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
+            }
 
             videoEditingService.addImageToTimelineFromProject(
-                    user, sessionId, projectId, layer, timelineStartTime, timelineEndTime, null, imageFileName, opacity, isElement);
+                    user, sessionId, projectId, layer, timelineStartTime, timelineEndTime, null, imageFileName, opacity, isElement, rotation);
 
             // Retrieve the updated timeline state to get the newly added segment
             TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
@@ -1001,6 +1069,7 @@ public class ProjectController {
             Double cropR = request.containsKey("cropR") ? Double.valueOf(request.get("cropR").toString()) : null;
             Double cropT = request.containsKey("cropT") ? Double.valueOf(request.get("cropT").toString()) : null;
             Double cropB = request.containsKey("cropB") ? Double.valueOf(request.get("cropB").toString()) : null;
+            Double rotation = request.containsKey("rotation") ? Double.valueOf(request.get("rotation").toString()) : null; // New parameter
 
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
@@ -1014,6 +1083,11 @@ public class ProjectController {
                         double time = Double.valueOf(kfData.get("time").toString());
                         Object value = kfData.get("value");
                         String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        // Validate keyframe value based on property
+                        String property = entry.getKey();
+                        if (property.equals("rotation") && value instanceof Number && !Double.isFinite(((Number) value).doubleValue())) {
+                            return ResponseEntity.badRequest().body("Rotation keyframe value must be a valid number");
+                        }
                         kfList.add(new Keyframe(time, value, interpolation));
                     }
                     parsedKeyframes.put(entry.getKey(), kfList);
@@ -1045,6 +1119,9 @@ public class ProjectController {
             if (cropB != null && (cropB < 0 || cropB > 100)) {
                 return ResponseEntity.badRequest().body("cropB must be between 0 and 100");
             }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
+            }
             // Validate total crop if static values are provided (not keyframed)
             if (parsedKeyframes == null ||
                     (!parsedKeyframes.containsKey("cropL") && !parsedKeyframes.containsKey("cropR") &&
@@ -1062,7 +1139,7 @@ public class ProjectController {
             videoEditingService.updateImageSegment(
                     sessionId, segmentId, positionX, positionY, scale, opacity, layer,
                     customWidth, customHeight, maintainAspectRatio,
-                    timelineStartTime, timelineEndTime, cropL, cropR, cropT, cropB, parsedKeyframes);
+                    timelineStartTime, timelineEndTime, cropL, cropR, cropT, cropB, rotation, parsedKeyframes);
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -33,15 +33,47 @@ public class TextSegment implements Segment {
     private Integer textBorderWidth = 0; // Text border (stroke) width in pixels
     private Double textBorderOpacity = 1.0; // Opacity of text border (0.0 to 1.0)
 
-    // Enhanced shadow properties
-    private String shadowColor = "transparent"; // Shadow color
-    private Integer shadowOffsetX = 0; // Shadow X offset in pixels
-    private Integer shadowOffsetY = 0; // Shadow Y offset in pixels
-    private Double shadowBlurRadius = 0.0; // Blur radius for shadow (0.0 for sharp, higher for softer)
-    private Double shadowSpread = 0.0; // Spread of the shadow (expands shadow size)
-    private Double shadowOpacity = 1.0; // Opacity of the shadow (0.0 to 1.0)
+    private Double letterSpacing = 0.0; // Letter spacing in pixels
+
+    private Double lineSpacing = 1.2; // Default line spacing (1.2x font size, matching frontend)
+
+    private Double rotation = 0.0; // Rotation in degrees, default to 0
+
+    public Double getRotation() {
+        return rotation;
+    }
+
+    public void setRotation(Double rotation) {
+        this.rotation = rotation;
+    }
+
+    // Validate line spacing
+    public void setLineSpacing(Double lineSpacing) {
+        if (lineSpacing != null && lineSpacing < 0.0) {
+            throw new IllegalArgumentException("Line spacing must be non-negative");
+        }
+        this.lineSpacing = lineSpacing != null ? lineSpacing : 1.2;
+    }
+
+    // Getter for line spacing
+    public Double getLineSpacing() {
+        return lineSpacing;
+    }
 
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
+
+    // Validate letter spacing
+    public void setLetterSpacing(Double letterSpacing) {
+        if (letterSpacing != null && letterSpacing < 0.0) {
+            throw new IllegalArgumentException("Letter spacing must be non-negative");
+        }
+        this.letterSpacing = letterSpacing != null ? letterSpacing : 0.0;
+    }
+
+    // Getter for letter spacing
+    public Double getLetterSpacing() {
+        return letterSpacing;
+    }
 
     // Validate alignment values
     public void setAlignment(String alignment) {
@@ -107,29 +139,6 @@ public class TextSegment implements Segment {
         this.textBorderOpacity = textBorderOpacity != null ? textBorderOpacity : 1.0;
     }
 
-    // Validate shadow blur radius
-    public void setShadowBlurRadius(Double shadowBlurRadius) {
-        if (shadowBlurRadius != null && shadowBlurRadius < 0.0) {
-            throw new IllegalArgumentException("Shadow blur radius must be non-negative");
-        }
-        this.shadowBlurRadius = shadowBlurRadius != null ? shadowBlurRadius : 0.0;
-    }
-
-    // Validate shadow spread
-    public void setShadowSpread(Double shadowSpread) {
-        if (shadowSpread != null && shadowSpread < 0.0) {
-            throw new IllegalArgumentException("Shadow spread must be non-negative");
-        }
-        this.shadowSpread = shadowSpread != null ? shadowSpread : 0.0;
-    }
-
-    // Validate shadow opacity
-    public void setShadowOpacity(Double shadowOpacity) {
-        if (shadowOpacity != null && (shadowOpacity < 0.0 || shadowOpacity > 1.0)) {
-            throw new IllegalArgumentException("Shadow opacity must be between 0.0 and 1.0");
-        }
-        this.shadowOpacity = shadowOpacity != null ? shadowOpacity : 1.0;
-    }
 
     public Map<String, List<Keyframe>> getKeyframes() {
         return keyframes;
@@ -217,18 +226,10 @@ public class TextSegment implements Segment {
     public void setTextBorderColor(String textBorderColor) { this.textBorderColor = textBorderColor; }
     public Integer getTextBorderWidth() { return textBorderWidth; }
     public Double getTextBorderOpacity() { return textBorderOpacity; }
-    public String getShadowColor() { return shadowColor; }
-    public void setShadowColor(String shadowColor) { this.shadowColor = shadowColor; }
-    public Integer getShadowOffsetX() { return shadowOffsetX; }
-    public void setShadowOffsetX(Integer shadowOffsetX) { this.shadowOffsetX = shadowOffsetX; }
-    public Integer getShadowOffsetY() { return shadowOffsetY; }
-    public void setShadowOffsetY(Integer shadowOffsetY) { this.shadowOffsetY = shadowOffsetY; }
     public Integer getBackgroundH() { return backgroundH; }
     public Integer getBackgroundW() { return backgroundW; }
     public Integer getBackgroundBorderWidth() { return backgroundBorderWidth; }
     public Double getBackgroundOpacity() { return backgroundOpacity; }
     public Integer getBackgroundBorderRadius() { return backgroundBorderRadius; }
-    public Double getShadowBlurRadius() { return shadowBlurRadius; }
-    public Double getShadowSpread() { return shadowSpread; }
-    public Double getShadowOpacity() { return shadowOpacity; }
+
 }

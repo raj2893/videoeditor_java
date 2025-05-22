@@ -29,7 +29,10 @@ import java.awt.font.TextLayout;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -298,7 +301,8 @@ public class VideoEditingService {
             Double startTime,
             Double endTime,
             boolean createAudioSegment,
-            Double speed
+            Double speed,
+            Double rotation
     ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
         if (session == null) {
@@ -421,6 +425,7 @@ public class VideoEditingService {
         segment.setCropR(0.0);
         segment.setCropT(0.0);
         segment.setSpeed(speed); // Set default speed
+        segment.setRotation(rotation);
 
         if (audioSegment != null) {
             segment.setAudioId(audioSegment.getId());
@@ -615,21 +620,15 @@ public class VideoEditingService {
             Double cropR,
             Double cropT,
             Double cropB,
-            Double speed, // New parameter
+            Double speed,
+            Double rotation, // New parameter
             Map<String, List<Keyframe>> keyframes
     ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
-        VideoSegment segmentToUpdate = null;
-        for (VideoSegment segment : session.getTimelineState().getSegments()) {
-            if (segment.getId().equals(segmentId)) {
-                segmentToUpdate = segment;
-                break;
-            }
-        }
-
-        if (segmentToUpdate == null) {
-            throw new RuntimeException("No segment found with ID: " + segmentId);
-        }
+        VideoSegment segmentToUpdate = session.getTimelineState().getSegments().stream()
+                .filter(segment -> segment.getId().equals(segmentId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("No segment found with ID: " + segmentId));
 
         double originalTimelineStartTime = segmentToUpdate.getTimelineStartTime();
         double originalTimelineEndTime = segmentToUpdate.getTimelineEndTime();
@@ -641,6 +640,7 @@ public class VideoEditingService {
         Double originalCropT = segmentToUpdate.getCropT();
         Double originalCropB = segmentToUpdate.getCropB();
         Double originalSpeed = segmentToUpdate.getSpeed();
+        Double originalRotation = segmentToUpdate.getRotation(); // Store original rotation
 
         boolean timelineOrLayerChanged = false;
 
@@ -657,10 +657,10 @@ public class VideoEditingService {
         if (cropB != null && (cropB < 0 || cropB > 100)) {
             throw new IllegalArgumentException("cropB must be between 0 and 100");
         }
-        double effectiveCropL = cropL != null ? cropL : segmentToUpdate.getCropL();
-        double effectiveCropR = cropR != null ? cropR : segmentToUpdate.getCropR();
-        double effectiveCropT = cropT != null ? cropT : segmentToUpdate.getCropT();
-        double effectiveCropB = cropB != null ? cropB : segmentToUpdate.getCropB();
+        double effectiveCropL = cropL != null ? cropL : (segmentToUpdate.getCropL() != null ? segmentToUpdate.getCropL() : 0.0);
+        double effectiveCropR = cropR != null ? cropR : (segmentToUpdate.getCropR() != null ? segmentToUpdate.getCropR() : 0.0);
+        double effectiveCropT = cropT != null ? cropT : (segmentToUpdate.getCropT() != null ? segmentToUpdate.getCropT() : 0.0);
+        double effectiveCropB = cropB != null ? cropB : (segmentToUpdate.getCropB() != null ? segmentToUpdate.getCropB() : 0.0);
         if (effectiveCropL + effectiveCropR >= 100) {
             throw new IllegalArgumentException("Total crop percentage (left + right) must be less than 100");
         }
@@ -676,37 +676,69 @@ public class VideoEditingService {
             segmentToUpdate.setSpeed(speed);
         }
 
+        // Handle keyframes
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
                 String property = entry.getKey();
                 List<Keyframe> kfs = entry.getValue();
-                for (Keyframe kf : kfs) {
-                    if (kf.getTime() < 0 || kf.getTime() > (segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime())) {
-                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                // Clear existing keyframes for this property
+                segmentToUpdate.getKeyframes().remove(property);
+                if (!kfs.isEmpty()) {
+                    // Add new keyframes if provided
+                    for (Keyframe kf : kfs) {
+                        if (kf.getTime() < 0 || kf.getTime() > (segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime())) {
+                            throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                        }
+                        kf.setTime(roundToThreeDecimals(kf.getTime()));
+                        segmentToUpdate.addKeyframe(property, kf);
                     }
-                    kf.setTime(roundToThreeDecimals(kf.getTime()));
-                    segmentToUpdate.addKeyframe(property, kf);
                 }
+                // Restore static property if keyframes are empty
                 switch (property) {
                     case "positionX":
-                        segmentToUpdate.setPositionX(null);
+                        if (kfs.isEmpty()) segmentToUpdate.setPositionX(positionX);
+                        else segmentToUpdate.setPositionX(null);
                         break;
                     case "positionY":
-                        segmentToUpdate.setPositionY(null);
+                        if (kfs.isEmpty()) segmentToUpdate.setPositionY(positionY);
+                        else segmentToUpdate.setPositionY(null);
                         break;
                     case "scale":
-                        segmentToUpdate.setScale(null);
+                        if (kfs.isEmpty()) segmentToUpdate.setScale(scale);
+                        else segmentToUpdate.setScale(null);
                         break;
                     case "opacity":
-                        segmentToUpdate.setOpacity(null);
+                        if (kfs.isEmpty()) segmentToUpdate.setOpacity(opacity);
+                        else segmentToUpdate.setOpacity(null);
                         break;
                 }
             }
+        } else {
+            // If no keyframes are provided, clear all keyframes and restore static properties
+            segmentToUpdate.getKeyframes().clear();
+            if (positionX != null) segmentToUpdate.setPositionX(positionX);
+            if (positionY != null) segmentToUpdate.setPositionY(positionY);
+            if (scale != null) segmentToUpdate.setScale(scale);
+            if (opacity != null) segmentToUpdate.setOpacity(opacity);
+            if (rotation != null) segmentToUpdate.setRotation(rotation);
         }
-        if (positionX != null) segmentToUpdate.setPositionX(positionX);
-        if (positionY != null) segmentToUpdate.setPositionY(positionY);
-        if (scale != null) segmentToUpdate.setScale(scale);
-        if (opacity != null) segmentToUpdate.setOpacity(opacity);
+
+        // Update non-keyframed properties
+        if (positionX != null && (keyframes == null || !keyframes.containsKey("positionX") || keyframes.get("positionX").isEmpty())) {
+            segmentToUpdate.setPositionX(positionX);
+        }
+        if (positionY != null && (keyframes == null || !keyframes.containsKey("positionY") || keyframes.get("positionY").isEmpty())) {
+            segmentToUpdate.setPositionY(positionY);
+        }
+        if (scale != null && (keyframes == null || !keyframes.containsKey("scale") || keyframes.get("scale").isEmpty())) {
+            segmentToUpdate.setScale(scale);
+        }
+        if (opacity != null && (keyframes == null || !keyframes.containsKey("opacity") || keyframes.get("opacity").isEmpty())) {
+            segmentToUpdate.setOpacity(opacity);
+        }
+        if (rotation != null) {
+            segmentToUpdate.setRotation(rotation); // Always update static rotation
+        }
         if (layer != null) {
             segmentToUpdate.setLayer(layer);
             timelineOrLayerChanged = true;
@@ -743,7 +775,7 @@ public class VideoEditingService {
         double newStartTime = startTime != null ? startTime : segmentToUpdate.getStartTime();
         double newEndTime = endTime != null ? endTime : segmentToUpdate.getEndTime();
         double newClipDuration = roundToThreeDecimals(newEndTime - newStartTime);
-        double effectiveSpeed = speed != null ? speed : originalSpeed;
+        double effectiveSpeed = speed != null ? speed : (originalSpeed != null ? originalSpeed : 1.0);
 
         // Update timelineEndTime only when speed is increasing
         if (speed != null && speed > originalSpeed && originalSpeed >= 1.0) {
@@ -787,6 +819,7 @@ public class VideoEditingService {
             segmentToUpdate.setCropT(originalCropT);
             segmentToUpdate.setCropB(originalCropB);
             segmentToUpdate.setSpeed(originalSpeed);
+            segmentToUpdate.setRotation(originalRotation); // Restore original rotation
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + segmentToUpdate.getLayer());
         }
 
@@ -820,7 +853,8 @@ public class VideoEditingService {
                                   Double backgroundOpacity, Integer backgroundBorderWidth, String backgroundBorderColor,
                                   Integer backgroundH, Integer backgroundW,
                                   Integer backgroundBorderRadius,
-                                  String textBorderColor, Integer textBorderWidth, Double textBorderOpacity) {
+                                  String textBorderColor, Integer textBorderWidth, Double textBorderOpacity,
+                                  Double letterSpacing, Double lineSpacing, Double rotation) { // Added lineSpacing parameter
         EditSession session = getSession(sessionId);
         timelineStartTime = roundToThreeDecimals(timelineStartTime);
         timelineEndTime = roundToThreeDecimals(timelineEndTime);
@@ -853,6 +887,11 @@ public class VideoEditingService {
         textSegment.setTextBorderColor(textBorderColor != null ? textBorderColor : "transparent");
         textSegment.setTextBorderWidth(textBorderWidth);
         textSegment.setTextBorderOpacity(textBorderOpacity);
+        // Set letter spacing
+        textSegment.setLetterSpacing(letterSpacing);
+        // Set line spacing
+        textSegment.setLineSpacing(lineSpacing);
+        textSegment.setRotation(rotation);
 
         session.getTimelineState().getTextSegments().add(textSegment);
         session.setLastAccessTime(System.currentTimeMillis());
@@ -882,6 +921,9 @@ public class VideoEditingService {
             String textBorderColor,
             Integer textBorderWidth,
             Double textBorderOpacity,
+            Double letterSpacing,
+            Double lineSpacing, // Added lineSpacing parameter
+            Double rotation, // New parameter
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
         EditSession session = getSession(sessionId);
@@ -893,46 +935,77 @@ public class VideoEditingService {
         double originalTimelineStartTime = textSegment.getTimelineStartTime();
         double originalTimelineEndTime = textSegment.getTimelineEndTime();
         int originalLayer = textSegment.getLayer();
+        Double originalRotation = textSegment.getRotation(); // Store original rotation
 
         boolean timelineOrLayerChanged = false;
 
+        // Handle keyframes
         if (keyframes != null && !keyframes.isEmpty()) {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
                 String property = entry.getKey();
                 List<Keyframe> kfs = entry.getValue();
-                for (Keyframe kf : kfs) {
-                    if (kf.getTime() < 0 || kf.getTime() > (textSegment.getTimelineEndTime() - textSegment.getTimelineStartTime())) {
-                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                // Clear existing keyframes for this property
+                textSegment.getKeyframes().remove(property);
+                if (!kfs.isEmpty()) {
+                    // Add new keyframes if provided
+                    for (Keyframe kf : kfs) {
+                        if (kf.getTime() < 0 || kf.getTime() > (textSegment.getTimelineEndTime() - textSegment.getTimelineStartTime())) {
+                            throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                        }
+                        kf.setTime(roundToThreeDecimals(kf.getTime()));
+                        textSegment.addKeyframe(property, kf);
                     }
-                    kf.setTime(roundToThreeDecimals(kf.getTime()));
-                    textSegment.addKeyframe(property, kf);
                 }
+                // If no keyframes are provided for this property, clear keyframe control
                 switch (property) {
                     case "positionX":
-                        textSegment.setPositionX(null);
+                        if (kfs.isEmpty()) textSegment.setPositionX(positionX);
+                        else textSegment.setPositionX(null);
                         break;
                     case "positionY":
-                        textSegment.setPositionY(null);
+                        if (kfs.isEmpty()) textSegment.setPositionY(positionY);
+                        else textSegment.setPositionY(null);
                         break;
                     case "opacity":
-                        textSegment.setOpacity(null);
+                        if (kfs.isEmpty()) textSegment.setOpacity(opacity);
+                        else textSegment.setOpacity(null);
                         break;
                     case "scale":
-                        textSegment.setScale(null);
+                        if (kfs.isEmpty()) textSegment.setScale(scale);
+                        else textSegment.setScale(null);
                         break;
                 }
             }
+        } else {
+            // If no keyframes are provided, restore all static properties
+            textSegment.getKeyframes().clear();
+            if (positionX != null) textSegment.setPositionX(positionX);
+            if (positionY != null) textSegment.setPositionY(positionY);
+            if (opacity != null) textSegment.setOpacity(opacity);
+            if (scale != null) textSegment.setScale(scale);
+            if (rotation != null) textSegment.setRotation(rotation);
         }
 
         // Update non-keyframed properties
         if (text != null) textSegment.setText(text);
         if (fontFamily != null) textSegment.setFontFamily(fontFamily);
-        if (scale != null && (keyframes == null || !keyframes.containsKey("scale"))) textSegment.setScale(scale);
+        if (scale != null && (keyframes == null || !keyframes.containsKey("scale") || keyframes.get("scale").isEmpty())) {
+            textSegment.setScale(scale);
+        }
         if (fontColor != null) textSegment.setFontColor(fontColor);
         if (backgroundColor != null) textSegment.setBackgroundColor(backgroundColor);
-        if (positionX != null && (keyframes == null || !keyframes.containsKey("positionX"))) textSegment.setPositionX(positionX);
-        if (positionY != null && (keyframes == null || !keyframes.containsKey("positionY"))) textSegment.setPositionY(positionY);
-        if (opacity != null && (keyframes == null || !keyframes.containsKey("opacity"))) textSegment.setOpacity(opacity);
+        if (positionX != null && (keyframes == null || !keyframes.containsKey("positionX") || keyframes.get("positionX").isEmpty())) {
+            textSegment.setPositionX(positionX);
+        }
+        if (positionY != null && (keyframes == null || !keyframes.containsKey("positionY") || keyframes.get("positionY").isEmpty())) {
+            textSegment.setPositionY(positionY);
+        }
+        if (opacity != null && (keyframes == null || !keyframes.containsKey("opacity") || keyframes.get("opacity").isEmpty())) {
+            textSegment.setOpacity(opacity);
+        }
+        if (rotation != null) {
+            textSegment.setRotation(rotation); // Always update static rotation
+        }
         if (timelineStartTime != null) {
             timelineStartTime = roundToThreeDecimals(timelineStartTime);
             textSegment.setTimelineStartTime(timelineStartTime);
@@ -957,6 +1030,8 @@ public class VideoEditingService {
         if (textBorderColor != null) textSegment.setTextBorderColor(textBorderColor);
         if (textBorderWidth != null) textSegment.setTextBorderWidth(textBorderWidth);
         if (textBorderOpacity != null) textSegment.setTextBorderOpacity(textBorderOpacity);
+        if (letterSpacing != null) textSegment.setLetterSpacing(letterSpacing);
+        if (lineSpacing != null) textSegment.setLineSpacing(lineSpacing); // Added lineSpacing update
 
         // Validate timeline position
         TimelineState timelineState = session.getTimelineState();
@@ -971,6 +1046,7 @@ public class VideoEditingService {
             textSegment.setTimelineStartTime(originalTimelineStartTime);
             textSegment.setTimelineEndTime(originalTimelineEndTime);
             textSegment.setLayer(originalLayer);
+            textSegment.setRotation(originalRotation); // Restore original rotation
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + textSegment.getLayer());
         }
 
@@ -1395,7 +1471,8 @@ public class VideoEditingService {
             Map<String, String> filters,
             String imageFileName,
             Double opacity,
-            boolean isElement) throws IOException {
+            boolean isElement,
+            Double rotation) throws IOException {
         String imagePath;
 
         if (isElement) {
@@ -1448,7 +1525,7 @@ public class VideoEditingService {
         }
 
         // Pass isElement to addImageToTimeline
-        addImageToTimeline(sessionId, imagePath, layer, timelineStartTime, timelineEndTime, positionX, positionY, scale, opacity, filters, isElement);
+        addImageToTimeline(sessionId, imagePath, layer, timelineStartTime, timelineEndTime, positionX, positionY, scale, opacity, filters, isElement, rotation);
     }
     public void addImageToTimeline(
             String sessionId,
@@ -1461,7 +1538,8 @@ public class VideoEditingService {
             Double scale,
             Double opacity,
             Map<String, String> filters,
-            boolean isElement // New parameter
+            boolean isElement, // New parameter
+            Double rotation
     ) {
         TimelineState timelineState = getTimelineState(sessionId);
 
@@ -1492,6 +1570,7 @@ public class VideoEditingService {
         imageSegment.setCropL(0.0);
         imageSegment.setCropR(0.0);
         imageSegment.setCropT(0.0);
+        imageSegment.setRotation(rotation);
 
         try {
             File imageFile = new File(baseDir, imagePath);
@@ -1532,10 +1611,11 @@ public class VideoEditingService {
             Boolean maintainAspectRatio,
             Double timelineStartTime,
             Double timelineEndTime,
-            Double cropL, // New parameter
-            Double cropR, // New parameter
-            Double cropT, // New parameter
-            Double cropB, // New parameter
+            Double cropL,
+            Double cropR,
+            Double cropT,
+            Double cropB,
+            Double rotation, // New parameter
             Map<String, List<Keyframe>> keyframes
     ) throws IOException {
         EditSession session = getSession(sessionId);
@@ -1553,6 +1633,7 @@ public class VideoEditingService {
         Double originalCropR = targetSegment.getCropR();
         Double originalCropT = targetSegment.getCropT();
         Double originalCropB = targetSegment.getCropB();
+        Double originalRotation = targetSegment.getRotation(); // Store original rotation
 
         boolean timelineOrLayerChanged = false;
 
@@ -1584,55 +1665,86 @@ public class VideoEditingService {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
                 String property = entry.getKey();
                 List<Keyframe> kfs = entry.getValue();
-                for (Keyframe kf : kfs) {
-                    if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
-                        throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                // Clear existing keyframes for this property
+                targetSegment.getKeyframes().remove(property);
+                if (!kfs.isEmpty()) {
+                    // Add new keyframes if provided
+                    for (Keyframe kf : kfs) {
+                        if (kf.getTime() < 0 || kf.getTime() > (targetSegment.getTimelineEndTime() - targetSegment.getTimelineStartTime())) {
+                            throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
+                        }
+                        kf.setTime(roundToThreeDecimals(kf.getTime()));
+                        targetSegment.addKeyframe(property, kf);
                     }
-                    kf.setTime(roundToThreeDecimals(kf.getTime()));
-                    targetSegment.addKeyframe(property, kf);
                 }
+                // Restore static property if keyframes are empty
                 switch (property) {
                     case "positionX":
-                        targetSegment.setPositionX(null);
+                        if (kfs.isEmpty()) targetSegment.setPositionX(positionX);
+                        else targetSegment.setPositionX(null);
                         break;
                     case "positionY":
-                        targetSegment.setPositionY(null);
+                        if (kfs.isEmpty()) targetSegment.setPositionY(positionY);
+                        else targetSegment.setPositionY(null);
                         break;
                     case "scale":
-                        targetSegment.setScale(null);
+                        if (kfs.isEmpty()) targetSegment.setScale(scale);
+                        else targetSegment.setScale(null);
                         break;
                     case "opacity":
-                        targetSegment.setOpacity(null);
+                        if (kfs.isEmpty()) targetSegment.setOpacity(opacity);
+                        else targetSegment.setOpacity(null);
                         break;
                 }
             }
-        }
+        } else {
+            // If no keyframes are provided, clear all keyframes and restore static properties
+            targetSegment.getKeyframes().clear();
             if (positionX != null) targetSegment.setPositionX(positionX);
             if (positionY != null) targetSegment.setPositionY(positionY);
             if (scale != null) targetSegment.setScale(scale);
             if (opacity != null) targetSegment.setOpacity(opacity);
-            if (layer != null) {
-                targetSegment.setLayer(layer);
-                timelineOrLayerChanged = true;
-            }
-            if (customWidth != null) targetSegment.setCustomWidth(customWidth);
-            if (customHeight != null) targetSegment.setCustomHeight(customHeight);
-            if (maintainAspectRatio != null) targetSegment.setMaintainAspectRatio(maintainAspectRatio);
-            if (timelineStartTime != null) {
-                timelineStartTime = roundToThreeDecimals(timelineStartTime);
-                targetSegment.setTimelineStartTime(timelineStartTime);
-                timelineOrLayerChanged = true;
-            }
-            if (timelineEndTime != null) {
-                timelineEndTime = roundToThreeDecimals(timelineEndTime);
-                targetSegment.setTimelineEndTime(timelineEndTime);
-                timelineOrLayerChanged = true;
-            }
-            // Update crop fields
-            if (cropL != null) targetSegment.setCropL(cropL);
-            if (cropR != null) targetSegment.setCropR(cropR);
-            if (cropT != null) targetSegment.setCropT(cropT);
-            if (cropB != null) targetSegment.setCropB(cropB);
+            if (rotation != null) targetSegment.setRotation(rotation);
+        }
+
+        // Update non-keyframed properties
+        if (positionX != null && (keyframes == null || !keyframes.containsKey("positionX") || keyframes.get("positionX").isEmpty())) {
+            targetSegment.setPositionX(positionX);
+        }
+        if (positionY != null && (keyframes == null || !keyframes.containsKey("positionY") || keyframes.get("positionY").isEmpty())) {
+            targetSegment.setPositionY(positionY);
+        }
+        if (scale != null && (keyframes == null || !keyframes.containsKey("scale") || keyframes.get("scale").isEmpty())) {
+            targetSegment.setScale(scale);
+        }
+        if (opacity != null && (keyframes == null || !keyframes.containsKey("opacity") || keyframes.get("opacity").isEmpty())) {
+            targetSegment.setOpacity(opacity);
+        }
+        if (rotation != null) {
+            targetSegment.setRotation(rotation); // Always update static rotation
+        }
+        if (layer != null) {
+            targetSegment.setLayer(layer);
+            timelineOrLayerChanged = true;
+        }
+        if (customWidth != null) targetSegment.setCustomWidth(customWidth);
+        if (customHeight != null) targetSegment.setCustomHeight(customHeight);
+        if (maintainAspectRatio != null) targetSegment.setMaintainAspectRatio(maintainAspectRatio);
+        if (timelineStartTime != null) {
+            timelineStartTime = roundToThreeDecimals(timelineStartTime);
+            targetSegment.setTimelineStartTime(timelineStartTime);
+            timelineOrLayerChanged = true;
+        }
+        if (timelineEndTime != null) {
+            timelineEndTime = roundToThreeDecimals(timelineEndTime);
+            targetSegment.setTimelineEndTime(timelineEndTime);
+            timelineOrLayerChanged = true;
+        }
+        // Update crop fields
+        if (cropL != null) targetSegment.setCropL(cropL);
+        if (cropR != null) targetSegment.setCropR(cropR);
+        if (cropT != null) targetSegment.setCropT(cropT);
+        if (cropB != null) targetSegment.setCropB(cropB);
 
         // Validate timeline position
         timelineState.getImageSegments().remove(targetSegment);
@@ -1650,6 +1762,7 @@ public class VideoEditingService {
             targetSegment.setCropR(originalCropR);
             targetSegment.setCropT(originalCropT);
             targetSegment.setCropB(originalCropB);
+            targetSegment.setRotation(originalRotation); // Restore original rotation
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + targetSegment.getLayer());
         }
 
@@ -2436,11 +2549,11 @@ public class VideoEditingService {
                 filterComplex.append("trim=").append(vs.getStartTime()).append(":").append(vs.getEndTime()).append(",");
                 // Apply speed adjustment
                 double speed = vs.getSpeed() != null ? vs.getSpeed() : 1.0;
-                double speedFactor = 1.0 / speed; // Inverse for setpts: speed > 1 means faster (shorter), speed < 1 means slower (longer)
+                double speedFactor = 1.0 / speed;
                 filterComplex.append("setpts=").append(String.format("%.6f", speedFactor)).append("*PTS,");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(vs.getTimelineStartTime()).append("/TB,");
 
-                // Store crop values before applying crop
+                // Store crop values
                 double cropL = vs.getCropL() != null ? vs.getCropL() : 0.0;
                 double cropR = vs.getCropR() != null ? vs.getCropR() : 0.0;
                 double cropT = vs.getCropT() != null ? vs.getCropT() : 0.0;
@@ -2454,7 +2567,7 @@ public class VideoEditingService {
                     throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + vs.getId());
                 }
 
-                // Apply filters
+                // Apply filters (excluding rotate, as it’s now a field)
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(vs.getId()))
                         .collect(Collectors.toList());
@@ -2540,17 +2653,6 @@ public class VideoEditingService {
                                     filterComplex.append("negate,");
                                 }
                                 break;
-                            case "rotate":
-                                double rotate = Double.parseDouble(filterValue);
-                                if (rotate >= -180 && rotate <= 180) {
-                                    double angleRad = Math.toRadians(rotate);
-                                    filterComplex.append("format=rgba,");
-                                    filterComplex.append("rotate=").append(angleRad)
-                                            .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
-                                            .append(":c=none,");
-                                    filterComplex.append("format=rgba,");
-                                }
-                                break;
                             case "flip":
                                 if (filterValue.equals("horizontal")) {
                                     filterComplex.append("hflip,");
@@ -2567,6 +2669,19 @@ public class VideoEditingService {
                                     vignetteValue = vignette;
                                 }
                                 break;
+                            case "blur":
+                                double blurValue = Double.parseDouble(filterValue);
+                                if (blurValue >= 0 && blurValue <= 10) {
+                                    if (blurValue > 0) {
+                                        // Map 0-1 range to luma_radius 0-10 for boxblur
+                                        double radius = blurValue * 10.0;
+                                        filterComplex.append("boxblur=").append(String.format("%.2f", radius)).append(",");
+                                        System.out.println("Blur filter applied to video segment " + vs.getId() + ": blurValue=" + blurValue + ", radius=" + radius);
+                                    }
+                                } else {
+                                    System.err.println("Invalid blur value for segment " + vs.getId() + ": " + blurValue + ", must be between 0 and 1");
+                                }
+                                break;
                             default:
                                 System.err.println("Unsupported filter: " + filterName + " for segment " + vs.getId());
                                 break;
@@ -2576,28 +2691,20 @@ public class VideoEditingService {
                     }
                 }
 
-// Apply vignette filter if present
-                // With this:
+                filterComplex.append("format=rgb24,");
+
                 if (hasVignette) {
-                    // Map vignetteValue (0 to 1) to darkening intensity
-                    double intensity = vignetteValue; // 0 (no effect) to 1 (max darkening)
-                    // Compute vignette mask: darken edges based on distance from center
-                    filterComplex.append("format=rgb24,");
-                    filterComplex.append("geq=")
-                            .append("lum='lum(X,Y)*")
-                            .append("(1-").append(String.format("%.6f", intensity)).append("*(1-sqrt(4*((X/W-0.5)^2+(Y/H-0.5)^2))))'")
-                            .append(":cb='cb(X,Y)':cr='cr(X,Y)',");
-                    filterComplex.append("format=yuv420p,");
-                    filterComplex.append("enable='between(t,")
-                            .append(String.format("%.6f", vs.getTimelineStartTime())).append(",")
-                            .append(String.format("%.6f", vs.getTimelineEndTime())).append(")',");
-                    System.out.println("Custom vignette filter applied to video segment " + vs.getId() + ": intensity=" + intensity);
+                    double intensity = vignetteValue;
+                    double angle = intensity * (Math.PI / 2);
+                    filterComplex.append("vignette=angle=").append(String.format("%.6f", angle))
+                            .append(":mode=forward,");
+                    System.out.println("Vignette filter applied to video segment " + vs.getId() +
+                            ": intensity=" + intensity + ", angle=" + angle);
                 }
 
-// Ensure consistent pixel format before scaling
-                filterComplex.append("format=yuv420p,");
+                filterComplex.append("format=rgba,");
 
-                // Apply transitions and get position and crop parameters
+                // Apply transitions (excluding rotation)
                 List<Transition> relevantTransitions = timelineState.getTransitions().stream()
                         .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(vs.getId()))
                         .filter(t -> t.getLayer() == vs.getLayer())
@@ -2626,34 +2733,41 @@ public class VideoEditingService {
                             ", enabled between t=" + transStart + " and t=" + transEnd);
                 }
 
-                // Apply rotation from transition
-                String rotationExpr = transitionOffsets.get("rotation");
-                if (rotationExpr != null && !rotationExpr.equals("0")) {
-                    filterComplex.append("format=rgba,");
-                    filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
-                    filterComplex.append("format=rgba,");
-                    System.out.println("Rotation applied to segment " + vs.getId() + ": " + rotationExpr);
+                // Apply rotation with keyframes
+                StringBuilder rotationExpr = new StringBuilder();
+                Double defaultRotation = vs.getRotation() != null ? vs.getRotation() : 0.0;
+
+
+                // No keyframes, just use the default rotation
+                rotationExpr.append(String.format("%.6f", Math.toRadians(defaultRotation)));
+
+                // Apply rotation if non-zero
+                if (!rotationExpr.toString().equals("0.000000")) {
+                    // Use FFmpeg-supported expressions for rotate filter
+                    filterComplex.append("rotate=a=").append(rotationExpr)
+                            .append(":ow='hypot(iw,ih)'")
+                            .append(":oh='hypot(iw,ih)'")
+                            .append(":c=0x00000000,");
+                    System.out.println("Rotation applied to segment " + vs.getId() + ": expr=" + rotationExpr);
                 }
+
+                filterComplex.append("format=rgba,");
 
                 // Apply opacity
                 double opacity = vs.getOpacity() != null ? vs.getOpacity() : 1.0;
                 if (opacity < 1.0) {
-                    filterComplex.append("format=rgba,");
                     filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
                     filterComplex.append("format=rgba,");
                     System.out.println("Opacity applied to video segment " + vs.getId() + ": " + opacity);
                 }
 
-                // Create a pad filter to maintain original dimensions
+                // Apply crop and pad
                 if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
-                    // Calculate dimensions and offsets for the pad filter
-                    // We need to first apply the crop filter
                     String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
                     String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
                     String cropX = String.format("iw*%.6f", cropL / 100.0);
                     String cropY = String.format("ih*%.6f", cropT / 100.0);
 
-                    // Apply the crop
                     filterComplex.append("crop=").append(cropWidth).append(":")
                             .append(cropHeight).append(":")
                             .append(cropX).append(":")
@@ -2781,7 +2895,7 @@ public class VideoEditingService {
                 }
                 yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
 
-                // Overlay the scaled video onto the previous output
+                // Overlay the scaled video
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
                 filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
                 filterComplex.append(":enable='between(t,").append(vs.getTimelineStartTime()).append(",").append(vs.getTimelineEndTime()).append(")'");
@@ -2798,7 +2912,7 @@ public class VideoEditingService {
                 filterComplex.append("trim=0:").append(String.format("%.6f", segmentDuration)).append(",");
                 filterComplex.append("setpts=PTS-STARTPTS+").append(is.getTimelineStartTime()).append("/TB,");
 
-                // Store crop values before applying crop
+                // Store crop values
                 double cropL = is.getCropL() != null ? is.getCropL() : 0.0;
                 double cropR = is.getCropR() != null ? is.getCropR() : 0.0;
                 double cropT = is.getCropT() != null ? is.getCropT() : 0.0;
@@ -2812,33 +2926,7 @@ public class VideoEditingService {
                     throw new IllegalArgumentException("Total crop percentages (left+right or top+bottom) must be less than 100 for segment " + is.getId());
                 }
 
-                // Create a pad filter to maintain original dimensions
-                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
-                    // Calculate dimensions and offsets for the pad filter
-                    String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
-                    String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
-                    String cropX = String.format("iw*%.6f", cropL / 100.0);
-                    String cropY = String.format("ih*%.6f", cropT / 100.0);
-
-                    // Apply the crop
-                    filterComplex.append("crop=").append(cropWidth).append(":")
-                            .append(cropHeight).append(":")
-                            .append(cropX).append(":")
-                            .append(cropY).append(",");
-                    System.out.println("Crop filter for image segment " + is.getId() + ": w=" + cropWidth +
-                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
-
-                    // Apply a pad filter to restore original dimensions with transparent padding
-                    filterComplex.append("format=rgba,");
-                    filterComplex.append("pad=iw/(1-").append(String.format("%.6f", (cropL + cropR) / 100.0)).append("):")
-                            .append("ih/(1-").append(String.format("%.6f", (cropT + cropB) / 100.0)).append("):")
-                            .append("iw*").append(String.format("%.6f", cropL / (100.0 - cropL - cropR))).append(":")
-                            .append("ih*").append(String.format("%.6f", cropT / (100.0 - cropT - cropB))).append(":")
-                            .append("color=0x00000000,");
-                    System.out.println("Pad filter to restore original dimensions for segment " + is.getId());
-                }
-
-                // Apply filters
+                // Apply filters (excluding rotate)
                 List<Filter> segmentFilters = timelineState.getFilters().stream()
                         .filter(f -> f.getSegmentId().equals(is.getId()))
                         .collect(Collectors.toList());
@@ -2924,17 +3012,6 @@ public class VideoEditingService {
                                     filterComplex.append("negate,");
                                 }
                                 break;
-                            case "rotate":
-                                double rotate = Double.parseDouble(filterValue);
-                                if (rotate >= -180 && rotate <= 180) {
-                                    double angleRad = Math.toRadians(rotate);
-                                    filterComplex.append("format=rgba,");
-                                    filterComplex.append("rotate=").append(angleRad)
-                                            .append(":ow='hypot(iw,ih)':oh='hypot(iw,ih)'")
-                                            .append(":c=none,");
-                                    filterComplex.append("format=rgba,");
-                                }
-                                break;
                             case "flip":
                                 if (filterValue.equals("horizontal")) {
                                     filterComplex.append("hflip,");
@@ -2951,6 +3028,19 @@ public class VideoEditingService {
                                     vignetteValue = vignette;
                                 }
                                 break;
+                            case "blur":
+                                double blurValue = Double.parseDouble(filterValue);
+                                if (blurValue >= 0 && blurValue <= 1) {
+                                    if (blurValue > 0) {
+                                        // Map 0-1 range to luma_radius 0-10 for boxblur
+                                        double radius = blurValue * 10.0;
+                                        filterComplex.append("boxblur=").append(String.format("%.2f", radius)).append(",");
+                                        System.out.println("Blur filter applied to image segment " + is.getId() + ": blurValue=" + blurValue + ", radius=" + radius);
+                                    }
+                                } else {
+                                    System.err.println("Invalid blur value for segment " + is.getId() + ": " + blurValue + ", must be between 0 and 1");
+                                }
+                                break;
                             default:
                                 System.err.println("Unsupported filter: " + filterName + " for segment " + is.getId());
                                 break;
@@ -2960,27 +3050,20 @@ public class VideoEditingService {
                     }
                 }
 
-// Apply vignette filter if present
+                filterComplex.append("format=rgb24,");
+
                 if (hasVignette) {
-                    // Map vignetteValue (0 to 1) to darkening intensity
-                    double intensity = vignetteValue; // 0 (no effect) to 1 (max darkening)
-                    // Compute vignette mask: darken edges based on distance from center
-                    filterComplex.append("format=rgb24,");
-                    filterComplex.append("geq=")
-                            .append("lum='lum(X,Y)*")
-                            .append("(1-").append(String.format("%.6f", intensity)).append("*(1-sqrt(4*((X/W-0.5)^2+(Y/H-0.5)^2))))'")
-                            .append(":cb='cb(X,Y)':cr='cr(X,Y)',");
-                    filterComplex.append("format=yuv420p,");
-                    filterComplex.append("enable='between(t,")
-                            .append(String.format("%.6f", is.getTimelineStartTime())).append(",")
-                            .append(String.format("%.6f", is.getTimelineEndTime())).append(")',");
-                    System.out.println("Custom vignette filter applied to image segment " + is.getId() + ": intensity=" + intensity);
+                    double intensity = vignetteValue;
+                    double angle = intensity * (Math.PI / 2);
+                    filterComplex.append("vignette=angle=").append(String.format("%.6f", angle))
+                            .append(":mode=forward,");
+                    System.out.println("Vignette filter applied to image segment " + is.getId() +
+                            ": intensity=" + intensity + ", angle=" + angle);
                 }
 
-// Ensure consistent pixel format before scaling
-                filterComplex.append("format=yuv420p,");
+                filterComplex.append("format=rgba,");
 
-                // Apply transitions and get position and crop parameters
+                // Apply transitions
                 List<Transition> relevantTransitions = timelineState.getTransitions().stream()
                         .filter(t -> t.getSegmentId() != null && t.getSegmentId().equals(is.getId()))
                         .filter(t -> t.getLayer() == is.getLayer())
@@ -3009,22 +3092,52 @@ public class VideoEditingService {
                             ", enabled between t=" + transStart + " and t=" + transEnd);
                 }
 
-                // Apply rotation from transition
-                String rotationExpr = transitionOffsets.get("rotation");
-                if (rotationExpr != null && !rotationExpr.equals("0")) {
-                    filterComplex.append("format=rgba,");
-                    filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
-                    filterComplex.append("format=rgba,");
-                    System.out.println("Rotation applied to segment " + is.getId() + ": " + rotationExpr);
+                // Apply rotation with keyframes
+                StringBuilder rotationExpr = new StringBuilder();
+                Double defaultRotation = is.getRotation() != null ? is.getRotation() : 0.0;
+
+                rotationExpr.append(String.format("%.6f", Math.toRadians(defaultRotation)));
+
+                // Apply rotation if non-zero
+                if (!rotationExpr.toString().equals("0.000000")) {
+                    filterComplex.append("rotate=").append(rotationExpr)
+                            .append(":ow='hypot(iw,ih)'")
+                            .append(":oh='hypot(iw,ih)'")
+                            .append(":c=0x00000000,");
+                    System.out.println("Rotation applied to segment " + is.getId() + ": expr=" + rotationExpr);
                 }
+
+                filterComplex.append("format=rgba,");
 
                 // Apply opacity
                 double opacity = is.getOpacity() != null ? is.getOpacity() : 1.0;
                 if (opacity < 1.0) {
-                    filterComplex.append("format=rgba,");
                     filterComplex.append("lutrgb=a='val*").append(String.format("%.6f", opacity)).append("',");
                     filterComplex.append("format=rgba,");
                     System.out.println("Opacity applied to image segment " + is.getId() + ": " + opacity);
+                }
+
+                // Apply crop and pad
+                if (cropL > 0 || cropR > 0 || cropT > 0 || cropB > 0) {
+                    String cropWidth = String.format("iw*(1-%.6f-%.6f)", cropL / 100.0, cropR / 100.0);
+                    String cropHeight = String.format("ih*(1-%.6f-%.6f)", cropT / 100.0, cropB / 100.0);
+                    String cropX = String.format("iw*%.6f", cropL / 100.0);
+                    String cropY = String.format("ih*%.6f", cropT / 100.0);
+
+                    filterComplex.append("crop=").append(cropWidth).append(":")
+                            .append(cropHeight).append(":")
+                            .append(cropX).append(":")
+                            .append(cropY).append(",");
+                    System.out.println("Crop filter for image segment " + is.getId() + ": w=" + cropWidth +
+                            ", h=" + cropHeight + ", x=" + cropX + ", y=" + cropY);
+
+                    filterComplex.append("format=rgba,");
+                    filterComplex.append("pad=iw/(1-").append(String.format("%.6f", (cropL + cropR) / 100.0)).append("):")
+                            .append("ih/(1-").append(String.format("%.6f", (cropT + cropB) / 100.0)).append("):")
+                            .append("iw*").append(String.format("%.6f", cropL / (100.0 - cropL - cropR))).append(":")
+                            .append("ih*").append(String.format("%.6f", cropT / (100.0 - cropT - cropB))).append(":")
+                            .append("color=0x00000000,");
+                    System.out.println("Pad filter to restore original dimensions for segment " + is.getId());
                 }
 
                 // Handle scaling with keyframes
@@ -3138,7 +3251,7 @@ public class VideoEditingService {
                 }
                 yExpr.insert(0, "(H/2)+(").append(")-(h/2)");
 
-                // Overlay the scaled image onto the previous output
+                // Overlay the scaled image
                 filterComplex.append("[").append(lastOutput).append("][scaled").append(outputLabel).append("]");
                 filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
                 filterComplex.append(":enable='between(t,").append(is.getTimelineStartTime()).append(",").append(is.getTimelineEndTime()).append(")'");
@@ -3184,19 +3297,28 @@ public class VideoEditingService {
                             .append("y='if(between(t,").append(String.format("%.6f", transStart)).append(",")
                             .append(String.format("%.6f", transEnd)).append("),").append(transitionOffsets.get("cropY")).append(",0)'")
                             .append(",");
-                    System.out.println("Crop filter for text segment " + ts.getId() + ": w=" + transitionOffsets.get("cropWidth") +
+                    System.out.println("Crop filter for segment " + ts.getId() + ": w=" + transitionOffsets.get("cropWidth") +
                             ", h=" + transitionOffsets.get("cropHeight") + ", x=" + transitionOffsets.get("cropX") + ", y=" + transitionOffsets.get("cropY") +
                             ", enabled between t=" + transStart + " and t=" + transEnd);
                 }
 
-                // Apply rotation from transition
-                String rotationExpr = transitionOffsets.get("rotation");
-                if (rotationExpr != null && !rotationExpr.equals("0")) {
-                    filterComplex.append("format=rgba,");
-                    filterComplex.append("rotate='").append(rotationExpr).append("':ow='hypot(iw,ih)':oh='hypot(iw,ih)':c=none,");
-                    filterComplex.append("format=rgba,");
-                    System.out.println("Rotation applied to text segment " + ts.getId() + ": " + rotationExpr);
+                // Apply rotation with keyframes
+                StringBuilder rotationExpr = new StringBuilder();
+                Double defaultRotation = ts.getRotation() != null ? ts.getRotation() : 0.0;
+
+                rotationExpr.append(String.format("%.6f", Math.toRadians(defaultRotation)));
+
+
+                // Apply rotation if non-zero
+                if (!rotationExpr.toString().equals("0.000000")) {
+                    filterComplex.append("rotate=").append(rotationExpr)
+                            .append(":ow='hypot(iw,ih)'")
+                            .append(":oh='hypot(iw,ih)'")
+                            .append(":c=0x00000000,");
+                    System.out.println("Rotation applied to segment " + ts.getId() + ": expr=" + rotationExpr);
                 }
+
+                filterComplex.append("format=rgba,");
 
                 // Apply opacity
                 double opacity = ts.getOpacity() != null ? ts.getOpacity() : 1.0;
@@ -3600,27 +3722,34 @@ public class VideoEditingService {
             font = new Font("Arial", Font.PLAIN, (int) baseFontSize);
         }
 
-        // Measure text
+        // Get letter spacing and line spacing, then scale them
+        double letterSpacing = ts.getLetterSpacing() != null ? ts.getLetterSpacing() : 0.0;
+        double scaledLetterSpacing = letterSpacing * maxScale * RESOLUTION_MULTIPLIER;
+        double lineSpacing = ts.getLineSpacing() != null ? ts.getLineSpacing() : 1.2; // Use TextSegment's lineSpacing
+        double scaledLineSpacing = lineSpacing * baseFontSize; // Line spacing as multiplier of font size
+
+        // Measure text with letter spacing
         BufferedImage tempImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2d = tempImage.createGraphics();
         g2d.setFont(font);
         FontMetrics fm = g2d.getFontMetrics();
         String[] lines = ts.getText().split("\n");
-        double lineSpacing = 1.2; // Match frontend's lineHeight = fontSize * 1.2
-        int lineHeight = (int) (baseFontSize * lineSpacing); // Use font size directly for consistency
-        int totalTextHeight = lines.length * lineHeight;
+        int lineHeight = (int) scaledLineSpacing; // Use scaledLineSpacing for line height
+        int totalTextHeight = lines.length > 1 ? (lines.length - 1) * lineHeight + fm.getAscent() + fm.getDescent() : fm.getAscent() + fm.getDescent();
         int maxTextWidth = 0;
         for (String line : lines) {
-            int lineWidth = fm.stringWidth(line);
-            if (lineWidth > maxTextWidth) {
-                maxTextWidth = lineWidth;
+            // Calculate width with letter spacing
+            int lineWidth = 0;
+            for (int i = 0; i < line.length(); i++) {
+                lineWidth += fm.charWidth(line.charAt(i));
+                if (i < line.length() - 1) {
+                    lineWidth += (int) scaledLetterSpacing;
+                }
             }
+            maxTextWidth = Math.max(maxTextWidth, lineWidth);
         }
         // Calculate text block height for centering
         int textBlockHeight = totalTextHeight;
-        if (lines.length == 1) {
-            textBlockHeight = fm.getAscent() + fm.getDescent(); // Single line uses ascent + descent
-        }
         g2d.dispose();
         tempImage.flush();
 
@@ -3632,9 +3761,8 @@ public class VideoEditingService {
         int textBorderWidth = (int) ((ts.getTextBorderWidth() != null ? ts.getTextBorderWidth() : 0) * maxScale * BORDER_SCALE_FACTOR);
 
         // Calculate content dimensions (text size + background dimensions)
-        // Replace the existing calculations
-        int contentWidth = maxTextWidth + bgWidth + 2 * textBorderWidth; // Include text border width
-        int contentHeight = textBlockHeight + bgHeight + 2 * textBorderWidth; // Include text border height
+        int contentWidth = maxTextWidth + bgWidth + 2 * textBorderWidth;
+        int contentHeight = textBlockHeight + bgHeight + 2 * textBorderWidth;
 
         // Cap dimensions to prevent excessive memory usage
         int maxDimension = (int) (Math.max(canvasWidth, canvasHeight) * RESOLUTION_MULTIPLIER * 1.5);
@@ -3645,14 +3773,14 @@ public class VideoEditingService {
                     maxDimension / (double) (contentWidth + 2 * bgBorderWidth + 2 * textBorderWidth),
                     maxDimension / (double) (contentHeight + 2 * bgBorderWidth + 2 * textBorderWidth)
             );
-            scaleDown = Math.max(scaleDown, 0.5); // Ensure at least 50% of original size
+            scaleDown = Math.max(scaleDown, 0.5);
             bgWidth = (int) (bgWidth * scaleDown);
             bgHeight = (int) (bgHeight * scaleDown);
             bgBorderWidth = (int) (bgBorderWidth * scaleDown);
             borderRadius = (int) (borderRadius * scaleDown);
             textBorderWidth = (int) (textBorderWidth * scaleDown);
-            contentWidth = maxTextWidth + bgWidth;
-            contentHeight = textBlockHeight + bgHeight; // Recompute with scaled values
+            contentWidth = maxTextWidth + bgWidth + 2 * textBorderWidth;
+            contentHeight = textBlockHeight + bgHeight + 2 * textBorderWidth;
         }
 
         // Calculate final image dimensions
@@ -3670,7 +3798,6 @@ public class VideoEditingService {
         fm = g2d.getFontMetrics();
 
         // Draw background
-        // Replace the background drawing logic
         if (bgColor != null) {
             float bgOpacity = ts.getBackgroundOpacity() != null ? ts.getBackgroundOpacity().floatValue() : 1.0f;
             g2d.setColor(new Color(bgColor.getRed(), bgColor.getGreen(), bgColor.getBlue(), (int) (bgOpacity * 255)));
@@ -3678,8 +3805,8 @@ public class VideoEditingService {
                 g2d.fillRoundRect(
                         bgBorderWidth + textBorderWidth,
                         bgBorderWidth + textBorderWidth,
-                        contentWidth, // Updated to include textBorderWidth
-                        contentHeight, // Updated to include textBorderWidth
+                        contentWidth,
+                        contentHeight,
                         borderRadius,
                         borderRadius
                 );
@@ -3687,14 +3814,13 @@ public class VideoEditingService {
                 g2d.fillRect(
                         bgBorderWidth + textBorderWidth,
                         bgBorderWidth + textBorderWidth,
-                        contentWidth, // Updated
-                        contentHeight // Updated
+                        contentWidth,
+                        contentHeight
                 );
             }
         }
 
         // Draw background border
-        // Replace the background border drawing logic
         if (bgBorderColor != null && bgBorderWidth > 0) {
             g2d.setColor(bgBorderColor);
             g2d.setStroke(new BasicStroke((float) bgBorderWidth));
@@ -3702,8 +3828,8 @@ public class VideoEditingService {
                 g2d.drawRoundRect(
                         bgBorderWidth / 2 + textBorderWidth,
                         bgBorderWidth / 2 + textBorderWidth,
-                        contentWidth + bgBorderWidth, // Updated
-                        contentHeight + bgBorderWidth, // Updated
+                        contentWidth + bgBorderWidth,
+                        contentHeight + bgBorderWidth,
                         borderRadius + bgBorderWidth,
                         borderRadius + bgBorderWidth
                 );
@@ -3711,32 +3837,54 @@ public class VideoEditingService {
                 g2d.drawRect(
                         bgBorderWidth / 2 + textBorderWidth,
                         bgBorderWidth / 2 + textBorderWidth,
-                        contentWidth + bgBorderWidth, // Updated
-                        contentHeight + bgBorderWidth // Updated
+                        contentWidth + bgBorderWidth,
+                        contentHeight + bgBorderWidth
                 );
             }
         }
 
-        // Draw text with border (stroke) if specified
+        // Draw text with border (stroke) and letter spacing
         String alignment = ts.getAlignment() != null ? ts.getAlignment().toLowerCase() : "center";
         // Center text vertically within contentHeight, accounting for background height
         int textYStart = bgBorderWidth + textBorderWidth + (contentHeight - textBlockHeight) / 2 + fm.getAscent();
         int y = textYStart;
         for (String line : lines) {
-            int x = calculateXPosition(line, alignment, totalWidth, fm, 0, bgBorderWidth + textBorderWidth);
-            if (textBorderColor != null && textBorderWidth > 0) {
-                // Draw text border (stroke)
-                float textBorderOpacity = ts.getTextBorderOpacity() != null ? ts.getTextBorderOpacity().floatValue() : 1.0f;
-                g2d.setColor(new Color(textBorderColor.getRed(), textBorderColor.getGreen(), textBorderColor.getBlue(), (int) (textBorderOpacity * 255)));
-                g2d.setStroke(new BasicStroke((float) textBorderWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                FontRenderContext frc = g2d.getFontRenderContext();
-                TextLayout textLayout = new TextLayout(line, font, frc);
-                Shape shape = textLayout.getOutline(AffineTransform.getTranslateInstance(x, y));
-                g2d.draw(shape);
+            // Calculate line width with letter spacing
+            int lineWidth = 0;
+            for (int i = 0; i < line.length(); i++) {
+                lineWidth += fm.charWidth(line.charAt(i));
+                if (i < line.length() - 1) {
+                    lineWidth += (int) scaledLetterSpacing;
+                }
             }
-            // Draw text fill
-            g2d.setColor(fontColor);
-            g2d.drawString(line, x, y);
+            // Calculate starting x position based on alignment
+            int x;
+            if (alignment.equals("left")) {
+                x = bgBorderWidth + textBorderWidth;
+            } else if (alignment.equals("center")) {
+                x = bgBorderWidth + textBorderWidth + (contentWidth - lineWidth) / 2;
+            } else { // right
+                x = bgBorderWidth + textBorderWidth + contentWidth - lineWidth;
+            }
+            // Draw each character with letter spacing
+            int currentX = x;
+            for (int i = 0; i < line.length(); i++) {
+                char c = line.charAt(i);
+                if (textBorderColor != null && textBorderWidth > 0) {
+                    // Draw text border (stroke)
+                    float textBorderOpacity = ts.getTextBorderOpacity() != null ? ts.getTextBorderOpacity().floatValue() : 1.0f;
+                    g2d.setColor(new Color(textBorderColor.getRed(), textBorderColor.getGreen(), textBorderColor.getBlue(), (int) (textBorderOpacity * 255)));
+                    g2d.setStroke(new BasicStroke((float) textBorderWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    FontRenderContext frc = g2d.getFontRenderContext();
+                    TextLayout textLayout = new TextLayout(String.valueOf(c), font, frc);
+                    Shape shape = textLayout.getOutline(AffineTransform.getTranslateInstance(currentX, y));
+                    g2d.draw(shape);
+                }
+                // Draw text fill
+                g2d.setColor(fontColor);
+                g2d.drawString(String.valueOf(c), currentX, y);
+                currentX += fm.charWidth(c) + (int) scaledLetterSpacing;
+            }
             y += lineHeight; // Use computed lineHeight for consistent spacing
         }
 
@@ -3921,19 +4069,35 @@ public class VideoEditingService {
                     break;
 
                 case "Rotate":
-                    String rotationExpr = "0";
-                    double rotationSpeed = "clockwise".equals(direction) ? 4 * Math.PI : -4 * Math.PI;
+                    String rotationExpr;
+                    // Use a smaller rotation angle (180 degrees) for better visuals
+                    double rotationAngle = "clockwise".equals(direction) ? 180.0 : -180.0;
+                    double angleRad = Math.toRadians(rotationAngle);
 
+                    // Smooth rotation over transition duration with easing
                     if (isStartTransition) {
-                        // Segment is entering: rotate from initial angle to 0
-                        rotationExpr = String.format("(%f)*(1-%s)", rotationSpeed * transDuration, progressExpr);
-                    } else { // end
-                        // Segment is exiting: rotate from 0 to final angle
-                        rotationExpr = String.format("(%f)*(%s)", rotationSpeed * transDuration, progressExpr);
+                        // Start: Rotate from angle to 0 with easing
+                        rotationExpr = String.format("(%.6f)*(1-min(1,max(0,%s))^2)", angleRad, progressExpr);
+                    } else {
+                        // End: Rotate from 0 to angle with easing
+                        rotationExpr = String.format("(%.6f)*(min(1,max(0,%s))^2)", angleRad, progressExpr);
                     }
 
+                    // Set rotation with proper scaling to avoid black background
                     transitionOffsets.put("rotation", String.format("if(between(t,%.6f,%.6f),%s,0)", transStart, transEnd, rotationExpr));
-                    System.out.println("Rotate transition " + transition.getId() + ": rotation=" + transitionOffsets.get("rotation") +
+
+                    // For cleaner rotation effect, also add slight zoom during rotation to hide any artifacts
+                    String rotateScaleExpr = String.format("1.0+0.05*sin(min(3.14159,%s*3.14159))", progressExpr);
+                    String currentScale = transitionOffsets.get("scale");
+                    if (currentScale.equals("1")) {
+                        transitionOffsets.put("scale", String.format("if(between(t,%.6f,%.6f),%s,1)", transStart, transEnd, rotateScaleExpr));
+                    } else {
+                        // Combine with existing scale
+                        transitionOffsets.put("scale", String.format("if(between(t,%.6f,%.6f),(%s)*(%s),(%s))",
+                                transStart, transEnd, currentScale, rotateScaleExpr, currentScale));
+                    }
+
+                    System.out.println("Rotate transition " + transition.getId() + ": rotation=" + rotationExpr +
                             ", direction=" + direction + ", transStart=" + transStart + ", transEnd=" + transEnd);
                     break;
 
@@ -4002,48 +4166,94 @@ public class VideoEditingService {
      * @return The full path to the font file
      */
     private String getFontPathByFamily(String fontFamily) {
-        // Default font path if nothing else matches
-        String defaultFontPath = "C:/Windows/Fonts/Arial.ttf";
+        final String FONTS_RESOURCE_PATH = "/fonts/";
+        final String TEMP_FONT_DIR = System.getProperty("java.io.tmpdir") + "/scenith-fonts/";
+
+        // Create temp directory for fonts if it doesn't exist
+        File tempDir = new File(TEMP_FONT_DIR);
+        if (!tempDir.exists()) {
+            tempDir.mkdirs();
+        }
+
+        // Default font path (fallback)
+        String defaultFontPath = getFontFilePath("arial.ttf", FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
 
         if (fontFamily == null || fontFamily.trim().isEmpty()) {
+            System.out.println("Font family is null or empty. Using default font: arial.ttf");
             return defaultFontPath;
         }
 
-        // Map common font families to their file paths
-        // You can expand this map with more fonts as needed
+        // Map font families to filenames in resources/fonts
         Map<String, String> fontMap = new HashMap<>();
-        fontMap.put("Arial", "C\\:/Windows/Fonts/Arial.ttf");
-        fontMap.put("Times New Roman", "C\\:/Windows/Fonts/times.ttf");
-        fontMap.put("Courier New", "C\\:/Windows/Fonts/cour.ttf");
-        fontMap.put("Calibri", "C\\:/Windows/Fonts/calibri.ttf");
-        fontMap.put("Verdana", "C\\:/Windows/Fonts/verdana.ttf");
-        fontMap.put("Georgia", "C\\:/Windows/Fonts/georgia.ttf");
-        fontMap.put("Comic Sans MS", "C\\:/Windows/Fonts/comic.ttf");
-        fontMap.put("Impact", "C\\:/Windows/Fonts/impact.ttf");
-        fontMap.put("Tahoma", "C\\:/Windows/Fonts/tahoma.ttf");
+        fontMap.put("Arial", "arial.ttf");
+        fontMap.put("Times New Roman", "times.ttf");
+        fontMap.put("Courier New", "cour.ttf");
+        fontMap.put("Calibri", "calibri.ttf");
+        fontMap.put("Verdana", "verdana.ttf");
+        fontMap.put("Georgia", "georgia.ttf");
+        fontMap.put("Comic Sans MS", "comic.ttf");
+        fontMap.put("Impact", "impact.ttf");
+        fontMap.put("Tahoma", "tahoma.ttf");
 
-        // Process the font family name to match potential keys
+        // Process the font family name
         String processedFontFamily = fontFamily.trim();
 
         // Try direct match
         if (fontMap.containsKey(processedFontFamily)) {
-            System.out.println("Found exact font match for: " + processedFontFamily);
-            return fontMap.get(processedFontFamily);
+            String fontFileName = fontMap.get(processedFontFamily);
+            String fontPath = getFontFilePath(fontFileName, FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
+            System.out.println("Found exact font match for: " + processedFontFamily + " -> " + fontPath);
+            return fontPath;
         }
 
         // Try case-insensitive match
         for (Map.Entry<String, String> entry : fontMap.entrySet()) {
             if (entry.getKey().equalsIgnoreCase(processedFontFamily)) {
-                System.out.println("Found case-insensitive font match for: " + processedFontFamily);
-                return entry.getValue();
+                String fontFileName = entry.getValue();
+                String fontPath = getFontFilePath(fontFileName, FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
+                System.out.println("Found case-insensitive font match for: " + processedFontFamily + " -> " + fontPath);
+                return fontPath;
             }
         }
 
-        // If the specified font isn't in our map, you might want to try a more elaborate lookup
-        // For example, scanning the Windows fonts directory or using platform-specific APIs
-        // For now, we'll just log this and fallback to Arial
-        System.out.println("Warning: Font family '" + fontFamily + "' not found in font map. Using Arial as fallback.");
+        // Fallback to default font
+        System.out.println("Warning: Font family '" + fontFamily + "' not found in font map. Using default: arial.ttf");
         return defaultFontPath;
+    }
+
+    private String getFontFilePath(String fontFileName, String fontsResourcePath, String tempFontDir) {
+        try {
+            // Check if font is already extracted in temp directory
+            File tempFontFile = new File(tempFontDir + fontFileName);
+            if (tempFontFile.exists()) {
+                return tempFontFile.getAbsolutePath();
+            }
+
+            // Load font from classpath
+            String resourcePath = fontsResourcePath + fontFileName;
+            InputStream fontStream = getClass().getResourceAsStream(resourcePath);
+            if (fontStream == null) {
+                System.err.println("Font file not found in resources: " + resourcePath);
+                throw new IOException("Font file not found: " + fontFileName);
+            }
+
+            // Copy font to temp directory
+            Path tempPath = tempFontFile.toPath();
+            Files.copy(fontStream, tempPath, StandardCopyOption.REPLACE_EXISTING);
+            fontStream.close();
+
+            System.out.println("Extracted font to: " + tempFontFile.getAbsolutePath());
+            return tempFontFile.getAbsolutePath();
+        } catch (IOException e) {
+            System.err.println("Error accessing font file: " + fontFileName + ". Error: " + e.getMessage());
+            // Fallback to a default font in temp directory or system font
+            File defaultFont = new File(tempFontDir + "arial.ttf");
+            if (defaultFont.exists()) {
+                return defaultFont.getAbsolutePath();
+            }
+            // Last resort: return a system font path
+            return "C:/Windows/Fonts/Arial.ttf";
+        }
     }
 
     public void applyFilter(String sessionId, String segmentId, String filterName, String filterValue) {

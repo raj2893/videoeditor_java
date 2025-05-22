@@ -24,6 +24,16 @@ public class VideoSegment implements Segment {
     private Double cropB = 0.0; // Crop percentage from bottom (0 to 100)
     private Double speed = 1.0; // Default speed is 1.0 (normal speed)
 
+    private Double rotation = 0.0; // Rotation in degrees, default to 0
+
+    public Double getRotation() {
+        return rotation;
+    }
+
+    public void setRotation(Double rotation) {
+        this.rotation = rotation;
+    }
+
     private Map<String, List<Keyframe>> keyframes = new HashMap<>();
 
     public VideoSegment() {

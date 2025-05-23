@@ -4289,13 +4289,15 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
-    public void removeFilter(String sessionId, String segmentId) {
+    public void removeFilter(String sessionId, String segmentId, String filterId) {
         EditSession session = getSession(sessionId);
         TimelineState timelineState = session.getTimelineState();
 
-        boolean removed = timelineState.getFilters().removeIf(f -> f.getSegmentId().equals(segmentId));
+        boolean removed = timelineState.getFilters().removeIf(f ->
+                f.getSegmentId().equals(segmentId) && f.getFilterId().equals(filterId)
+        );
         if (!removed) {
-            throw new RuntimeException("Filter not found with ID: " + " for segment: " + segmentId);
+            throw new RuntimeException("Filter not found with ID: " + filterId + " for segment: " + segmentId);
         }
 
         session.setLastAccessTime(System.currentTimeMillis());

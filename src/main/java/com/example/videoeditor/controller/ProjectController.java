@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -139,6 +140,44 @@ public class ProjectController {
         Project project = projectRepository.findByIdAndUser(projectId, user);
 
         return ResponseEntity.ok(project);
+    }
+
+    @PostMapping("/{projectId}/upload-video")
+    public ResponseEntity<?> uploadVideo(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam("video") MultipartFile[] videoFiles,
+            @RequestParam(value = "videoFileNames", required = false) String[] videoFileNames
+    ) {
+        try {
+            User user = getUserFromToken(token);
+            Project updatedProject = videoEditingService.uploadVideoToProject(user, projectId, videoFiles, videoFileNames);
+
+            // Extract video metadata from videosJson
+            List<Map<String, String>> videoFilesMetadata = videoEditingService.getVideos(updatedProject);
+            List<Map<String, String>> responseVideoFiles = videoFilesMetadata.stream()
+                    .map(video -> {
+                        Map<String, String> videoData = new HashMap<>();
+                        videoData.put("videoFileName", video.get("videoFileName"));
+                        videoData.put("videoPath", video.get("videoPath"));
+                        videoData.put("audioPath", video.getOrDefault("audioPath", null));
+                        return videoData;
+                    })
+                    .collect(Collectors.toList());
+
+            // Prepare response
+            Map<String, Object> response = new HashMap<>();
+            response.put("project", updatedProject);
+            response.put("videoFiles", responseVideoFiles);
+
+            return ResponseEntity.ok(response);
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error uploading video: " + e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(e.getMessage());
+        }
     }
 
     @PostMapping("/{projectId}/add-to-timeline")
@@ -328,6 +367,79 @@ public class ProjectController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error updating video segment: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/{projectId}/videos/{filename:.+}")
+    public ResponseEntity<Resource> serveVideo(
+            @RequestHeader(value = "Authorization", required = false) String token,
+            @PathVariable Long projectId,
+            @PathVariable String filename) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                user = getUserFromToken(token);
+            }
+
+            // Verify project exists
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+            // If token is provided, verify user has access
+            if (user != null && !project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define video file path
+            String videoDirectory = "videos/projects/" + projectId + "/";
+            Path videoPath = Paths.get(videoDirectory).resolve(filename).normalize();
+            Resource resource = new UrlResource(videoPath.toUri());
+
+            // Verify file existence
+            if (!resource.exists() || !resource.isReadable()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Set content type
+            String contentType = "video/mp4";
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                    .body(resource);
+        } catch (RuntimeException e) {
+            System.err.println("Error serving video: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving video: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    @GetMapping("/{projectId}/video-duration/{filename:.+}")
+    public ResponseEntity<Double> getVideoDuration(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @PathVariable String filename) {
+        try {
+            User user = getUserFromToken(token);
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+            if (!project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+
+            String videoPath = "videos/projects/" + projectId + "/" + filename;
+            double duration = videoEditingService.getVideoDuration(videoPath);
+            return ResponseEntity.ok(duration);
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(null);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(null);
         }
     }
 

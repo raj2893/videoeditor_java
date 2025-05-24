@@ -291,6 +291,42 @@ public class VideoEditingService {
                 .orElseThrow(() -> new RuntimeException("No active session found"));
     }
 
+    public Project uploadVideoToProject(User user, Long projectId, MultipartFile[] videoFiles, String[] videoFileNames) throws IOException {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+        if (!project.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Unauthorized to modify this project");
+        }
+
+        File projectVideoDir = new File(baseDir, "videos/projects/" + projectId);
+        if (!projectVideoDir.exists()) {
+            projectVideoDir.mkdirs();
+        }
+
+        for (int i = 0; i < videoFiles.length; i++) {
+            MultipartFile videoFile = videoFiles[i];
+            String originalFileName = videoFile.getOriginalFilename();
+            String uniqueFileName = (videoFileNames != null && i < videoFileNames.length && videoFileNames[i] != null)
+                    ? videoFileNames[i]
+                    : projectId + "_" + System.currentTimeMillis() + "_" + originalFileName;
+
+            File destinationFile = new File(projectVideoDir, uniqueFileName);
+            videoFile.transferTo(destinationFile);
+
+            String relativePath = "videos/projects/" + projectId + "/" + uniqueFileName;
+
+            try {
+                addVideo(project, relativePath, uniqueFileName);
+            } catch (JsonProcessingException e) {
+                throw new IOException("Failed to process video data for file: " + uniqueFileName, e);
+            }
+        }
+
+        project.setLastModified(LocalDateTime.now());
+        return projectRepository.save(project);
+    }
+
     // Updated addVideoToTimeline method
     public void addVideoToTimeline(
             String sessionId,
@@ -309,7 +345,24 @@ public class VideoEditingService {
             throw new RuntimeException("No active session found for sessionId: " + sessionId);
         }
 
-        double fullDuration = getVideoDuration(videoPath);
+        // Construct the correct video path: videos/projects/{projectId}/{filename}
+        String cleanedVideoPath;
+        if (videoPath.startsWith("videos/")) {
+            cleanedVideoPath = videoPath.substring("videos/".length());
+        } else if (videoPath.startsWith("projects/")) {
+            cleanedVideoPath = videoPath.substring(videoPath.indexOf('/', "projects/".length()) + 1);
+        } else {
+            cleanedVideoPath = videoPath;
+        }
+        String projectVideoPath = "videos/projects/" + session.getProjectId() + "/" + cleanedVideoPath;
+
+        // Verify file existence
+        File videoFile = new File(baseDir, projectVideoPath);
+        if (!videoFile.exists()) {
+            throw new RuntimeException("Video file not found: " + videoFile.getAbsolutePath());
+        }
+
+        double fullDuration = getVideoDuration(projectVideoPath);
         layer = layer != null ? layer : 0;
 
         if (timelineStartTime == null) {
@@ -334,7 +387,7 @@ public class VideoEditingService {
         double clipDuration = endTime - startTime;
 
         if (timelineEndTime == null) {
-            timelineEndTime = timelineStartTime + (clipDuration / speed);
+            timelineEndTime = timelineStartTime + (clipDuration / (speed != null ? speed : 1.0));
         }
         timelineEndTime = roundToThreeDecimals(timelineEndTime);
 
@@ -352,14 +405,14 @@ public class VideoEditingService {
         AudioSegment audioSegment = null;
 
         if (createAudioSegment) {
-            String videoFileName = new File(videoPath).getName();
+            String videoFileName = new File(cleanedVideoPath).getName();
             String audioFileName = "extracted_" + videoFileName.replaceAll("[^a-zA-Z0-9.]", "_") + ".mp3";
             File projectAudioDir = new File(baseDir, "audio/projects/" + session.getProjectId() + "/extracted");
             File audioFile = new File(projectAudioDir, audioFileName);
 
             List<Map<String, String>> extractedAudio = getExtractedAudio(project);
             Map<String, String> existingAudio = extractedAudio.stream()
-                    .filter(audio -> audio.get("sourceVideoPath").equals(videoPath) && audio.get("audioFileName").equals(audioFileName))
+                    .filter(audio -> audio.get("sourceVideoPath").equals(cleanedVideoPath) && audio.get("audioFileName").equals(audioFileName))
                     .findFirst()
                     .orElse(null);
 
@@ -369,7 +422,7 @@ public class VideoEditingService {
                 audioPath = existingAudio.get("audioPath");
                 waveformJsonPath = existingAudio.get("waveformJsonPath");
             } else {
-                Map<String, String> extractionResult = extractAudioFromVideo(videoPath, session.getProjectId(), audioFileName);
+                Map<String, String> extractionResult = extractAudioFromVideo(projectVideoPath, session.getProjectId(), audioFileName);
                 audioPath = extractionResult.get("audioPath");
                 waveformJsonPath = extractionResult.get("waveformJsonPath");
                 System.out.println("Extracted audio file: " + audioPath + ", waveform: " + waveformJsonPath);
@@ -380,14 +433,14 @@ public class VideoEditingService {
                 List<Map<String, String>> videos = getVideos(project);
                 boolean videoExists = false;
                 for (Map<String, String> video : videos) {
-                    if (video.get("videoPath").equals(videoPath)) {
+                    if (video.get("videoPath").equals(cleanedVideoPath)) {
                         video.put("audioPath", audioPath);
                         videoExists = true;
                         break;
                     }
                 }
                 if (!videoExists) {
-                    addVideo(project, videoPath, videoFileName, audioPath);
+                    addVideo(project, cleanedVideoPath, videoFileName, audioPath);
                 } else {
                     project.setVideosJson(objectMapper.writeValueAsString(videos));
                 }
@@ -405,12 +458,12 @@ public class VideoEditingService {
                 audioSegment.setVolume(1.0);
                 audioSegment.setExtracted(true);
             } else {
-                System.out.println("No audio extracted for video: " + videoPath + ", skipping audio segment creation");
+                System.out.println("No audio extracted for video: " + projectVideoPath + ", skipping audio segment creation");
             }
         }
 
         VideoSegment segment = new VideoSegment();
-        segment.setSourceVideoPath(videoPath);
+        segment.setSourceVideoPath(cleanedVideoPath); // Store filename without videos/projects prefix
         segment.setStartTime(startTime);
         segment.setEndTime(endTime);
         segment.setPositionX(0);
@@ -424,8 +477,8 @@ public class VideoEditingService {
         segment.setCropL(0.0);
         segment.setCropR(0.0);
         segment.setCropT(0.0);
-        segment.setSpeed(speed); // Set default speed
-        segment.setRotation(rotation);
+        segment.setSpeed(speed != null ? speed : 1.0);
+        segment.setRotation(rotation != null ? rotation : 0.0);
 
         if (audioSegment != null) {
             segment.setAudioId(audioSegment.getId());
@@ -459,7 +512,7 @@ public class VideoEditingService {
     }
 
     private Map<String, String> extractAudioFromVideo(String videoPath, Long projectId, String audioFileName) throws IOException, InterruptedException {
-        File videoFile = new File(baseDir, "videos/" + videoPath);
+        File videoFile = new File(baseDir, videoPath); // Remove "videos/" prefix
         if (!videoFile.exists()) {
             throw new IOException("Video file not found: " + videoFile.getAbsolutePath());
         }
@@ -571,37 +624,29 @@ public class VideoEditingService {
         return result;
     }
 
-    private double getVideoDuration(String videoPath) throws IOException, InterruptedException {
-        String fullPath = baseDir + "/videos/" + videoPath;
+    public double getVideoDuration(String videoPath) throws IOException, InterruptedException {
+        // Adjust path to include baseDir
+        String fullPath = new File(baseDir, videoPath).getAbsolutePath();
         ProcessBuilder builder = new ProcessBuilder(
-                ffmpegPath, "-i", fullPath
+                ffmpegPath.replace("ffmpeg.exe", "ffprobe.exe"),
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                fullPath
         );
+
         builder.redirectErrorStream(true);
         Process process = builder.start();
 
-        StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
-            }
-        }
-
+        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        String duration = reader.readLine();
         int exitCode = process.waitFor();
-        String outputStr = output.toString();
-        int durationIndex = outputStr.indexOf("Duration:");
-        if (durationIndex >= 0) {
-            String durationStr = outputStr.substring(durationIndex + 10, outputStr.indexOf(",", durationIndex)).trim();
-            String[] parts = durationStr.split(":");
-            if (parts.length == 3) {
-                double hours = Double.parseDouble(parts[0]);
-                double minutes = Double.parseDouble(parts[1]);
-                double seconds = Double.parseDouble(parts[2]);
-                // MODIFIED: Round duration to three decimal places
-                return roundToThreeDecimals(hours * 3600 + minutes * 60 + seconds);
-            }
+
+        if (exitCode != 0 || duration == null) {
+            throw new IOException("Failed to get video duration for path: " + fullPath);
         }
-        return 300; // Default to 5 minutes
+        // Round duration to three decimal places
+        return roundToThreeDecimals(Double.parseDouble(duration));
     }
 
     public void updateVideoSegment(
@@ -621,7 +666,7 @@ public class VideoEditingService {
             Double cropT,
             Double cropB,
             Double speed,
-            Double rotation, // New parameter
+            Double rotation,
             Map<String, List<Keyframe>> keyframes
     ) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
@@ -640,9 +685,17 @@ public class VideoEditingService {
         Double originalCropT = segmentToUpdate.getCropT();
         Double originalCropB = segmentToUpdate.getCropB();
         Double originalSpeed = segmentToUpdate.getSpeed();
-        Double originalRotation = segmentToUpdate.getRotation(); // Store original rotation
+        Double originalRotation = segmentToUpdate.getRotation();
 
         boolean timelineOrLayerChanged = false;
+
+        // Construct correct video path for getVideoDuration
+        String videoPath = segmentToUpdate.getSourceVideoPath();
+        String projectVideoPath = "videos/projects/" + session.getProjectId() + "/" + videoPath;
+        File videoFile = new File(baseDir, projectVideoPath);
+        if (!videoFile.exists()) {
+            throw new IOException("Video file not found: " + videoFile.getAbsolutePath());
+        }
 
         // Validate crop parameters
         if (cropL != null && (cropL < 0 || cropL > 100)) {
@@ -681,10 +734,8 @@ public class VideoEditingService {
             for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
                 String property = entry.getKey();
                 List<Keyframe> kfs = entry.getValue();
-                // Clear existing keyframes for this property
                 segmentToUpdate.getKeyframes().remove(property);
                 if (!kfs.isEmpty()) {
-                    // Add new keyframes if provided
                     for (Keyframe kf : kfs) {
                         if (kf.getTime() < 0 || kf.getTime() > (segmentToUpdate.getTimelineEndTime() - segmentToUpdate.getTimelineStartTime())) {
                             throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property);
@@ -693,7 +744,6 @@ public class VideoEditingService {
                         segmentToUpdate.addKeyframe(property, kf);
                     }
                 }
-                // Restore static property if keyframes are empty
                 switch (property) {
                     case "positionX":
                         if (kfs.isEmpty()) segmentToUpdate.setPositionX(positionX);
@@ -714,7 +764,6 @@ public class VideoEditingService {
                 }
             }
         } else {
-            // If no keyframes are provided, clear all keyframes and restore static properties
             segmentToUpdate.getKeyframes().clear();
             if (positionX != null) segmentToUpdate.setPositionX(positionX);
             if (positionY != null) segmentToUpdate.setPositionY(positionY);
@@ -737,7 +786,7 @@ public class VideoEditingService {
             segmentToUpdate.setOpacity(opacity);
         }
         if (rotation != null) {
-            segmentToUpdate.setRotation(rotation); // Always update static rotation
+            segmentToUpdate.setRotation(rotation);
         }
         if (layer != null) {
             segmentToUpdate.setLayer(layer);
@@ -760,12 +809,11 @@ public class VideoEditingService {
         if (endTime != null) {
             endTime = roundToThreeDecimals(endTime);
             segmentToUpdate.setEndTime(endTime);
-            double originalVideoDuration = getVideoDuration(segmentToUpdate.getSourceVideoPath());
+            double originalVideoDuration = getVideoDuration(projectVideoPath); // Use projectVideoPath
             if (endTime > originalVideoDuration) {
                 segmentToUpdate.setEndTime(roundToThreeDecimals(originalVideoDuration));
             }
         }
-        // Update crop fields
         if (cropL != null) segmentToUpdate.setCropL(cropL);
         if (cropR != null) segmentToUpdate.setCropR(cropR);
         if (cropT != null) segmentToUpdate.setCropT(cropT);
@@ -777,29 +825,24 @@ public class VideoEditingService {
         double newClipDuration = roundToThreeDecimals(newEndTime - newStartTime);
         double effectiveSpeed = speed != null ? speed : (originalSpeed != null ? originalSpeed : 1.0);
 
-        // Update timelineEndTime only when speed is increasing
         if (speed != null && speed > originalSpeed && originalSpeed >= 1.0) {
-            // Update timelineEndTime when speed increases
             double newTimelineDuration = roundToThreeDecimals(newClipDuration / effectiveSpeed);
             if (timelineEndTime == null) {
                 segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newTimelineDuration));
             } else {
-                // Ensure provided timelineEndTime matches the expected duration
                 double providedTimelineDuration = roundToThreeDecimals(timelineEndTime - segmentToUpdate.getTimelineStartTime());
                 if (Math.abs(providedTimelineDuration - newTimelineDuration) > 0.001) {
                     segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newTimelineDuration));
                 }
             }
         } else {
-            // When speed decreases or stays the same, keep timelineEndTime unless explicitly provided
             if (timelineEndTime == null && (startTime != null || endTime != null)) {
-                // Recalculate timelineEndTime based on new clip duration only if startTime or endTime changed
                 double newTimelineDuration = roundToThreeDecimals(newClipDuration / effectiveSpeed);
                 segmentToUpdate.setTimelineEndTime(roundToThreeDecimals(segmentToUpdate.getTimelineStartTime() + newTimelineDuration));
             }
         }
 
-        // Validate timeline position with rounded values
+        // Validate timeline position
         TimelineState timelineState = session.getTimelineState();
         timelineState.getSegments().remove(segmentToUpdate);
         boolean positionAvailable = timelineState.isTimelinePositionAvailable(
@@ -819,11 +862,10 @@ public class VideoEditingService {
             segmentToUpdate.setCropT(originalCropT);
             segmentToUpdate.setCropB(originalCropB);
             segmentToUpdate.setSpeed(originalSpeed);
-            segmentToUpdate.setRotation(originalRotation); // Restore original rotation
+            segmentToUpdate.setRotation(originalRotation);
             throw new RuntimeException("Timeline position overlaps with an existing segment in layer " + segmentToUpdate.getLayer());
         }
 
-        // Update associated transitions if timelineStartTime or layer changed
         if (timelineOrLayerChanged) {
             updateAssociatedTransitions(
                     sessionId,
@@ -1950,7 +1992,7 @@ public class VideoEditingService {
     }
 
     public void deleteProjectFiles(Long projectId) throws IOException {
-        // Delete videos
+        // Update videos deletion to use project-specific directory
         File videoDir = new File(baseDir, "videos/projects/" + projectId);
         if (videoDir.exists()) {
             FileUtils.deleteDirectory(videoDir);

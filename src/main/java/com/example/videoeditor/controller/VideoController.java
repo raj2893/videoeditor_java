@@ -117,30 +117,6 @@ public class VideoController {
         return ResponseEntity.ok(editedVideos);
     }
 
-
-    // Add this class at the end of VideoController
-    public static class SplitRequest {
-        private String videoPath;
-        private double splitTimeSeconds;
-        private String segmentId;
-
-        public String getSegmentId() {
-            return segmentId;
-        }
-
-        public void setSegmentId(String segmentId) {
-            this.segmentId = segmentId;
-        }
-
-        // Getters and setters
-        public String getVideoPath() { return videoPath; }
-        public void setVideoPath(String videoPath) { this.videoPath = videoPath; }
-        public double getSplitTimeSeconds() { return splitTimeSeconds; }
-        public void setSplitTimeSeconds(double splitTimeSeconds) {
-            this.splitTimeSeconds = splitTimeSeconds;
-        }
-    }
-
     // Also add this method to get video duration
     @GetMapping("/duration/{filename}")
     public ResponseEntity<Double> getVideoDuration(@RequestHeader("Authorization") String token,

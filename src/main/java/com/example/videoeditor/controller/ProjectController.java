@@ -46,7 +46,7 @@ public class ProjectController {
         this.userRepository = userRepository;
     }
 
-    private User getUserFromToken(String token) {
+    public User getUserFromToken(String token) {
         String email = jwtUtil.extractEmail(token.substring(7));
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -1430,7 +1430,7 @@ public class ProjectController {
     }
 
     // Helper method to determine content type
-    private String determineContentType(String filename) {
+    public String determineContentType(String filename) {
         filename = filename.toLowerCase();
         if (filename.endsWith(".png")) return "image/png";
         if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
@@ -1870,7 +1870,7 @@ public class ProjectController {
     }
 
     // Helper method to determine audio content type
-    private String determineAudioContentType(String filename) {
+    public String determineAudioContentType(String filename) {
         filename = filename.toLowerCase();
         if (filename.endsWith(".mp3")) return "audio/mpeg";
         if (filename.endsWith(".wav")) return "audio/wav";

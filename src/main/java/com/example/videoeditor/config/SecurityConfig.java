@@ -36,7 +36,7 @@ public class SecurityConfig implements WebMvcConfigurer {
     public CorsConfigurationSource corsConfigurationSource() {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000", "https://splendid-mooncake-2c2f66.netlify.app"));
+        config.setAllowedOrigins(List.of("http://localhost:3000", "https://splendid-mooncake-2c2f66.netlify.app", "https://scenith.in"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
         config.setExposedHeaders(List.of("Authorization"));
@@ -66,8 +66,13 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("/developer/**").authenticated() // Requires JWT, role checked in JwtFilter
                         .requestMatchers("/videos/upload", "/videos/my-videos", "/videos/merge", "/videos/edited-videos","/videos/trim", "/videos/split", "/videos/duration/**").authenticated()
                         .requestMatchers("/projects/{projectId}/images/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
+                        .requestMatchers("image/projects/{projectId}/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
+                        .requestMatchers("elements/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
                         .requestMatchers("/projects/{projectId}/audio/{filename}").permitAll()
+                        .requestMatchers("audio/projects/{projectId}/{filename}").permitAll()
+                        .requestMatchers("audio/projects/{projectId}/extracted/{filename}").permitAll()
                         .requestMatchers("/projects/{projectId}/videos/{filename}").permitAll()
+                        .requestMatchers("videos/projects/{projectId}/{filename}").permitAll()
                         .requestMatchers("/projects/**", "/projects/{projectId}/add-to-timeline").authenticated()
                         .requestMatchers(HttpMethod.GET, "/videos/edited-videos/**").permitAll()
                         .requestMatchers("/videos/**", "/videos/*").permitAll()  // ✅ Allow public video access

@@ -346,13 +346,11 @@ public class VideoEditingService {
         }
 
         // Construct the correct video path: videos/projects/{projectId}/{filename}
-        String cleanedVideoPath;
+        String cleanedVideoPath = videoPath;
         if (videoPath.startsWith("videos/")) {
             cleanedVideoPath = videoPath.substring("videos/".length());
         } else if (videoPath.startsWith("projects/")) {
             cleanedVideoPath = videoPath.substring(videoPath.indexOf('/', "projects/".length()) + 1);
-        } else {
-            cleanedVideoPath = videoPath;
         }
         String projectVideoPath = "videos/projects/" + session.getProjectId() + "/" + cleanedVideoPath;
 
@@ -403,16 +401,16 @@ public class VideoEditingService {
                 .orElseThrow(() -> new RuntimeException("Project not found"));
         String audioPath = null;
         AudioSegment audioSegment = null;
+        String videoFileName = new File(cleanedVideoPath).getName();
 
         if (createAudioSegment) {
-            String videoFileName = new File(cleanedVideoPath).getName();
             String audioFileName = "extracted_" + videoFileName.replaceAll("[^a-zA-Z0-9.]", "_") + ".mp3";
             File projectAudioDir = new File(baseDir, "audio/projects/" + session.getProjectId() + "/extracted");
             File audioFile = new File(projectAudioDir, audioFileName);
 
             List<Map<String, String>> extractedAudio = getExtractedAudio(project);
             Map<String, String> existingAudio = extractedAudio.stream()
-                    .filter(audio -> audio.get("sourceVideoPath").equals(cleanedVideoPath) && audio.get("audioFileName").equals(audioFileName))
+                    .filter(audio -> audio.get("sourceVideoPath").equals(projectVideoPath) && audio.get("audioFileName").equals(audioFileName))
                     .findFirst()
                     .orElse(null);
 
@@ -430,18 +428,22 @@ public class VideoEditingService {
 
             // Only create audio segment if audio was successfully extracted
             if (audioPath != null) {
+                // Check if video already exists in videos_json
                 List<Map<String, String>> videos = getVideos(project);
-                boolean videoExists = false;
-                for (Map<String, String> video : videos) {
-                    if (video.get("videoPath").equals(cleanedVideoPath)) {
-                        video.put("audioPath", audioPath);
-                        videoExists = true;
-                        break;
-                    }
-                }
+                boolean videoExists = videos.stream()
+                        .anyMatch(video -> video.get("videoPath").equals(projectVideoPath));
+
                 if (!videoExists) {
-                    addVideo(project, cleanedVideoPath, videoFileName, audioPath);
+                    // Add video with audioPath
+                    addVideo(project, projectVideoPath, videoFileName, audioPath);
                 } else {
+                    // Update existing video entry with audioPath
+                    for (Map<String, String> video : videos) {
+                        if (video.get("videoPath").equals(projectVideoPath)) {
+                            video.put("audioPath", audioPath);
+                            break;
+                        }
+                    }
                     project.setVideosJson(objectMapper.writeValueAsString(videos));
                 }
                 projectRepository.save(project);
@@ -459,6 +461,21 @@ public class VideoEditingService {
                 audioSegment.setExtracted(true);
             } else {
                 System.out.println("No audio extracted for video: " + projectVideoPath + ", skipping audio segment creation");
+                // Ensure video is added without audioPath if not already present
+                List<Map<String, String>> videos = getVideos(project);
+                boolean videoExists = videos.stream()
+                        .anyMatch(video -> video.get("videoPath").equals(projectVideoPath));
+                if (!videoExists) {
+                    addVideo(project, projectVideoPath, videoFileName, null);
+                }
+            }
+        } else {
+            // If not creating audio segment, ensure video is added without audioPath if not already present
+            List<Map<String, String>> videos = getVideos(project);
+            boolean videoExists = videos.stream()
+                    .anyMatch(video -> video.get("videoPath").equals(projectVideoPath));
+            if (!videoExists) {
+                addVideo(project, projectVideoPath, videoFileName, null);
             }
         }
 
@@ -2640,7 +2657,7 @@ public class VideoEditingService {
                                     if (cssBrightnessMultiplier == 1.0) {
                                         break;
                                     }
-                                    filterComplex.append("format=rgb24,");
+                                    filterComplex.append("format=rgba,");
                                     String lut = String.format(
                                             "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
                                             cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
@@ -2655,7 +2672,7 @@ public class VideoEditingService {
                                     if (contrast == 1.0) {
                                         break;
                                     }
-                                    filterComplex.append("format=rgb24,");
+                                    filterComplex.append("format=rgba,");
                                     double offset = 128 * (1 - contrast);
                                     String lut = String.format(
                                             "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
@@ -2733,7 +2750,7 @@ public class VideoEditingService {
                     }
                 }
 
-                filterComplex.append("format=rgb24,");
+                filterComplex.append("format=rgba,");
 
                 if (hasVignette) {
                     double intensity = vignetteValue;
@@ -2999,13 +3016,13 @@ public class VideoEditingService {
                                     if (cssBrightnessMultiplier == 1.0) {
                                         break;
                                     }
-                                    filterComplex.append("format=rgb24,");
+                                    filterComplex.append("format=rgba,");
                                     String lut = String.format(
-                                            "lutrgb=r='val*%f':g='val*%f':b='val*%f',",
+                                            "lutrgb=r='val*%f':g='val*%f':b='val*%f':a='val',",
                                             cssBrightnessMultiplier, cssBrightnessMultiplier, cssBrightnessMultiplier
                                     );
                                     filterComplex.append(lut);
-                                    filterComplex.append("format=yuv420p,");
+                                    filterComplex.append("format=rgba,"); // Keep rgba to preserve alpha
                                 }
                                 break;
                             case "contrast":
@@ -3014,14 +3031,14 @@ public class VideoEditingService {
                                     if (contrast == 1.0) {
                                         break;
                                     }
-                                    filterComplex.append("format=rgb24,");
+                                    filterComplex.append("format=rgba,");
                                     double offset = 128 * (1 - contrast);
                                     String lut = String.format(
-                                            "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)',",
+                                            "lutrgb=r='clip(val*%f+%f,0,255)':g='clip(val*%f+%f,0,255)':b='clip(val*%f+%f,0,255)':a='val',",
                                             contrast, offset, contrast, offset, contrast, offset
                                     );
                                     filterComplex.append(lut);
-                                    filterComplex.append("format=yuv420p,");
+                                    filterComplex.append("format=rgba,"); // Keep rgba to preserve alpha
                                 }
                                 break;
                             case "saturation":
@@ -3091,8 +3108,6 @@ public class VideoEditingService {
                         System.err.println("Invalid filter value for " + filterName + " in segment " + is.getId() + ": " + filterValue);
                     }
                 }
-
-                filterComplex.append("format=rgb24,");
 
                 if (hasVignette) {
                     double intensity = vignetteValue;

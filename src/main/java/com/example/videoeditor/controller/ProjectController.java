@@ -837,8 +837,8 @@ public class ProjectController {
             if (audioFileName == null || audioFileName.isEmpty()) {
                 return ResponseEntity.badRequest().body("Audio filename is required");
             }
-            if (volume < 0 || volume > 1) {
-                return ResponseEntity.badRequest().body("Volume must be between 0 and 1");
+            if (volume < 0 || volume > 15) {
+                return ResponseEntity.badRequest().body("Volume must be between 0 and 15");
             }
 
             // Add audio to timeline
@@ -865,7 +865,7 @@ public class ProjectController {
             response.put("volume", addedAudioSegment.getVolume());
             response.put("audioPath", addedAudioSegment.getAudioPath());
             response.put("waveformJsonPath", addedAudioSegment.getWaveformJsonPath());
-            response.put("isExtracted", addedAudioSegment.isExtracted()); // Include isExtracted
+            response.put("extracted", addedAudioSegment.isExtracted()); // Include isExtracted
             response.put("keyframes", addedAudioSegment.getKeyframes() != null ? addedAudioSegment.getKeyframes() : new HashMap<>());
 
             return ResponseEntity.ok(response);
@@ -1552,6 +1552,27 @@ public class ProjectController {
         }
     }
 
+    @DeleteMapping("/{projectId}/remove-all-filters")
+    public ResponseEntity<?> removeAllFilters(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @RequestParam String sessionId,
+            @RequestParam String segmentId) {
+        try {
+            User user = getUserFromToken(token);
+
+            if (segmentId == null) {
+                return ResponseEntity.badRequest().body("Missing required parameter: segmentId");
+            }
+
+            videoEditingService.removeAllFilters(sessionId, segmentId);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error removing all filters: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/{projectId}/add-transition")
     public ResponseEntity<?> addTransition(
             @RequestHeader("Authorization") String token,
@@ -1751,6 +1772,50 @@ public class ProjectController {
             return ResponseEntity.ok("Text segment deleted successfully");
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/{projectId}/remove-segments")
+    public ResponseEntity<?> removeMultipleSegments(
+        @RequestHeader("Authorization") String token,
+        @PathVariable Long projectId,
+        @RequestParam String sessionId,
+        @RequestBody Map<String, Object> request) {
+        try {
+            User user = getUserFromToken(token);
+
+            // Extract segmentIds from request body
+            @SuppressWarnings("unchecked")
+            List<String> segmentIds = (List<String>) request.get("segmentIds");
+
+            // Validate input
+            if (segmentIds == null || segmentIds.isEmpty()) {
+                return ResponseEntity.badRequest().body("Missing or empty required parameter: segmentIds");
+            }
+            if (sessionId == null || sessionId.isEmpty()) {
+                return ResponseEntity.badRequest().body("Missing required parameter: sessionId");
+            }
+
+            // Verify project exists and user has access
+            Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            if (!project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Unauthorized to modify this project");
+            }
+
+            // Call service method to delete segments
+            videoEditingService.deleteMultipleSegments(sessionId, segmentIds);
+
+            return ResponseEntity.ok().body("Segments deleted successfully");
+        } catch (ClassCastException e) {
+            return ResponseEntity.badRequest().body("Invalid segmentIds format: must be a list of strings");
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body("Error removing segments: " + e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error removing segments: " + e.getMessage());
         }
     }
 

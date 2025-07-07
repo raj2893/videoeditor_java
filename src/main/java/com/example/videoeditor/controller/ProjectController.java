@@ -116,9 +116,9 @@ public class ProjectController {
         return ResponseEntity.ok().build();
     }
 
-    @PostMapping("/{projectId}/export")
+    @GetMapping("/{projectId}/export")
     public ResponseEntity<String> exportProject(
-            @RequestHeader("Authorization") String token,
+            @RequestHeader(value = "Authorization", required = false) String token,
             @PathVariable Long projectId,
             @RequestParam String sessionId) throws IOException, InterruptedException {
         // Export the project using the existing session ID

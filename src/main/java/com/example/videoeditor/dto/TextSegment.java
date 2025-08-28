@@ -1,5 +1,6 @@
 package com.example.videoeditor.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.util.*;
@@ -38,6 +39,17 @@ public class TextSegment implements Segment {
     private Double lineSpacing = 1.2; // Default line spacing (1.2x font size, matching frontend)
 
     private Double rotation = 0.0; // Rotation in degrees, default to 0
+    @JsonProperty("isSubtitle") // Ensure JSON field is "isSubtitle"
+    private boolean isSubtitle = false;
+
+    @JsonProperty("isSubtitle") // Optional: reinforce on getter
+    public boolean isSubtitle() {
+        return isSubtitle;
+    }
+
+    public void setSubtitle(boolean isSubtitle) {
+        this.isSubtitle = isSubtitle;
+    }
 
     public Double getRotation() {
         return rotation;

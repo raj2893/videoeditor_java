@@ -2,14 +2,19 @@ package com.example.videoeditor.service;
 
 import com.example.videoeditor.developer.entity.GlobalElement;
 import com.example.videoeditor.developer.repository.GlobalElementRepository;
+import com.example.videoeditor.dto.*;
 import com.example.videoeditor.entity.Element;
 import com.example.videoeditor.entity.Project;
-import com.example.videoeditor.dto.*;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.UserTtsUsage;
 import com.example.videoeditor.repository.ProjectRepository;
+import com.example.videoeditor.repository.UserTtsUsageRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.cloud.texttospeech.v1.*;
+import com.google.protobuf.ByteString;
 import lombok.Data;
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
@@ -32,10 +37,13 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -44,24 +52,31 @@ public class VideoEditingService {
     private final ObjectMapper objectMapper;
     private final Map<String, EditSession> activeSessions;
     private final GlobalElementRepository globalElementRepository;
+    private UserTtsUsageRepository userTtsUsageRepository;
 
     private final String ffmpegPath = "C:\\Users\\raj.p\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe";
     private final String baseDir = "D:\\Backend\\videoEditor-main"; // Base directory constant
+    private final String pythonPath = System.getenv().getOrDefault("PYTHON_PATH", "C:\\Users\\raj.p\\AppData\\Local\\Programs\\Python\\Python311\\python.exe");
+    private final String pythonScriptPath = baseDir + File.separator + "scripts" + File.separator + "whisper_subtitle.py";
+    private final String backgroundRemovalScriptPath = baseDir + File.separator + "scripts" + File.separator + "remove_background.py";
+    String credentialsPath = baseDir + File.separator + "credentials" + File.separator + "video-editor-tts-24b472478ab838d2168992684517cacfab4c11da.json";
 
     private String globalElementsDirectory = "elements/";
 
     public VideoEditingService(
             ProjectRepository projectRepository,
+            UserTtsUsageRepository userTtsUsageRepository,
             ObjectMapper objectMapper, GlobalElementRepository globalElementRepository
     ) {
         this.projectRepository = projectRepository;
         this.objectMapper = objectMapper;
         this.globalElementRepository = globalElementRepository;
         this.activeSessions = new ConcurrentHashMap<>();
+        this.userTtsUsageRepository = userTtsUsageRepository;
     }
 
     @Data
-    private class EditSession {
+    public class EditSession {
         private String sessionId;
         private Long projectId;
         private TimelineState timelineState;
@@ -100,8 +115,15 @@ public class VideoEditingService {
         }
     }
 
+    @Data
+    private static class Subtitle {
+        private double startTime;
+        private double endTime;
+        private String text;
+    }
+
     // NEW: Helper method to round doubles to three decimal places
-    private double roundToThreeDecimals(Double value) {
+    public double roundToThreeDecimals(Double value) {
         if (value == null) return 0.0;
         DecimalFormat df = new DecimalFormat("#.###");
         return Double.parseDouble(df.format(value));
@@ -283,7 +305,7 @@ public class VideoEditingService {
                 entry.getValue().getLastAccessTime() < expiryTime);
     }
 
-    private EditSession getSession(String sessionId) {
+    public EditSession getSession(String sessionId) {
         return Optional.ofNullable(activeSessions.get(sessionId))
                 .orElseThrow(() -> new RuntimeException("No active session found"));
     }
@@ -1120,6 +1142,601 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
+    public void updateMultipleTextSegments(
+        String sessionId,
+        List<String> segmentIds,
+        String text,
+        String fontFamily,
+        Double scale,
+        String fontColor,
+        String backgroundColor,
+        Integer positionX,
+        Integer positionY,
+        Double opacity,
+        Double timelineStartTime,
+        Double timelineEndTime,
+        Integer layer,
+        String alignment,
+        Double backgroundOpacity,
+        Integer backgroundBorderWidth,
+        String backgroundBorderColor,
+        Integer backgroundH,
+        Integer backgroundW,
+        Integer backgroundBorderRadius,
+        String textBorderColor,
+        Integer textBorderWidth,
+        Double textBorderOpacity,
+        Double letterSpacing,
+        Double lineSpacing,
+        Double rotation,
+        Map<String, List<Keyframe>> keyframes
+    ) throws IOException {
+        EditSession session = getSession(sessionId);
+        TimelineState timelineState = session.getTimelineState();
+        Map<String, TextSegment> segmentMap = timelineState.getTextSegments().stream()
+            .collect(Collectors.toMap(TextSegment::getId, s -> s));
+        List<TextSegment> segmentsToUpdate = new ArrayList<>();
+        Map<TextSegment, Double> originalStartTimes = new HashMap<>();
+        Map<TextSegment, Double> originalEndTimes = new HashMap<>();
+        Map<TextSegment, Integer> originalLayers = new HashMap<>();
+        Map<TextSegment, Double> originalRotations = new HashMap<>();
+        boolean timelineOrLayerChanged = false;
+
+        // Collect segments and store original values
+        for (String segmentId : segmentIds) {
+            TextSegment segment = segmentMap.get(segmentId);
+            if (segment == null) {
+                throw new RuntimeException("Text segment not found with ID: " + segmentId);
+            }
+            segmentsToUpdate.add(segment);
+            originalStartTimes.put(segment, segment.getTimelineStartTime());
+            originalEndTimes.put(segment, segment.getTimelineEndTime());
+            originalLayers.put(segment, segment.getLayer());
+            originalRotations.put(segment, segment.getRotation());
+        }
+
+        // Prepare updated timeline positions for batch validation
+        Map<TextSegment, Double> newStartTimes = new HashMap<>();
+        Map<TextSegment, Double> newEndTimes = new HashMap<>();
+        Map<TextSegment, Integer> newLayers = new HashMap<>();
+        for (TextSegment segment : segmentsToUpdate) {
+            double start = timelineStartTime != null ? roundToThreeDecimals(timelineStartTime) : segment.getTimelineStartTime();
+            double end = timelineEndTime != null ? roundToThreeDecimals(timelineEndTime) : segment.getTimelineEndTime();
+            int newLayer = layer != null ? layer : segment.getLayer();
+            newStartTimes.put(segment, start);
+            newEndTimes.put(segment, end);
+            newLayers.put(segment, newLayer);
+            if (timelineStartTime != null || timelineEndTime != null || layer != null) {
+                timelineOrLayerChanged = true;
+            }
+        }
+
+        // Batch validate timeline positions
+        for (TextSegment segment : segmentsToUpdate) {
+            double start = newStartTimes.get(segment);
+            double end = newEndTimes.get(segment);
+            int newLayer = newLayers.get(segment);
+            // Temporarily set segment's new position for validation
+            double tempStart = segment.getTimelineStartTime();
+            double tempEnd = segment.getTimelineEndTime();
+            int tempLayer = segment.getLayer();
+            segment.setTimelineStartTime(start);
+            segment.setTimelineEndTime(end);
+            segment.setLayer(newLayer);
+            // Check for overlaps, excluding segments being updated
+            boolean positionAvailable = timelineState.getTextSegments().stream()
+                .filter(s -> !segmentsToUpdate.contains(s))
+                .noneMatch(s -> s.getLayer() == newLayer &&
+                    start < s.getTimelineEndTime() &&
+                    end > s.getTimelineStartTime());
+            // Restore original position
+            segment.setTimelineStartTime(tempStart);
+            segment.setTimelineEndTime(tempEnd);
+            segment.setLayer(tempLayer);
+            if (!positionAvailable) {
+                throw new RuntimeException("Timeline position overlaps in layer " + newLayer + " for segment " + segment.getId());
+            }
+        }
+
+        // Update segments in-place
+        for (TextSegment segment : segmentsToUpdate) {
+            // Handle keyframes
+            if (keyframes != null && !keyframes.isEmpty()) {
+                for (Map.Entry<String, List<Keyframe>> entry : keyframes.entrySet()) {
+                    String property = entry.getKey();
+                    List<Keyframe> kfs = entry.getValue();
+                    segment.getKeyframes().remove(property);
+                    if (!kfs.isEmpty()) {
+                        double segmentDuration = newEndTimes.get(segment) - newStartTimes.get(segment);
+                        for (Keyframe kf : kfs) {
+                            if (kf.getTime() < 0 || kf.getTime() > segmentDuration) {
+                                throw new IllegalArgumentException("Keyframe time out of segment bounds for property " + property + " in segment " + segment.getId());
+                            }
+                            kf.setTime(roundToThreeDecimals(kf.getTime()));
+                            segment.addKeyframe(property, kf);
+                        }
+                    }
+                    switch (property) {
+                        case "positionX":
+                            segment.setPositionX(kfs.isEmpty() ? positionX : null);
+                            break;
+                        case "positionY":
+                            segment.setPositionY(kfs.isEmpty() ? positionY : null);
+                            break;
+                        case "opacity":
+                            segment.setOpacity(kfs.isEmpty() ? opacity : null);
+                            break;
+                        case "scale":
+                            segment.setScale(kfs.isEmpty() ? scale : null);
+                            break;
+                    }
+                }
+            } else {
+                segment.getKeyframes().clear();
+                if (positionX != null) segment.setPositionX(positionX);
+                if (positionY != null) segment.setPositionY(positionY);
+                if (opacity != null) segment.setOpacity(opacity);
+                if (scale != null) segment.setScale(scale);
+                if (rotation != null) segment.setRotation(rotation);
+            }
+
+            // Update non-keyframed properties
+            if (text != null) segment.setText(text);
+            if (fontFamily != null) segment.setFontFamily(fontFamily);
+            if (scale != null && (keyframes == null || !keyframes.containsKey("scale") || keyframes.get("scale").isEmpty())) {
+                segment.setScale(scale);
+            }
+            if (fontColor != null) segment.setFontColor(fontColor);
+            if (backgroundColor != null) segment.setBackgroundColor(backgroundColor);
+            if (positionX != null && (keyframes == null || !keyframes.containsKey("positionX") || keyframes.get("positionX").isEmpty())) {
+                segment.setPositionX(positionX);
+            }
+            if (positionY != null && (keyframes == null || !keyframes.containsKey("positionY") || keyframes.get("positionY").isEmpty())) {
+                segment.setPositionY(positionY);
+            }
+            if (opacity != null && (keyframes == null || !keyframes.containsKey("opacity") || keyframes.get("opacity").isEmpty())) {
+                segment.setOpacity(opacity);
+            }
+            if (rotation != null) segment.setRotation(rotation);
+            if (timelineStartTime != null) segment.setTimelineStartTime(newStartTimes.get(segment));
+            if (timelineEndTime != null) segment.setTimelineEndTime(newEndTimes.get(segment));
+            if (layer != null) segment.setLayer(newLayers.get(segment));
+            if (alignment != null) segment.setAlignment(alignment);
+            if (backgroundOpacity != null) segment.setBackgroundOpacity(backgroundOpacity);
+            if (backgroundBorderWidth != null) segment.setBackgroundBorderWidth(backgroundBorderWidth);
+            if (backgroundBorderColor != null) segment.setBackgroundBorderColor(backgroundBorderColor);
+            if (backgroundH != null) segment.setBackgroundH(backgroundH);
+            if (backgroundW != null) segment.setBackgroundW(backgroundW);
+            if (backgroundBorderRadius != null) segment.setBackgroundBorderRadius(backgroundBorderRadius);
+            if (textBorderColor != null) segment.setTextBorderColor(textBorderColor);
+            if (textBorderWidth != null) segment.setTextBorderWidth(textBorderWidth);
+            if (textBorderOpacity != null) segment.setTextBorderOpacity(textBorderOpacity);
+            if (letterSpacing != null) segment.setLetterSpacing(letterSpacing);
+            if (lineSpacing != null) segment.setLineSpacing(lineSpacing);
+        }
+
+        // Consolidated transition updates
+        if (timelineOrLayerChanged) {
+            for (TextSegment segment : segmentsToUpdate) {
+                updateAssociatedTransitions(
+                    sessionId,
+                    segment.getId(),
+                    segment.getLayer(),
+                    segment.getTimelineStartTime(),
+                    segment.getTimelineEndTime()
+                );
+            }
+        }
+
+        session.setLastAccessTime(System.currentTimeMillis());
+    }
+
+    // Add auto-subtitles to the timeline, handling multiple audio segments
+    public void addAutoSubtitlesToTimeline(String sessionId, Long projectId, Map<String, Object> subtitleProperties) throws IOException, InterruptedException {
+        EditSession session = getSession(sessionId);
+        TimelineState timelineState = session.getTimelineState();
+        Project project = projectRepository.findById(projectId)
+            .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+        List<AudioSegment> audioSegments = timelineState.getAudioSegments();
+        if (audioSegments.isEmpty()) {
+            throw new IOException("No audio segments found in the timeline");
+        }
+
+        int subtitleLayer = findTopmostLayer(timelineState);
+
+        // Get project dimensions (assuming Project class has width and height properties)
+        int projectWidth = project.getWidth(); // Replace with actual method to get project width
+        int maxTextWidth = (int) (projectWidth * 0.7);
+
+        for (AudioSegment audioSegment : audioSegments) {
+            String mixedAudioPath = mixAudioSegments(Collections.singletonList(audioSegment), projectId);
+            List<Subtitle> subtitles = generateSubtitles(mixedAudioPath);
+            if (subtitles.isEmpty()) {
+                System.out.println("No subtitles generated for audio segment at " + audioSegment.getTimelineStartTime());
+                File mixedAudioFile = new File(mixedAudioPath);
+                if (mixedAudioFile.exists()) {
+                    mixedAudioFile.delete();
+                }
+                continue;
+            }
+
+            double timelineStart = audioSegment.getTimelineStartTime();
+            double timelineEnd = audioSegment.getTimelineEndTime();
+            double audioDuration = timelineEnd - timelineStart;
+
+            double firstSubtitleStart = subtitles.stream()
+                .filter(s -> s.getText() != null && !s.getText().trim().isEmpty() && s.getEndTime() > s.getStartTime())
+                .map(Subtitle::getStartTime)
+                .min(Double::compare)
+                .orElse(0.0);
+
+            double timeOffset = timelineStart - firstSubtitleStart;
+
+            for (Subtitle subtitle : subtitles) {
+                double startTime = subtitle.getStartTime() + timeOffset;
+                double endTime = subtitle.getEndTime() + timeOffset;
+
+                startTime = Math.max(timelineStart, startTime);
+                endTime = Math.min(timelineEnd, endTime);
+
+                if (endTime <= startTime || Double.isNaN(startTime) || Double.isNaN(endTime)) {
+                    System.out.println("Skipping subtitle at " + startTime + "s due to invalid duration");
+                    continue;
+                }
+
+                // NEW: Split subtitle text into chunks that fit within maxTextWidth
+                List<String> subtitleChunks = splitSubtitleText(
+                    subtitle.getText().trim(),
+                    maxTextWidth,
+                    subtitleProperties
+                );
+
+                // NEW: Calculate duration per chunk (distribute original duration across chunks)
+                double chunkDuration = (endTime - startTime) / subtitleChunks.size();
+                double currentStartTime = startTime;
+
+                for (String chunkText : subtitleChunks) {
+                    double chunkEndTime = currentStartTime + chunkDuration;
+
+                    if (!timelineState.isTimelinePositionAvailable(currentStartTime, chunkEndTime, subtitleLayer)) {
+                        System.out.println("Skipping subtitle chunk at " + currentStartTime + "s due to overlap in layer " + subtitleLayer);
+                        continue;
+                    }
+
+                    TextSegment textSegment = new TextSegment();
+                    textSegment.setId(UUID.randomUUID().toString());
+                    textSegment.setText(chunkText);
+                    textSegment.setLayer(subtitleLayer);
+                    textSegment.setTimelineStartTime(currentStartTime);
+                    textSegment.setTimelineEndTime(chunkEndTime);
+
+                    textSegment.setPositionX(subtitleProperties != null && subtitleProperties.containsKey("positionX")
+                        ? (int) ((Number) subtitleProperties.get("positionX")).doubleValue() : 0);
+
+                    textSegment.setFontFamily(subtitleProperties != null && subtitleProperties.containsKey("fontFamily")
+                        ? (String) subtitleProperties.get("fontFamily") : "Montserrat Alternates Black");
+                    textSegment.setFontColor(subtitleProperties != null && subtitleProperties.containsKey("fontColor")
+                        ? (String) subtitleProperties.get("fontColor") : "black");
+                    textSegment.setBackgroundColor(subtitleProperties != null && subtitleProperties.containsKey("backgroundColor")
+                        ? (String) subtitleProperties.get("backgroundColor") : "white");
+                    textSegment.setBackgroundOpacity(subtitleProperties != null && subtitleProperties.containsKey("backgroundOpacity")
+                        ? ((Number) subtitleProperties.get("backgroundOpacity")).doubleValue() : 1.0);
+                    textSegment.setPositionY(subtitleProperties != null && subtitleProperties.containsKey("positionY")
+                        ? (int) ((Number) subtitleProperties.get("positionY")).doubleValue() : 350);
+                    textSegment.setOpacity(subtitleProperties != null && subtitleProperties.containsKey("opacity")
+                        ? ((Number) subtitleProperties.get("opacity")).doubleValue() : 1.0);
+                    textSegment.setScale(subtitleProperties != null && subtitleProperties.containsKey("scale")
+                        ? ((Number) subtitleProperties.get("scale")).doubleValue() : 1.25);
+                    textSegment.setAlignment(subtitleProperties != null && subtitleProperties.containsKey("alignment")
+                        ? (String) subtitleProperties.get("alignment") : "center");
+                    textSegment.setBackgroundH(subtitleProperties != null && subtitleProperties.containsKey("backgroundH")
+                        ? (int) ((Number) subtitleProperties.get("backgroundH")).doubleValue() : 50);
+                    textSegment.setBackgroundW(subtitleProperties != null && subtitleProperties.containsKey("backgroundW")
+                        ? (int) ((Number) subtitleProperties.get("backgroundW")).doubleValue() : 50);
+                    textSegment.setBackgroundBorderRadius(subtitleProperties != null && subtitleProperties.containsKey("backgroundBorderRadius")
+                        ? (int) ((Number) subtitleProperties.get("backgroundBorderRadius")).doubleValue() : 15);
+                    textSegment.setBackgroundBorderWidth(subtitleProperties != null && subtitleProperties.containsKey("backgroundBorderWidth")
+                        ? (int) ((Number) subtitleProperties.get("backgroundBorderWidth")).doubleValue() : 0);
+                    textSegment.setTextBorderWidth(subtitleProperties != null && subtitleProperties.containsKey("textBorderWidth")
+                        ? (int) ((Number) subtitleProperties.get("textBorderWidth")).doubleValue() : 0);
+                    textSegment.setLetterSpacing(subtitleProperties != null && subtitleProperties.containsKey("letterSpacing")
+                        ? ((Number) subtitleProperties.get("letterSpacing")).doubleValue() : 0.0);
+                    textSegment.setLineSpacing(subtitleProperties != null && subtitleProperties.containsKey("lineSpacing")
+                        ? ((Number) subtitleProperties.get("lineSpacing")).doubleValue() : 1.2);
+                    textSegment.setRotation(subtitleProperties != null && subtitleProperties.containsKey("rotation")
+                        ? ((Number) subtitleProperties.get("rotation")).doubleValue() : 0.0);
+                    textSegment.setSubtitle(true);
+
+                    timelineState.getTextSegments().add(textSegment);
+
+                    // NEW: Increment start time for the next chunk
+                    currentStartTime = chunkEndTime;
+                }
+
+                File mixedAudioFile = new File(mixedAudioPath);
+                if (mixedAudioFile.exists()) {
+                    mixedAudioFile.delete();
+                }
+            }
+
+            session.setLastAccessTime(System.currentTimeMillis());
+            saveProject(sessionId);
+        }
+    }
+
+    // NEW: Helper method to split subtitle text into chunks that fit within max width
+    private List<String> splitSubtitleText(String text, int maxTextWidth, Map<String, Object> subtitleProperties) {
+        List<String> chunks = new ArrayList<>();
+        String[] words = text.split("\\s+");
+        StringBuilder currentChunk = new StringBuilder();
+        double scale = subtitleProperties != null && subtitleProperties.containsKey("scale")
+            ? ((Number) subtitleProperties.get("scale")).doubleValue() : 1.25;
+        double letterSpacing = subtitleProperties != null && subtitleProperties.containsKey("letterSpacing")
+            ? ((Number) subtitleProperties.get("letterSpacing")).doubleValue() : 0.0;
+
+        for (String word : words) {
+            String testChunk = currentChunk.length() > 0 ? currentChunk + " " + word : word;
+            int textWidth = estimateTextWidth(testChunk, subtitleProperties);
+
+            if (textWidth <= maxTextWidth) {
+                if (currentChunk.length() > 0) {
+                    currentChunk.append(" ");
+                }
+                currentChunk.append(word);
+            } else {
+                if (currentChunk.length() > 0) {
+                    chunks.add(currentChunk.toString());
+                    currentChunk = new StringBuilder(word);
+                } else {
+                    // Handle single word longer than max width (rare case)
+                    chunks.add(word);
+                }
+            }
+        }
+
+        if (currentChunk.length() > 0) {
+            chunks.add(currentChunk.toString());
+        }
+
+        // Ensure at least one chunk
+        if (chunks.isEmpty()) {
+            chunks.add("");
+        }
+
+        return chunks;
+    }
+
+    // NEW: Helper method to estimate text width based on font properties
+    private int estimateTextWidth(String text, Map<String, Object> subtitleProperties) {
+        // Extract font properties
+        String fontFamily = subtitleProperties != null && subtitleProperties.containsKey("fontFamily")
+            ? (String) subtitleProperties.get("fontFamily") : "Montserrat Alternates Black";
+        double scale = subtitleProperties != null && subtitleProperties.containsKey("scale")
+            ? ((Number) subtitleProperties.get("scale")).doubleValue() : 1.25;
+        double letterSpacing = subtitleProperties != null && subtitleProperties.containsKey("letterSpacing")
+            ? ((Number) subtitleProperties.get("letterSpacing")).doubleValue() : 0.0;
+
+        // Simplified text width estimation (adjust based on your rendering engine)
+        // Assumption: Average character width is 10 pixels at scale 1.0 for a standard font
+        double baseCharWidth = 10.0; // Adjust this based on font metrics or testing
+        double scaledCharWidth = baseCharWidth * scale;
+        double totalWidth = text.length() * scaledCharWidth;
+
+        // Add letter spacing
+        if (text.length() > 1) {
+            totalWidth += (text.length() - 1) * letterSpacing;
+        }
+
+        // Adjust for font family (optional, if you have font-specific metrics)
+        if (fontFamily.equals("Montserrat Alternates Black")) {
+            totalWidth *= 1.1; // Example adjustment for wider font
+        }
+
+        return (int) Math.ceil(totalWidth);
+    }
+
+
+    // Mix multiple audio segments into a single audio file
+    private String mixAudioSegments(List<AudioSegment> audioSegments, Long projectId) throws IOException, InterruptedException {
+        if (audioSegments.isEmpty()) {
+            throw new IOException("No audio segments provided for mixing");
+        }
+
+        File tempDir = new File(baseDir, "audio/temp/" + projectId);
+        if (!tempDir.exists() && !tempDir.mkdirs()) {
+            throw new IOException("Failed to create temporary directory: " + tempDir.getAbsolutePath());
+        }
+        String mixedAudioPath = tempDir.getAbsolutePath() + File.separator + "mixed_" + System.currentTimeMillis() + ".mp3";
+        File mixedAudioFile = new File(mixedAudioPath);
+
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegPath);
+        for (AudioSegment segment : audioSegments) {
+            File audioFile = new File(baseDir, segment.getAudioPath());
+            if (!audioFile.exists()) {
+                throw new IOException("Audio file not found: " + audioFile.getAbsolutePath());
+            }
+            command.add("-i");
+            command.add(audioFile.getAbsolutePath());
+        }
+        command.add("-filter_complex");
+        StringBuilder filterComplex = new StringBuilder();
+        for (int i = 0; i < audioSegments.size(); i++) {
+            AudioSegment segment = audioSegments.get(i);
+            double startTime = segment.getStartTime();
+            double duration = segment.getEndTime() - segment.getStartTime();
+            // Ensure duration is positive
+            if (duration <= 0) {
+                throw new IOException("Invalid duration for audio segment: " + duration);
+            }
+            filterComplex.append("[").append(i).append(":a]atrim=start=").append(startTime)
+                .append(":duration=").append(duration)
+                .append(",asetpts=PTS-STARTPTS") // Reset timestamps to start at 0
+                .append(",volume=").append(segment.getVolume() != null ? segment.getVolume() : 1.0)
+                .append("[a").append(i).append("];");
+        }
+        filterComplex.append("[a0]");
+        for (int i = 1; i < audioSegments.size(); i++) {
+            filterComplex.append("[a").append(i).append("]");
+        }
+        filterComplex.append("amix=inputs=").append(audioSegments.size()).append(":duration=longest");
+        command.add(filterComplex.toString());
+        command.add("-y");
+        command.add(mixedAudioFile.getAbsolutePath());
+
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IOException("FFmpeg audio mixing failed with exit code: " + exitCode + ", output: " + output.toString());
+        }
+
+        if (!mixedAudioFile.exists()) {
+            throw new IOException("Mixed audio file was not created: " + mixedAudioFile.getAbsolutePath());
+        }
+
+        return mixedAudioPath;
+    }
+
+    // Generate subtitles using Whisper (local Python script)
+    private List<Subtitle> generateSubtitles(String audioPath) throws IOException, InterruptedException {
+        List<Subtitle> subtitles = new ArrayList<>();
+        File audioFile = new File(audioPath);
+        File scriptFile = new File(pythonScriptPath);
+
+        if (!scriptFile.exists()) {
+            throw new IOException("Python script not found: " + scriptFile.getAbsolutePath());
+        }
+        if (!audioFile.exists()) {
+            throw new IOException("Audio file not found: " + audioFile.getAbsolutePath());
+        }
+
+        // Get audio duration using FFmpeg
+        double audioDuration = getAudioDuration(audioFile);
+
+        List<String> command = new ArrayList<>();
+        command.add(pythonPath);
+        command.add(scriptFile.getAbsolutePath());
+        command.add(audioFile.getAbsolutePath());
+
+        System.out.println("Executing command: " + String.join(" ", command));
+
+        ProcessBuilder pb = new ProcessBuilder(command);
+        Process process = pb.start();
+
+        StringBuilder output = new StringBuilder();
+        StringBuilder errorOutput = new StringBuilder();
+        try (BufferedReader stdoutReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+             BufferedReader stderrReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+            String line;
+            while ((line = stdoutReader.readLine()) != null) {
+                output.append(line);
+                System.out.println("stdout: " + line);
+            }
+            while ((line = stderrReader.readLine()) != null) {
+                errorOutput.append(line).append("\n");
+                System.out.println("stderr: " + line);
+            }
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IOException("Whisper transcription failed with exit code: " + exitCode + ", error: " + errorOutput.toString());
+        }
+
+        try {
+            if (output.length() == 0) {
+                throw new IOException("No output from Whisper script, stderr: " + errorOutput.toString());
+            }
+            List<Map<String, Object>> segments = objectMapper.readValue(
+                output.toString(),
+                new TypeReference<List<Map<String, Object>>>() {}
+            );
+            for (Map<String, Object> segment : segments) {
+                double startTime = ((Number) segment.get("start")).doubleValue();
+                double endTime = ((Number) segment.get("end")).doubleValue();
+                String text = (String) segment.get("text");
+
+                // Constrain timings to audio duration
+                startTime = Math.max(0, startTime);
+                endTime = Math.min(audioDuration, endTime);
+
+                if (endTime > startTime && text != null && !text.trim().isEmpty()) {
+                    Subtitle subtitle = new Subtitle();
+                    subtitle.setStartTime(startTime);
+                    subtitle.setEndTime(endTime);
+                    subtitle.setText(text.trim());
+                    subtitles.add(subtitle);
+                }
+            }
+        } catch (JsonProcessingException e) {
+            throw new IOException("Failed to parse Whisper output: " + e.getMessage() + ", output: " + output.toString());
+        }
+
+        return subtitles;
+    }
+
+    // Helper method to get audio duration using FFmpeg
+    private double getAudioDuration(File audioFile) throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegPath);
+        command.add("-i");
+        command.add(audioFile.getAbsolutePath());
+        command.add("-f");
+        command.add("null");
+        command.add("-");
+
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IOException("FFmpeg failed to get audio duration: " + output.toString());
+        }
+
+        // Parse duration from FFmpeg output (e.g., "Duration: 00:00:10.23")
+        Pattern pattern = Pattern.compile("Duration: (\\d{2}):(\\d{2}):(\\d{2}\\.\\d+)");
+        Matcher matcher = pattern.matcher(output.toString());
+        if (matcher.find()) {
+            int hours = Integer.parseInt(matcher.group(1));
+            int minutes = Integer.parseInt(matcher.group(2));
+            double seconds = Double.parseDouble(matcher.group(3));
+            return hours * 3600 + minutes * 60 + seconds;
+        }
+        throw new IOException("Could not parse audio duration from FFmpeg output");
+    }
+
+    // Find the topmost layer across all segment types
+    public int findTopmostLayer(TimelineState timelineState) {
+        int maxLayer = -1;
+        maxLayer = Math.max(maxLayer, timelineState.getSegments().stream()
+            .mapToInt(VideoSegment::getLayer)
+            .max().orElse(-1));
+        maxLayer = Math.max(maxLayer, timelineState.getImageSegments().stream()
+            .mapToInt(ImageSegment::getLayer)
+            .max().orElse(-1));
+        maxLayer = Math.max(maxLayer, timelineState.getTextSegments().stream()
+            .mapToInt(TextSegment::getLayer)
+            .max().orElse(-1));
+        return maxLayer + 1;
+    }
+
     public Project uploadAudioToProject(User user, Long projectId, MultipartFile[] audioFiles, String[] audioFileNames) throws IOException, InterruptedException {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
@@ -1428,6 +2045,237 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
+  public void generateTtsAndAddToTimeline(
+      String sessionId,
+      Long projectId,
+      String text,
+      String voiceName,
+      String languageCode,
+      int layer,
+      double timelineStartTime,
+      Double timelineEndTime
+  ) throws IOException, InterruptedException {
+    if (layer >= 0) {
+      throw new IllegalArgumentException("Audio layers must be negative (e.g., -1, -2, -3)");
+    }
+
+    // Enforce 15-minute limit (~13,500 characters/user/month)
+    if (text.length() > 13_500) {
+      throw new IllegalArgumentException("Text exceeds 15-minute limit (~13,500 characters)");
+    }
+
+    // Track character usage per user (assumes a database table or in-memory store)
+    long userUsage = getUserTtsUsage(projectId); // Implement this method
+    if (userUsage + text.length() > 13_500) {
+      throw new IllegalStateException("User exceeded monthly TTS limit (13,500 characters)");
+    }
+
+    EditSession session = getSession(sessionId);
+    Project project = projectRepository.findById(projectId)
+        .orElseThrow(() -> new RuntimeException("Project not found"));
+
+      GoogleCredentials credentials = GoogleCredentials.fromStream(new FileInputStream(credentialsPath));
+      TextToSpeechSettings settings = TextToSpeechSettings.newBuilder()
+          .setCredentialsProvider(() -> credentials)
+          .build();
+
+    // Generate audio using Google Cloud TTS
+    try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create(settings)) {
+      SynthesisInput input = SynthesisInput.newBuilder().setText(text).build();
+      VoiceSelectionParams voice = VoiceSelectionParams.newBuilder()
+          .setLanguageCode(languageCode) // e.g., "en-US"
+          .setName(voiceName) // e.g., "en-US-Neural2-A"
+          .build();
+      AudioConfig audioConfig = AudioConfig.newBuilder()
+          .setAudioEncoding(AudioEncoding.MP3)
+          .build();
+      SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
+      ByteString audioContent = response.getAudioContent();
+
+      // Save audio file
+      String audioFileName = projectId + "_tts_" + System.currentTimeMillis() + ".mp3";
+      File audioDir = new File(baseDir, "audio/projects/" + projectId);
+      audioDir.mkdirs();
+      File audioFile = new File(audioDir, audioFileName);
+      try (FileOutputStream out = new FileOutputStream(audioFile)) {
+        out.write(audioContent.toByteArray());
+      }
+
+      String audioPath = "audio/projects/" + projectId + "/" + audioFileName;
+
+      // Generate waveform JSON
+      String waveformJsonPath = generateAndSaveWaveformJson(audioPath, projectId);
+
+      // Add to project audioJson (same as uploadAudioToProject)
+      addAudio(project, audioPath, audioFileName, waveformJsonPath);
+      project.setLastModified(LocalDateTime.now());
+      projectRepository.save(project);
+
+      // Get audio duration
+      double audioDuration = getAudioDuration(audioPath);
+      double startTime = 0.0;
+      double endTime = roundToThreeDecimals(audioDuration);
+      timelineStartTime = roundToThreeDecimals(timelineStartTime);
+      double calculatedTimelineEndTime = timelineEndTime != null ? roundToThreeDecimals(timelineEndTime) :
+          roundToThreeDecimals(timelineStartTime + audioDuration);
+
+      // Validate timeline position
+      if (!session.getTimelineState().isTimelinePositionAvailable(timelineStartTime, calculatedTimelineEndTime, layer)) {
+        throw new RuntimeException("Timeline position overlaps with existing audio in layer " + layer);
+      }
+
+      // Add to timeline as AudioSegment
+      AudioSegment audioSegment = new AudioSegment();
+      audioSegment.setAudioPath(audioPath);
+      audioSegment.setLayer(layer);
+      audioSegment.setStartTime(startTime);
+      audioSegment.setEndTime(endTime);
+      audioSegment.setTimelineStartTime(timelineStartTime);
+      audioSegment.setTimelineEndTime(calculatedTimelineEndTime);
+      audioSegment.setVolume(1.0);
+      audioSegment.setExtracted(false); // Not extracted from video
+      audioSegment.setWaveformJsonPath(waveformJsonPath);
+
+      session.getTimelineState().getAudioSegments().add(audioSegment);
+      session.setLastAccessTime(System.currentTimeMillis());
+
+      // Update TTS usage
+      updateUserTtsUsage(projectId, text.length()); // Implement this method
+    }
+  }
+
+    private long getUserTtsUsage(Long projectId) {
+        Project project = projectRepository.findById(projectId)
+            .orElseThrow(() -> new RuntimeException("Project not found"));
+        User user = project.getUser();
+        YearMonth currentMonth = YearMonth.now();
+        Optional<UserTtsUsage> usage = userTtsUsageRepository.findByUserAndMonth(user, currentMonth);
+        return usage.map(UserTtsUsage::getCharactersUsed).orElse(0L);
+    }
+
+    private void updateUserTtsUsage(Long projectId, long characters) {
+        Project project = projectRepository.findById(projectId)
+            .orElseThrow(() -> new RuntimeException("Project not found"));
+        User user = project.getUser();
+        YearMonth currentMonth = YearMonth.now();
+        UserTtsUsage usage = userTtsUsageRepository.findByUserAndMonth(user, currentMonth)
+            .orElseGet(() -> new UserTtsUsage(user, currentMonth));
+        usage.setCharactersUsed(usage.getCharactersUsed() + characters);
+        userTtsUsageRepository.save(usage);
+    }
+
+//    public List<VoiceInfo> getAvailableVoices() {
+//        List<VoiceInfo> voices = new ArrayList<>();
+//
+//        // English (US)
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Neural2-E", "Female", "Emily"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Wavenet-C", "Female", "Charlotte"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Wavenet-E", "Female", "Emma"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Neural2-F", "Female", "Sophia"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Wavenet-F", "Female", "Isabella"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Neural2-H", "Female", "Madison"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Wavenet-A", "Male", "Alexander"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Wavenet-B", "Male", "Benjamin"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Neural2-B", "Male", "William"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Wavenet-D", "Male", "Daniel"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Neural2-G", "Male", "Gabriel"));
+//        voices.add(new VoiceInfo("English (US)", "en-US", "en-US-Neural2-J", "Male", "Jackson"));
+//
+//        // English (UK)
+//        voices.add(new VoiceInfo("English (UK)", "en-GB", "en-GB-Neural2-A", "Female", "Amelia"));
+//        voices.add(new VoiceInfo("English (UK)", "en-GB", "en-GB-Wavenet-C", "Female", "Catherine"));
+//        voices.add(new VoiceInfo("English (UK)", "en-GB", "en-GB-Neural2-F", "Female", "Florence"));
+//        voices.add(new VoiceInfo("English (UK)", "en-GB", "en-GB-Wavenet-B", "Male", "Benedict"));
+//        voices.add(new VoiceInfo("English (UK)", "en-GB", "en-GB-Neural2-D", "Male", "David"));
+//        voices.add(new VoiceInfo("English (UK)", "en-GB", "en-GB-Neural2-O", "Male", "Oliver"));
+//
+//        // Hindi (India)
+//        voices.add(new VoiceInfo("Hindi (India)", "hi-IN", "hi-IN-Wavenet-A", "Female", "Alia"));
+//        voices.add(new VoiceInfo("Hindi (India)", "hi-IN", "hi-IN-Wavenet-D", "Female", "Kiara"));
+//        voices.add(new VoiceInfo("Hindi (India)", "hi-IN", "hi-IN-Wavenet-B", "Male", "Rohit"));
+//        voices.add(new VoiceInfo("Hindi (India)", "hi-IN", "hi-IN-Wavenet-C", "Male", "Virat"));
+//
+//        // Spanish (Spain)
+//        voices.add(new VoiceInfo("Spanish (Spain)", "es-ES", "es-ES-Neural2-A", "Female", "Alba"));
+//        voices.add(new VoiceInfo("Spanish (Spain)", "es-ES", "es-ES-Neural2-B", "Male", "Bruno"));
+//
+//        // Spanish (Latin America)
+//        voices.add(new VoiceInfo("Spanish (Latin America)", "es-US", "es-US-Neural2-A", "Female", "Alejandra"));
+//        voices.add(new VoiceInfo("Spanish (Latin America)", "es-US", "es-US-Neural2-B", "Male", "Bruno-2"));
+//
+//        // Portuguese (Brazil)
+//        voices.add(new VoiceInfo("Portuguese (Brazil)", "pt-BR", "pt-BR-Neural2-A", "Female", "Ana"));
+//        voices.add(new VoiceInfo("Portuguese (Brazil)", "pt-BR", "pt-BR-Neural2-B", "Male", "Nuno"));
+//
+//        // French (France)
+//        voices.add(new VoiceInfo("French (France)", "fr-FR", "fr-FR-Neural2-A", "Female", "Amélie"));
+//        voices.add(new VoiceInfo("French (France)", "fr-FR", "fr-FR-Neural2-D", "Male", "Damien"));
+//
+//        // German (Germany)
+//        voices.add(new VoiceInfo("German (Germany)", "de-DE", "de-DE-Neural2-B", "Female", "Beatrice"));
+//        voices.add(new VoiceInfo("German (Germany)", "de-DE", "de-DE-Neural2-D", "Male", "Dominik"));
+//
+//        // Arabic (Modern Standard)
+//        voices.add(new VoiceInfo("Arabic (Modern Standard)", "ar-XA", "ar-XA-Wavenet-A", "Female", "Aisha"));
+//        voices.add(new VoiceInfo("Arabic (Modern Standard)", "ar-XA", "ar-XA-Wavenet-B", "Male", "Bilal"));
+//
+//        // Japanese
+//        voices.add(new VoiceInfo("Japanese", "ja-JP", "ja-JP-Wavenet-B", "Female", "Yuki"));
+//        voices.add(new VoiceInfo("Japanese", "ja-JP", "ja-JP-Wavenet-D", "Male", "Daiki"));
+//
+//        // Korean
+//        voices.add(new VoiceInfo("Korean", "ko-KR", "ko-KR-Wavenet-A", "Female", "Areum"));
+//        voices.add(new VoiceInfo("Korean", "ko-KR", "ko-KR-Wavenet-B", "Male", "Byung-ho"));
+//
+//        // Chinese (Simplified)
+//        voices.add(new VoiceInfo("Chinese (Simplified)", "cmn-CN", "cmn-CN-Wavenet-A", "Female", "An"));
+//        voices.add(new VoiceInfo("Chinese (Simplified)", "cmn-CN", "cmn-CN-Wavenet-D", "Male", "Dong"));
+//
+//        // Italian
+//        voices.add(new VoiceInfo("Italian", "it-IT", "it-IT-Wavenet-A", "Female", "Alessia"));
+//        voices.add(new VoiceInfo("Italian", "it-IT", "it-IT-Wavenet-C", "Male", "Carlo"));
+//
+//        // Russian
+//        voices.add(new VoiceInfo("Russian", "ru-RU", "ru-RU-Wavenet-A", "Female", "Anastasia"));
+//        voices.add(new VoiceInfo("Russian", "ru-RU", "ru-RU-Wavenet-D", "Male", "Dmitri"));
+//
+//        // Turkish
+//        voices.add(new VoiceInfo("Turkish", "tr-TR", "tr-TR-Wavenet-A", "Female", "Ayşe"));
+//        voices.add(new VoiceInfo("Turkish", "tr-TR", "tr-TR-Wavenet-B", "Male", "Burak"));
+//
+//        return voices;
+//    }
+
+//    public List<VoiceInfo> getAvailableVoices() {
+//        ObjectMapper mapper = new ObjectMapper();
+//        try (InputStream is = getClass().getClassLoader().getResourceAsStream("voices.json")) {
+//            return mapper.readValue(is, new TypeReference<List<VoiceInfo>>() {});
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//            return Collections.emptyList();
+//        }
+//    }
+//
+//    public List<VoiceInfo> getVoicesByLanguage(String language) {
+//        return getAvailableVoices().stream()
+//            .filter(voice -> voice.getLanguage().equalsIgnoreCase(language))
+//            .collect(Collectors.toList());
+//    }
+//
+//    public List<VoiceInfo> getVoicesByGender(String gender) {
+//        return getAvailableVoices().stream()
+//            .filter(voice -> voice.getGender().equalsIgnoreCase(gender))
+//            .collect(Collectors.toList());
+//    }
+//
+//    public List<VoiceInfo> getVoicesByLanguageAndGender(String language, String gender) {
+//        return getAvailableVoices().stream()
+//            .filter(voice -> voice.getLanguage().equalsIgnoreCase(language))
+//            .filter(voice -> voice.getGender().equalsIgnoreCase(gender))
+//            .collect(Collectors.toList());
+//    }
+
+
     public void removeAudioSegment(String sessionId, String audioSegmentId) {
         EditSession session = getSession(sessionId);
         TimelineState timelineState = session.getTimelineState();
@@ -1443,7 +2291,7 @@ public class VideoEditingService {
         session.setLastAccessTime(System.currentTimeMillis());
     }
 
-    private double getAudioDuration(String audioPath) throws IOException, InterruptedException {
+    public double getAudioDuration(String audioPath) throws IOException, InterruptedException {
         File audioFile = new File(baseDir, audioPath);
         if (!audioFile.exists()) {
             throw new IOException("Audio file not found: " + audioFile.getAbsolutePath());
@@ -1835,6 +2683,72 @@ public class VideoEditingService {
 
         session.setLastAccessTime(System.currentTimeMillis());
         saveTimelineState(sessionId, timelineState);
+    }
+
+    public Project processImageBackgroundRemoval(User user, Long projectId, String inputPath) throws IOException, InterruptedException, JsonProcessingException {
+        Project project = projectRepository.findById(projectId)
+            .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+        if (!project.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("Unauthorized to modify this project");
+        }
+
+        File inputFile = new File(baseDir, inputPath);
+        if (!inputFile.exists()) {
+            throw new IOException("Input file not found: " + inputFile.getAbsolutePath());
+        }
+
+        File outputDir = new File(baseDir, "images/projects/" + projectId);
+        if (!outputDir.exists() && !outputDir.mkdirs()) {
+            throw new IOException("Failed to create output directory: " + outputDir.getAbsolutePath());
+        }
+
+        String outputFileName = "bg_removed_" + inputFile.getName();
+        File outputFile = new File(outputDir, outputFileName);
+        String outputPath = "images/projects/" + projectId + "/" + outputFileName;
+
+        List<String> command = Arrays.asList(
+            pythonPath,
+            backgroundRemovalScriptPath,
+            inputFile.getAbsolutePath(),
+            outputFile.getAbsolutePath()
+        );
+
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line);
+            }
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IOException("Background removal failed with exit code: " + exitCode + ", output: " + output.toString());
+        }
+
+        if (!outputFile.exists()) {
+            throw new IOException("Output file not created: " + outputFile.getAbsolutePath());
+        }
+
+        Map<String, Object> result;
+        try {
+            result = objectMapper.readValue(output.toString(), new TypeReference<Map<String, Object>>() {});
+        } catch (JsonProcessingException e) {
+            throw new IOException("Failed to parse background removal output: " + output.toString(), e);
+        }
+
+        if (!"success".equals(result.get("status"))) {
+            throw new IOException("Background removal failed: " + result.get("message"));
+        }
+
+        // Add processed image to project
+        addImage(project, outputPath, outputFileName);
+
+        project.setLastModified(LocalDateTime.now());
+        return projectRepository.save(project);
     }
 
     public void removeImageSegment(String sessionId, String segmentId) {
@@ -2349,7 +3263,7 @@ public class VideoEditingService {
         return Double.parseDouble(duration);
     }
 
-    private String generateAndSaveWaveformJson(String audioPath, Long projectId) throws IOException, InterruptedException {
+    public String generateAndSaveWaveformJson(String audioPath, Long projectId) throws IOException, InterruptedException {
         File audioFile = new File(baseDir, audioPath);
         if (!audioFile.exists()) {
             throw new IOException("Audio file not found: " + audioFile.getAbsolutePath());
@@ -2451,50 +3365,117 @@ public class VideoEditingService {
         return "audio/projects/" + projectId + "/waveforms/" + waveformFileName;
     }
 
+    private void executeFFmpegCommand(List<String> command, Long projectId, double batchStart, double batchDuration, double totalDuration, int batchIndex) throws IOException, InterruptedException {
+        Project project = projectRepository.findById(projectId)
+            .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+
+        List<String> updatedCommand = new ArrayList<>(command);
+        if (!updatedCommand.contains("-progress")) {
+            updatedCommand.add("-progress");
+            updatedCommand.add("pipe:");
+        }
+
+        ProcessBuilder processBuilder = new ProcessBuilder(updatedCommand);
+        processBuilder.redirectErrorStream(true);
+
+        System.out.println("Executing FFmpeg command: " + String.join(" ", updatedCommand));
+        Process process = processBuilder.start();
+        double lastProgress = -1.0;
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                System.out.println("FFmpeg: " + line);
+                if (line.startsWith("out_time_ms=") && !line.equals("out_time_ms=N/A")) {
+                    try {
+                        long outTimeUs = Long.parseLong(line.replace("out_time_ms=", ""));
+                        double currentBatchTime = outTimeUs / 1_000_000.0;
+
+                        double batchProgress = Math.min(currentBatchTime / batchDuration, 1.0);
+                        double batchContribution = batchDuration / totalDuration * 100.0;
+                        double completedBatchesProgress = batchIndex * (batchDuration / totalDuration * 100.0);
+                        double totalProgress = completedBatchesProgress + (batchProgress * batchContribution);
+                        totalProgress = Math.min(totalProgress, 100.0);
+
+                        int roundedProgress = (int) Math.round(totalProgress);
+                        if (roundedProgress != (int) lastProgress && roundedProgress >= 0 && roundedProgress <= 100 && roundedProgress % 10 == 0) {
+                            project.setProgress((double) roundedProgress);
+                            project.setLastModified(LocalDateTime.now());
+                            project.setStatus("PENDING");
+                            projectRepository.save(project);
+                            System.out.println("Progress updated: " + roundedProgress + "% for projectId: " + projectId);
+                            lastProgress = roundedProgress;
+                        }
+                    } catch (NumberFormatException e) {
+                        System.err.println("Failed to parse out_time_ms: " + line);
+                    }
+                }
+            }
+        }
+
+        boolean completed = process.waitFor(10, TimeUnit.MINUTES);
+        if (!completed) {
+            process.destroyForcibly();
+            throw new RuntimeException("FFmpeg process timed out after 10 minutes");
+        }
+
+        int exitCode = process.exitValue();
+        if (exitCode != 0) {
+            project.setStatus("FAILED");
+            project.setProgress(0.0);
+            project.setLastModified(LocalDateTime.now());
+            projectRepository.save(project);
+            throw new RuntimeException("FFmpeg process failed with exit code: " + exitCode);
+        }
+    }
+
     public File exportProject(String sessionId) throws IOException, InterruptedException {
         EditSession session = getSession(sessionId);
-
-        // Check if session exists
         if (session == null) {
             throw new RuntimeException("No active session found for sessionId: " + sessionId);
         }
 
-        // Get project details
         Project project = projectRepository.findById(session.getProjectId())
-                .orElseThrow(() -> new RuntimeException("Project not found"));
+            .orElseThrow(() -> new RuntimeException("Project not found: " + session.getProjectId()));
 
-        // Create default output path
         String outputFileName = project.getName().replaceAll("[^a-zA-Z0-9]", "_") + "_"
-                + System.currentTimeMillis() + ".mp4";
+            + System.currentTimeMillis() + ".mp4";
         String outputPath = "exports/" + outputFileName;
 
-        // Ensure exports directory exists
         File exportsDir = new File("exports");
         if (!exportsDir.exists()) {
             exportsDir.mkdirs();
         }
 
-        // Render the final video
-        String exportedVideoPath = renderFinalVideo(session.getTimelineState(), outputPath, project.getWidth(), project.getHeight(), project.getFps(), session.getProjectId());
-
-        // Update project status to exported
-        project.setStatus("EXPORTED");
+        project.setStatus("PENDING");
+        project.setProgress(0.0);
         project.setLastModified(LocalDateTime.now());
-        project.setExportedVideoPath(exportedVideoPath);
-
-        try {
-            project.setTimelineState(objectMapper.writeValueAsString(session.getTimelineState()));
-        } catch (JsonProcessingException e) {
-            System.err.println("Error saving timeline state: " + e.getMessage());
-            // Continue with export even if saving timeline state fails
-        }
-
         projectRepository.save(project);
 
-        System.out.println("Project successfully exported to: " + exportedVideoPath);
+        try {
+            String exportedVideoPath = renderFinalVideo(session.getTimelineState(), outputPath, project.getWidth(), project.getHeight(), project.getFps(), session.getProjectId());
 
-        // Return the File object as per your original implementation
-        return new File(exportedVideoPath);
+            project.setStatus("EXPORTED");
+            project.setLastModified(LocalDateTime.now());
+            project.setExportedVideoPath(exportedVideoPath);
+            project.setProgress(100.0);
+
+            try {
+                project.setTimelineState(objectMapper.writeValueAsString(session.getTimelineState()));
+            } catch (JsonProcessingException e) {
+                System.err.println("Error saving timeline state: " + e.getMessage());
+            }
+
+            projectRepository.save(project);
+            System.out.println("Project successfully exported to: " + exportedVideoPath);
+            return new File(exportedVideoPath);
+        } catch (Exception e) {
+            project.setStatus("FAILED");
+            project.setProgress(0.0);
+            project.setLastModified(LocalDateTime.now());
+            projectRepository.save(project);
+            throw e;
+        }
     }
 
   public String renderFinalVideo(TimelineState timelineState, String outputPath, int canvasWidth, int canvasHeight, Float fps, Long projectId)
@@ -2538,6 +3519,12 @@ public class VideoEditingService {
 
       // Concatenate all batch files into the final video
       concatenateBatches(tempVideoFiles, outputPath, fps != null ? fps : 30);
+
+      Project project = projectRepository.findById(projectId)
+          .orElseThrow(() -> new RuntimeException("Project not found: " + projectId));
+      project.setProgress(100.0);
+      project.setLastModified(LocalDateTime.now());
+      projectRepository.save(project);
 
     } finally {
       // Clean up temporary text PNGs
@@ -3864,7 +4851,20 @@ public class VideoEditingService {
     command.add(outputPath);
 
     System.out.println("FFmpeg command for batch: " + String.join(" ", command));
-    executeFFmpegCommand(command);
+
+    double totalDuration = Math.max(
+        timelineState.getSegments().stream().mapToDouble(VideoSegment::getTimelineEndTime).max().orElse(0.0),
+        Math.max(
+            timelineState.getImageSegments().stream().mapToDouble(ImageSegment::getTimelineEndTime).max().orElse(0.0),
+            Math.max(
+                timelineState.getTextSegments().stream().mapToDouble(TextSegment::getTimelineEndTime).max().orElse(0.0),
+                timelineState.getAudioSegments().stream().mapToDouble(AudioSegment::getTimelineEndTime).max().orElse(0.0)
+            )
+        )
+    );
+    int totalBatches = (int) Math.ceil(totalDuration / 8.0);
+    int batchIndex = (int) (batchStart / 8.0);
+    executeFFmpegCommand(command, projectId, batchStart, batchDuration, totalDuration, batchIndex);
   }
 
   private void concatenateBatches(List<String> tempVideoFiles, String outputPath, float fps)

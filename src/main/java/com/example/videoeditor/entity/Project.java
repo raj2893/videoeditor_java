@@ -60,6 +60,16 @@ public class Project {
     @Column(name = "element_json", columnDefinition = "TEXT")
     private String elementJson;
 
+    private Double progress;
+
+    public Double getProgress() {
+        return progress;
+    }
+
+    public void setProgress(Double progress) {
+        this.progress = progress;
+    }
+
     // Getters and setters
     public String getElementJson() {
         return elementJson;

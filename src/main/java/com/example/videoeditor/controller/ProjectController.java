@@ -19,6 +19,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.File;
 import java.io.IOException;
@@ -129,6 +130,24 @@ public class ProjectController {
 
         // Return just the filename as in your original implementation
         return ResponseEntity.ok(exportedVideo.getName());
+    }
+
+    @GetMapping("/{projectId}/export/progress")
+    public ResponseEntity<Map<String, Object>> getExportProgress(
+        @PathVariable Long projectId,
+        @RequestParam String sessionId,
+        @RequestHeader(value = "Authorization", required = false) String token) {
+        Project project = projectRepository.findById(projectId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found: " + sessionId));
+
+        if (!project.getId().equals(projectId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Session does not match project");
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("status", project.getStatus());
+        response.put("progress", project.getProgress() != null ? project.getProgress() : 0.0);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{projectId}")
@@ -766,6 +785,201 @@ public class ProjectController {
         }
     }
 
+    @PutMapping("/{projectId}/update-multiple-text")
+    public ResponseEntity<?> updateMultipleTextSegments(
+        @RequestHeader("Authorization") String token,
+        @PathVariable Long projectId,
+        @RequestParam String sessionId,
+        @RequestBody Map<String, Object> request) {
+        try {
+            User user = getUserFromToken(token);
+
+            // Extract segmentIds as a list
+            @SuppressWarnings("unchecked")
+            List<String> segmentIds = (List<String>) request.get("segmentIds");
+            String text = (String) request.get("text");
+            String fontFamily = (String) request.get("fontFamily");
+            Double scale = request.containsKey("scale") ? Double.valueOf(request.get("scale").toString()) : null;
+            String fontColor = (String) request.get("fontColor");
+            String backgroundColor = (String) request.get("backgroundColor");
+            Integer positionX = request.containsKey("positionX") ? Integer.valueOf(request.get("positionX").toString()) : null;
+            Integer positionY = request.containsKey("positionY") ? Integer.valueOf(request.get("positionY").toString()) : null;
+            Double opacity = request.containsKey("opacity") ? Double.valueOf(request.get("opacity").toString()) : null;
+            Double timelineStartTime = request.containsKey("timelineStartTime") ? Double.valueOf(request.get("timelineStartTime").toString()) : null;
+            Double timelineEndTime = request.containsKey("timelineEndTime") ? Double.valueOf(request.get("timelineEndTime").toString()) : null;
+            Integer layer = request.containsKey("layer") ? Integer.valueOf(request.get("layer").toString()) : null;
+            String alignment = (String) request.get("alignment");
+            Double rotation = request.containsKey("rotation") ? Double.valueOf(request.get("rotation").toString()) : null;
+            @SuppressWarnings("unchecked")
+            Map<String, List<Map<String, Object>>> keyframes = request.containsKey("keyframes") ? (Map<String, List<Map<String, Object>>>) request.get("keyframes") : null;
+
+            // Background parameters
+            Double backgroundOpacity = request.containsKey("backgroundOpacity") ? Double.valueOf(request.get("backgroundOpacity").toString()) : null;
+            Integer backgroundBorderWidth = request.containsKey("backgroundBorderWidth") ? Integer.valueOf(request.get("backgroundBorderWidth").toString()) : null;
+            String backgroundBorderColor = (String) request.get("backgroundBorderColor");
+            Integer backgroundH = request.containsKey("backgroundH") ? Integer.valueOf(request.get("backgroundH").toString()) : null;
+            Integer backgroundW = request.containsKey("backgroundW") ? Integer.valueOf(request.get("backgroundW").toString()) : null;
+            Integer backgroundBorderRadius = request.containsKey("backgroundBorderRadius") ? Integer.valueOf(request.get("backgroundBorderRadius").toString()) : null;
+
+            // Text border parameters
+            String textBorderColor = (String) request.get("textBorderColor");
+            Integer textBorderWidth = request.containsKey("textBorderWidth") ? Integer.valueOf(request.get("textBorderWidth").toString()) : null;
+            Double textBorderOpacity = request.containsKey("textBorderOpacity") ? Double.valueOf(request.get("textBorderOpacity").toString()) : null;
+
+            // Letter spacing parameter
+            Double letterSpacing = request.containsKey("letterSpacing") ? Double.valueOf(request.get("letterSpacing").toString()) : null;
+
+            // Line spacing parameter
+            Double lineSpacing = request.containsKey("lineSpacing") ? Double.valueOf(request.get("lineSpacing").toString()) : null;
+
+            // Parse keyframes
+            Map<String, List<Keyframe>> parsedKeyframes = null;
+            if (keyframes != null) {
+                parsedKeyframes = new HashMap<>();
+                for (Map.Entry<String, List<Map<String, Object>>> entry : keyframes.entrySet()) {
+                    String property = entry.getKey();
+                    List<Keyframe> kfList = new ArrayList<>();
+                    for (Map<String, Object> kfData : entry.getValue()) {
+                        double time = Double.valueOf(kfData.get("time").toString());
+                        Object value = kfData.get("value");
+                        String interpolation = (String) kfData.getOrDefault("interpolationType", "linear");
+                        // Validate keyframe value based on property
+                        if (property.equals("rotation") && value instanceof Number && !Double.isFinite(((Number) value).doubleValue())) {
+                            return ResponseEntity.badRequest().body("Rotation keyframe value must be a valid number");
+                        }
+                        kfList.add(new Keyframe(time, value, interpolation));
+                    }
+                    parsedKeyframes.put(property, kfList);
+                }
+            }
+
+            // Validation
+            if (segmentIds == null || segmentIds.isEmpty()) {
+                return ResponseEntity.badRequest().body("Missing or empty required parameter: segmentIds");
+            }
+            // Allow text to be null if not updating text content (e.g., for styling updates)
+            if (text != null && text.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Text content cannot be empty if provided");
+            }
+            if (opacity != null && (opacity < 0 || opacity > 1)) {
+                return ResponseEntity.badRequest().body("Opacity must be between 0 and 1");
+            }
+            if (alignment != null && !Arrays.asList("left", "right", "center").contains(alignment)) {
+                return ResponseEntity.badRequest().body("Alignment must be 'left', 'right', or 'center'");
+            }
+            if (rotation != null && !Double.isFinite(rotation)) {
+                return ResponseEntity.badRequest().body("Rotation must be a valid number");
+            }
+            if (backgroundOpacity != null && (backgroundOpacity < 0 || backgroundOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Background opacity must be between 0 and 1");
+            }
+            if (backgroundBorderWidth != null && backgroundBorderWidth < 0) {
+                return ResponseEntity.badRequest().body("Background border width must be non-negative");
+            }
+            if (backgroundH != null && backgroundH < 0) {
+                return ResponseEntity.badRequest().body("Background height must be non-negative");
+            }
+            if (backgroundW != null && backgroundW < 0) {
+                return ResponseEntity.badRequest().body("Background width must be non-negative");
+            }
+            if (backgroundBorderRadius != null && backgroundBorderRadius < 0) {
+                return ResponseEntity.badRequest().body("Background border radius must be non-negative");
+            }
+            if (textBorderWidth != null && textBorderWidth < 0) {
+                return ResponseEntity.badRequest().body("Text border width must be non-negative");
+            }
+            if (textBorderOpacity != null && (textBorderOpacity < 0 || textBorderOpacity > 1)) {
+                return ResponseEntity.badRequest().body("Text border opacity must be between 0 and 1");
+            }
+            if (letterSpacing != null && letterSpacing < 0) {
+                return ResponseEntity.badRequest().body("Letter spacing must be non-negative");
+            }
+            if (lineSpacing != null && lineSpacing < 0) {
+                return ResponseEntity.badRequest().body("Line spacing must be non-negative");
+            }
+
+            // Call the service method
+            videoEditingService.updateMultipleTextSegments(
+                sessionId, segmentIds, text, fontFamily, scale,
+                fontColor, backgroundColor, positionX, positionY, opacity,
+                timelineStartTime, timelineEndTime, layer, alignment,
+                backgroundOpacity, backgroundBorderWidth, backgroundBorderColor,
+                backgroundH, backgroundW, backgroundBorderRadius,
+                textBorderColor, textBorderWidth, textBorderOpacity,
+                letterSpacing, lineSpacing, rotation, parsedKeyframes);
+
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error updating multiple text segments: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/{projectId}/subtitles")
+    public ResponseEntity<?> addAutoSubtitlesToTimeline(
+        @RequestHeader("Authorization") String token,
+        @PathVariable Long projectId,
+        @RequestParam String sessionId,
+        @RequestBody(required = false) Map<String, Object> subtitleProperties) {
+        try {
+            User user = getUserFromToken(token);
+            Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+
+            if (!project.getUser().getId().equals(user.getId())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Unauthorized to modify this project");
+            }
+
+            // Call the service method to add subtitles
+            videoEditingService.addAutoSubtitlesToTimeline(sessionId, projectId, subtitleProperties);
+
+            // Retrieve the updated timeline state
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            List<TextSegment> addedSubtitles = timelineState.getTextSegments().stream()
+                .filter(t -> t.getLayer() == videoEditingService.findTopmostLayer(timelineState))
+                .collect(Collectors.toList());
+
+            // Prepare response
+            List<Map<String, Object>> subtitleData = addedSubtitles.stream().map(t -> {
+                Map<String, Object> data = new HashMap<>();
+                data.put("textSegmentId", t.getId());
+                data.put("text", t.getText());
+                data.put("timelineStartTime", t.getTimelineStartTime());
+                data.put("timelineEndTime", t.getTimelineEndTime());
+                data.put("layer", t.getLayer());
+                data.put("positionX", t.getPositionX());
+                data.put("positionY", t.getPositionY());
+                data.put("fontFamily", t.getFontFamily());
+                data.put("fontColor", t.getFontColor());
+                data.put("backgroundColor", t.getBackgroundColor());
+                data.put("backgroundOpacity", t.getBackgroundOpacity());
+                data.put("scale", t.getScale());
+                data.put("alignment", t.getAlignment());
+                data.put("backgroundH", t.getBackgroundH());
+                data.put("backgroundW", t.getBackgroundW());
+                data.put("backgroundBorderRadius", t.getBackgroundBorderRadius());
+                data.put("letterSpacing", t.getLetterSpacing());
+                data.put("lineSpacing", t.getLineSpacing());
+                data.put("rotation", t.getRotation());
+                data.put("isSubtitle", t.isSubtitle());
+                return data;
+            }).collect(Collectors.toList());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Subtitles added successfully");
+            response.put("subtitles", subtitleData);
+
+            return ResponseEntity.ok(response);
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error adding subtitles: " + e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(e.getMessage());
+        }
+    }
+
     //    AUDIO FUNCTIONALITY .......................................................................................
 
     @PostMapping("/{projectId}/upload-audio")
@@ -959,6 +1173,84 @@ public class ProjectController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error updating audio segment: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/{projectId}/generate-ai-audio")
+    public ResponseEntity<?> generateAiAudioToTimeline(
+        @RequestHeader("Authorization") String token,
+        @PathVariable Long projectId,
+        @RequestParam String sessionId,
+        @RequestBody Map<String, Object> request) {
+        try {
+            User user = getUserFromToken(token);
+
+            // Extract parameters from the request
+            String text = (String) request.get("text");
+            String voiceName = (String) request.get("voiceName");
+            String languageCode = (String) request.get("languageCode");
+            Integer layer = request.get("layer") != null ? ((Number) request.get("layer")).intValue() : -1;
+            Double timelineStartTime = request.get("timelineStartTime") != null ?
+                ((Number) request.get("timelineStartTime")).doubleValue() : 0.0;
+            Double timelineEndTime = request.get("timelineEndTime") != null ?
+                ((Number) request.get("timelineEndTime")).doubleValue() : null;
+
+            // Validate parameters
+            if (text == null || text.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Text is required and cannot be empty");
+            }
+            if (voiceName == null || voiceName.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Voice name is required");
+            }
+            if (languageCode == null || languageCode.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Language code is required");
+            }
+            if (layer >= 0) {
+                return ResponseEntity.badRequest().body("Audio layer must be negative (e.g., -1, -2, -3)");
+            }
+            if (timelineStartTime < 0) {
+                return ResponseEntity.badRequest().body("Timeline start time must be non-negative");
+            }
+
+            // Call the service method to generate AI audio and add to timeline
+            videoEditingService.generateTtsAndAddToTimeline(
+                sessionId, projectId, text, voiceName, languageCode, layer, timelineStartTime, timelineEndTime);
+
+            // Retrieve the newly added audio segment from TimelineState
+            TimelineState timelineState = videoEditingService.getTimelineState(sessionId);
+            AudioSegment addedAudioSegment = timelineState.getAudioSegments().stream()
+                .filter(a -> a.getAudioPath().contains(projectId + "_tts_") &&
+                    Math.abs(a.getTimelineStartTime() - timelineStartTime) < 0.001)
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Failed to find added AI audio segment"));
+
+            // Prepare response
+            Map<String, Object> response = new HashMap<>();
+            response.put("audioSegmentId", addedAudioSegment.getId());
+            response.put("layer", addedAudioSegment.getLayer());
+            response.put("timelineStartTime", addedAudioSegment.getTimelineStartTime());
+            response.put("timelineEndTime", addedAudioSegment.getTimelineEndTime());
+            response.put("startTime", addedAudioSegment.getStartTime());
+            response.put("endTime", addedAudioSegment.getEndTime());
+            response.put("volume", addedAudioSegment.getVolume());
+            response.put("audioPath", addedAudioSegment.getAudioPath());
+            response.put("waveformJsonPath", addedAudioSegment.getWaveformJsonPath());
+            response.put("isExtracted", addedAudioSegment.isExtracted());
+            response.put("keyframes", addedAudioSegment.getKeyframes() != null ?
+                addedAudioSegment.getKeyframes() : new HashMap<>());
+
+            return ResponseEntity.ok(response);
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error generating AI audio: " + e.getMessage());
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body("Unauthorized or project not found: " + e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Unexpected error: " + e.getMessage());
         }
     }
 
@@ -1256,6 +1548,46 @@ public class ProjectController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error updating image segment: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/{projectId}/remove-image-background")
+    public ResponseEntity<?> removeImageBackground(
+        @RequestHeader("Authorization") String token,
+        @PathVariable Long projectId,
+        @RequestBody Map<String, String> request
+    ) {
+        try {
+            User user = getUserFromToken(token);
+            String imageFileName = request.get("imageFileName");
+            if (imageFileName == null || imageFileName.isEmpty()) {
+                return ResponseEntity.badRequest().body("Image filename is required");
+            }
+
+            Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found with ID: " + projectId));
+            List<Map<String, String>> images = videoEditingService.getImages(project);
+            Map<String, String> targetImage = images.stream()
+                .filter(img -> img.get("imageFileName").equals(imageFileName))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("No image found with filename: " + imageFileName));
+
+            String inputPath = targetImage.get("imagePath");
+            Project updatedProject = videoEditingService.processImageBackgroundRemoval(user, projectId, inputPath);
+
+            List<Map<String, String>> updatedImages = videoEditingService.getImages(updatedProject);
+            Map<String, String> processedImage = updatedImages.stream()
+                .filter(img -> img.get("imagePath").endsWith("bg_removed_" + imageFileName))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Failed to find processed image"));
+
+            return ResponseEntity.ok(processedImage);
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body("Error processing background removal: " + e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(e.getMessage());
         }
     }
 

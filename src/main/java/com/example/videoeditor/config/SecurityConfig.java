@@ -67,6 +67,8 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("/videos/upload", "/videos/my-videos", "/videos/merge", "/videos/edited-videos","/videos/trim", "/videos/split", "/videos/duration/**").authenticated()
                         .requestMatchers("/projects/{projectId}/images/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
                         .requestMatchers("image/projects/{projectId}/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
+                        .requestMatchers("image/standalone/{userId}/original/{filename}").permitAll()
+                        .requestMatchers("image/standalone/{userId}/processed/{filename}").permitAll()
                         .requestMatchers("elements/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
                         .requestMatchers("/projects/{projectId}/audio/{filename}").permitAll()
                         .requestMatchers("audio/projects/{projectId}/{filename}").permitAll()

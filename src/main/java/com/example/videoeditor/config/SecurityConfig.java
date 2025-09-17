@@ -63,6 +63,7 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/api/global-elements", "/api/global-elements/**").permitAll() // Public access
                         .requestMatchers("/projects/{projectId}/waveforms/{filename}").permitAll()
+                        .requestMatchers("/audio/sole_tts/{userId}/{filename}").permitAll()
                         .requestMatchers("/developer/**").authenticated() // Requires JWT, role checked in JwtFilter
                         .requestMatchers("/videos/upload", "/videos/my-videos", "/videos/merge", "/videos/edited-videos","/videos/trim", "/videos/split", "/videos/duration/**").authenticated()
                         .requestMatchers("/projects/{projectId}/images/{filename}").permitAll() // Place this BEFORE the general /projects/** rule

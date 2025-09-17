@@ -289,4 +289,37 @@ public class ServeController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
+
+    @GetMapping("audio/sole_tts/{userId}/{filename:.+}")
+    public ResponseEntity<Resource> serveTTSAudio(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String filename) {
+        try {
+
+            // Define TTS audio file path
+            String ttsAudioDirectory = "audio/sole_tts/" + userId + "/";
+            File audioFile = new File(ttsAudioDirectory, filename);
+
+            // Verify file existence
+            if (!audioFile.exists() || !audioFile.isFile()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            Resource resource = new FileSystemResource(audioFile);
+            String contentType = projectController.determineAudioContentType(filename);
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                .body(resource);
+        } catch (RuntimeException e) {
+            System.err.println("Error serving TTS audio: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving TTS audio: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
 }

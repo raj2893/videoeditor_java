@@ -322,4 +322,92 @@ public class ServeController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
+
+    @GetMapping("videos/filtered/{userId}/original/{filename:.+}")
+    public ResponseEntity<Resource> serveFilteredOriginal(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String filename) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                user = projectController.getUserFromToken(token);
+            }
+
+            // If token is provided, verify user has access
+            if (user != null && !user.getId().equals(userId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define filtered original video file path
+            String filteredDirectory = "videos/filtered/" + userId + "/original/";
+            File videoFile = new File(filteredDirectory, filename);
+
+            // Verify file existence
+            if (!videoFile.exists() || !videoFile.isFile()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Create resource and set content type
+            Resource resource = new FileSystemResource(videoFile);
+            String contentType = "video/mp4"; // Assuming MP4 for filtered videos
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                .body(resource);
+        } catch (RuntimeException e) {
+            System.err.println("Error serving filtered original video: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving filtered original video: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    @GetMapping("/speed-videos/{userId}/{fileName:.+}")
+    public ResponseEntity<Resource> serveSpeedVideo(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String fileName) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                user = projectController.getUserFromToken(token);
+            }
+
+            // If token is provided, verify user has access
+            if (user != null && !user.getId().equals(userId)) {
+                System.err.println("Unauthorized access to speed video: userId=" + user.getId() + ", requested userId=" + userId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define speed video file path
+            String speedVideoDirectory = "D:/Backend/videoEditor-main/speed-videos/" + userId + "/";
+            File videoFile = new File(speedVideoDirectory, fileName);
+
+            // Verify file existence
+            if (!videoFile.exists() || !videoFile.isFile()) {
+                System.err.println("Speed video file not found: " + speedVideoDirectory + fileName);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Create resource and set content type
+            Resource resource = new FileSystemResource(videoFile);
+            String contentType = "video/mp4";
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + fileName + "\"")
+                .body(resource);
+        } catch (RuntimeException e) {
+            System.err.println("Error serving speed video: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving speed video: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
 }

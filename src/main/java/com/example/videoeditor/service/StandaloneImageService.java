@@ -58,7 +58,8 @@ public class StandaloneImageService {
     File inputFile = new File(originalDir, imageFile.getOriginalFilename());
     imageFile.transferTo(inputFile);
 
-    String outputFileName = "bg_removed_" + inputFile.getName();
+    String originalFileName = imageFile.getOriginalFilename();
+    String outputFileName = "bg_removed_" + originalFileName.substring(0, originalFileName.lastIndexOf('.')) + ".png";
     File outputFile = new File(processedDir, outputFileName);
 
     // Build python command

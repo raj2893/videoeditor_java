@@ -66,6 +66,8 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("/audio/sole_tts/{userId}/{filename}").permitAll()
                         .requestMatchers("/developer/**").authenticated() // Requires JWT, role checked in JwtFilter
                         .requestMatchers("/videos/upload", "/videos/my-videos", "/videos/merge", "/videos/edited-videos","/videos/trim", "/videos/split", "/videos/duration/**").authenticated()
+                        .requestMatchers("videos/filtered/{userId}/original/{filename}").permitAll()
+                        .requestMatchers("/speed-videos/{userId}/{fileName}").permitAll()
                         .requestMatchers("/projects/{projectId}/images/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
                         .requestMatchers("image/projects/{projectId}/{filename}").permitAll() // Place this BEFORE the general /projects/** rule
                         .requestMatchers("image/standalone/{userId}/original/{filename}").permitAll()

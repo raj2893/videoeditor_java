@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -32,6 +34,7 @@ public class PodcastClipService {
     private final PodcastClipMediaRepository podcastClipMediaRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final ResourceLoader resourceLoader;
 
     @Value("${app.base-dir:D:\\Backend\\videoEditor-main}")
     private String baseDir;
@@ -48,15 +51,19 @@ public class PodcastClipService {
     @Value("${app.whisper-script-path:D:\\Backend\\videoEditor-main\\scripts\\whisper_transcribe.py}")
     private String whisperScriptPath;
 
+    @Value("${app.background-image-path:classpath:assets/podcast_background.png}")
+    private String backgroundImagePath;
+
     public PodcastClipService(
-            JwtUtil jwtUtil,
-            PodcastClipMediaRepository podcastClipMediaRepository,
-            UserRepository userRepository,
-            ObjectMapper objectMapper) {
+        JwtUtil jwtUtil,
+        PodcastClipMediaRepository podcastClipMediaRepository,
+        UserRepository userRepository,
+        ObjectMapper objectMapper, ResourceLoader resourceLoader) {
         this.jwtUtil = jwtUtil;
         this.podcastClipMediaRepository = podcastClipMediaRepository;
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
+        this.resourceLoader = resourceLoader;
     }
 
     public PodcastClipMedia uploadMedia(User user, MultipartFile mediaFile, String youtubeUrl) throws IOException {
@@ -74,14 +81,12 @@ public class PodcastClipService {
         }
 
         if (youtubeUrl != null && !youtubeUrl.isEmpty()) {
-            // Validate YouTube URL
             if (!youtubeUrl.matches("^(https?://)?(www\\.)?(youtube\\.com|youtu\\.be)/.+")) {
                 logger.error("Invalid YouTube URL: {}", youtubeUrl);
                 throw new IllegalArgumentException("Invalid YouTube URL");
             }
             media.setSourceUrl(youtubeUrl);
             media.setOriginalFileName("youtube_" + UUID.randomUUID().toString() + ".mp4");
-            // Temp path for download later
             media.setOriginalPath("podcast_clips/" + user.getId() + "/original/" + media.getOriginalFileName());
             media.setOriginalCdnUrl("http://localhost:8080/" + media.getOriginalPath());
         } else if (mediaFile != null && !mediaFile.isEmpty()) {
@@ -115,10 +120,10 @@ public class PodcastClipService {
         logger.info("Processing podcast clips for user: {}, mediaId: {}", user.getId(), mediaId);
 
         PodcastClipMedia media = podcastClipMediaRepository.findById(mediaId)
-                .orElseThrow(() -> {
-                    logger.error("Media not found for id: {}", mediaId);
-                    return new IllegalArgumentException("Media not found");
-                });
+            .orElseThrow(() -> {
+                logger.error("Media not found for id: {}", mediaId);
+                return new IllegalArgumentException("Media not found");
+            });
 
         if (!media.getUser().getId().equals(user.getId())) {
             logger.error("User {} not authorized to process clips for media {}", user.getId(), mediaId);
@@ -131,7 +136,7 @@ public class PodcastClipService {
 
         // Prepare directories
         String tempDirPath = baseDir + File.separator + "podcast_clips" + File.separator + user.getId() + File.separator + "temp";
-        String processedDirPath = baseDir + File.separator + "podcast_clips" + File.separator + user.getId() + File.separator + "processed";
+        String processedDirPath = baseDir + File.separator + "podcast_clips" + File.separator + user.getId() + File.separator + "processed" + File.separator + "media_" + mediaId;
         File tempDir = new File(tempDirPath);
         File processedDir = new File(processedDirPath);
         if (!tempDir.exists() && !tempDir.mkdirs()) {
@@ -147,9 +152,30 @@ public class PodcastClipService {
             throw new IOException("Failed to create processed directory");
         }
 
+        // Validate background image exists
+        File backgroundImage;
+        try {
+            Resource resource = resourceLoader.getResource(backgroundImagePath);
+            if (!resource.exists()) {
+                logger.error("Background image resource not found: {}", backgroundImagePath);
+                media.setStatus("FAILED");
+                podcastClipMediaRepository.save(media);
+                throw new IOException("Background image not found in resources: " + backgroundImagePath);
+            }
+
+            // Copy resource to temp directory for FFmpeg to access
+            backgroundImage = new File(tempDirPath + File.separator + "background.png");
+            Files.copy(resource.getInputStream(), backgroundImage.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            logger.info("Extracted background image to: {}", backgroundImage.getAbsolutePath());
+        } catch (IOException e) {
+            logger.error("Failed to load background image: {}", e.getMessage());
+            media.setStatus("FAILED");
+            podcastClipMediaRepository.save(media);
+            throw new IOException("Failed to load background image: " + e.getMessage(), e);
+        }
+
         File inputFile;
         if (media.getSourceUrl() != null) {
-            // Download YouTube video
             String tempFileName = media.getOriginalFileName();
             String tempFilePath = tempDirPath + File.separator + tempFileName;
             inputFile = new File(tempFilePath);
@@ -167,7 +193,6 @@ public class PodcastClipService {
 
         validateInputFile(inputFile);
 
-        // Transcribe audio
         List<Map<String, Object>> segments = transcribeAudio(inputFile, mediaId);
         if (segments.isEmpty()) {
             logger.error("No transcription segments generated for mediaId: {}", mediaId);
@@ -176,7 +201,6 @@ public class PodcastClipService {
             throw new IOException("Transcription failed");
         }
 
-        // Score and select clips
         List<Map<String, Object>> selectedClips = selectViralClips(segments, mediaId);
         if (selectedClips.isEmpty()) {
             logger.error("No viral clips selected for mediaId: {}", mediaId);
@@ -185,19 +209,18 @@ public class PodcastClipService {
             throw new IOException("No viral clips selected");
         }
 
-        // Generate clips
-        List<Map<String, Object>> clipMetadata = generateClips(inputFile, selectedClips, processedDirPath, user.getId(), mediaId);
+        List<Map<String, Object>> clipMetadata = generateClips(inputFile, selectedClips, processedDirPath, user.getId(), mediaId, backgroundImage);
         media.setClipsJson(objectMapper.writeValueAsString(clipMetadata));
         media.setStatus("SUCCESS");
         media.setProgress(100.0);
         podcastClipMediaRepository.save(media);
 
-        // Clean up temp file if YouTube download
         if (media.getSourceUrl() != null) {
             Files.deleteIfExists(inputFile.toPath());
         }
 
         logger.info("Successfully processed clips for user: {}, mediaId: {}", user.getId(), mediaId);
+        Files.deleteIfExists(backgroundImage.toPath());
         return media;
     }
 
@@ -208,18 +231,18 @@ public class PodcastClipService {
     public User getUserFromToken(String token) {
         String email = jwtUtil.extractEmail(token.substring(7));
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> {
-                    logger.error("User not found for email extracted from token");
-                    return new RuntimeException("User not found");
-                });
+            .orElseThrow(() -> {
+                logger.error("User not found for email extracted from token");
+                return new RuntimeException("User not found");
+            });
     }
 
     private void downloadYouTubeVideo(String youtubeUrl, String outputPath) throws IOException, InterruptedException {
         List<String> command = Arrays.asList(
-                ytDlpPath,
-                "-f", "best[height<=720]", // Limit to 720p for speed
-                youtubeUrl,
-                "-o", outputPath
+            ytDlpPath,
+            "-f", "best[height<=720]",
+            youtubeUrl,
+            "-o", outputPath
         );
 
         ProcessBuilder pb = new ProcessBuilder(command);
@@ -242,12 +265,12 @@ public class PodcastClipService {
 
     private void validateInputFile(File inputFile) throws IOException, InterruptedException {
         List<String> command = Arrays.asList(
-                ffmpegPath.replace("ffmpeg.exe", "ffprobe.exe"),
-                "-i", inputFile.getAbsolutePath(),
-                "-show_streams",
-                "-show_format",
-                "-print_format", "json",
-                "-v", "quiet"
+            ffmpegPath.replace("ffmpeg.exe", "ffprobe.exe"),
+            "-i", inputFile.getAbsolutePath(),
+            "-show_streams",
+            "-show_format",
+            "-print_format", "json",
+            "-v", "quiet"
         );
 
         ProcessBuilder pb = new ProcessBuilder(command);
@@ -323,13 +346,12 @@ public class PodcastClipService {
             while ((line = reader.readLine()) != null) {
                 output.append(line).append("\n");
                 if (line.trim().startsWith("[")) {
-                    inJson = true; // Start of JSON array
+                    inJson = true;
                 }
                 if (inJson) {
                     jsonOutput.append(line).append("\n");
                 }
             }
-            // Complete JSON if it ends with a closing bracket
             if (inJson && jsonOutput.toString().trim().endsWith("]")) {
                 jsonOutput = new StringBuilder(jsonOutput.toString().trim());
             }
@@ -356,12 +378,10 @@ public class PodcastClipService {
     }
 
     private List<Map<String, Object>> selectViralClips(List<Map<String, Object>> segments, Long mediaId) {
-        // Simple rule-based scoring (extendable with NLP later)
         List<Map<String, Object>> scoredClips = new ArrayList<>();
-        double targetDuration = 35.0; // Average of 30-40 seconds
-        int targetClipCount = 15; // Average of 10-20 clips
+        double targetDuration = 35.0;
+        int targetClipCount = 15;
 
-        // Group segments into ~35-second windows
         List<Map<String, Object>> candidateClips = new ArrayList<>();
         double currentStart = 0.0;
         StringBuilder currentText = new StringBuilder();
@@ -404,17 +424,14 @@ public class PodcastClipService {
             }
         }
 
-        // Sort by virality score and select top 15
         candidateClips.sort((a, b) -> Double.compare((double) b.get("viralityScore"), (double) a.get("viralityScore")));
         return candidateClips.subList(0, Math.min(targetClipCount, candidateClips.size()));
     }
 
     private double calculateViralityScore(String text) {
-        // Simple rule-based scoring (extend with NLP later)
         double score = 0.0;
         text = text.toLowerCase();
 
-        // Keywords for emotional/engaging content
         String[] positiveKeywords = {"amazing", "shocking", "incredible", "secret", "why", "how"};
         String[] negativeKeywords = {"worst", "fail", "disaster", "controversial"};
         for (String keyword : positiveKeywords) {
@@ -424,17 +441,15 @@ public class PodcastClipService {
             if (text.contains(keyword)) score += 15.0;
         }
 
-        // Short sentences are punchier
         int sentenceCount = text.split("[.!?]").length;
         if (sentenceCount <= 3) score += 20.0;
 
-        // Questions drive engagement
         if (text.contains("?")) score += 15.0;
 
         return Math.min(score, 100.0);
     }
 
-    private List<Map<String, Object>> generateClips(File inputFile, List<Map<String, Object>> clips, String processedDirPath, Long userId, Long mediaId) throws IOException, InterruptedException {
+    private List<Map<String, Object>> generateClips(File inputFile, List<Map<String, Object>> clips, String processedDirPath, Long userId, Long mediaId, File backgroundImage) throws IOException, InterruptedException {
         List<Map<String, Object>> clipMetadata = new ArrayList<>();
         int clipIndex = 0;
 
@@ -445,25 +460,32 @@ public class PodcastClipService {
             double viralityScore = (double) clip.get("viralityScore");
             String text = (String) clip.get("text");
 
-            String outputFileName = "clip_" + clipId + ".mp4";
+            String outputFileName = "media_" + mediaId + "_clip_" + clipIndex + "_" + clipId.substring(0, 8) + ".mp4";
             String outputFilePath = processedDirPath + File.separator + outputFileName;
 
-            List<String> command = Arrays.asList(
-                    ffmpegPath,
-                    "-i", inputFile.getAbsolutePath(),
-                    "-ss", String.valueOf(startTime),
-                    "-t", String.valueOf(duration),
-                    "-c:v", "libx264",
-                    "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-                    "-y", outputFilePath
-            );
+            List<String> command = new ArrayList<>(Arrays.asList(
+                ffmpegPath,
+                "-loop", "1",
+                "-i", backgroundImage.getAbsolutePath(),
+                "-i", inputFile.getAbsolutePath(),
+                "-filter_complex",
+                "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,trim=duration=" + String.valueOf(duration) + ",setpts=PTS-STARTPTS[bg];" +
+                    "[1:v]trim=start=" + startTime + ":end=" + (startTime + duration) + ",setpts=PTS-STARTPTS,scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black@0[fg];" +
+                    "[bg][fg]overlay=(W-w)/2:(H-h)/2[vout];" +
+                    "[1:a]atrim=start=" + startTime + ":end=" + (startTime + duration) + ",asetpts=PTS-STARTPTS[aout]",
+                "-map", "[vout]",
+                "-map", "[aout]",
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-shortest",
+                "-y", outputFilePath
+            ));
 
             executeFFmpegCommand(command, mediaId, clipIndex, duration);
             clipIndex++;
 
-            String processedPath = "podcast_clips/" + userId + "/processed/" + outputFileName;
+            String processedPath = "podcast_clips/" + userId + "/processed/media_" + mediaId + "/" + outputFileName;
             String processedCdnUrl = "http://localhost:8080/" + processedPath;
 
             Map<String, Object> metadata = new HashMap<>();
@@ -491,7 +513,6 @@ public class PodcastClipService {
         ProcessBuilder processBuilder = new ProcessBuilder(updatedCommand);
         processBuilder.redirectErrorStream(true);
 
-        // Corrected temp directory path to include userId
         String tempDirPath = baseDir + File.separator + "podcast_clips" + File.separator + media.getUser().getId() + File.separator + "temp";
         File tempDir = new File(tempDirPath);
         if (!tempDir.exists() && !tempDir.mkdirs()) {

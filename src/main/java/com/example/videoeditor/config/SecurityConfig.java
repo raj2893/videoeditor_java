@@ -60,6 +60,7 @@ public class SecurityConfig implements WebMvcConfigurer {
                 }))
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/emails/**").permitAll()
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/api/global-elements", "/api/global-elements/**").permitAll() // Public access
                         .requestMatchers("/projects/{projectId}/waveforms/{filename}").permitAll()
@@ -78,6 +79,9 @@ public class SecurityConfig implements WebMvcConfigurer {
                         .requestMatchers("audio/projects/{projectId}/extracted/{filename}").permitAll()
                         .requestMatchers("/projects/{projectId}/videos/{filename}").permitAll()
                         .requestMatchers("videos/projects/{projectId}/{filename}").permitAll()
+                        .requestMatchers("subtitles/{userId}/original/{filename}").permitAll()
+                        .requestMatchers("aspect_ratio/{userId}/original/{filename}").permitAll()
+                        .requestMatchers("image_editor/{userId}/assets/{filename}").permitAll()
                         .requestMatchers("/projects/**", "/projects/{projectId}/add-to-timeline").authenticated()
                         .requestMatchers(HttpMethod.GET, "/videos/edited-videos/**").permitAll()
                         .requestMatchers("/videos/**", "/videos/*").permitAll()  // ✅ Allow public video access

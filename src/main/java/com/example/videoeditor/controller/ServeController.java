@@ -410,4 +410,151 @@ public class ServeController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
+
+    @GetMapping("subtitles/{userId}/original/{name:.+}")
+    public ResponseEntity<Resource> serveSubtitleFile(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String name) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                user = projectController.getUserFromToken(token);
+            }
+
+            // If token is provided, verify user has access
+            if (user != null && !user.getId().equals(userId)) {
+                System.err.println("Unauthorized access to subtitle file: userId=" + user.getId() + ", requested userId=" + userId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define subtitle file path
+            String subtitleDirectory = "subtitles/" + userId + "/original/";
+            File subtitleFile = new File(subtitleDirectory, name);
+
+            // Verify file existence
+            if (!subtitleFile.exists() || !subtitleFile.isFile()) {
+                System.err.println("Subtitle file not found: " + subtitleDirectory + name);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Create resource
+            Resource resource = new FileSystemResource(subtitleFile);
+
+            // Determine content type (most likely text/vtt or text/plain)
+            String contentType = "text/vtt";
+            if (name.endsWith(".srt")) {
+                contentType = "application/x-subrip";
+            } else if (name.endsWith(".txt")) {
+                contentType = "text/plain";
+            }
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + name + "\"")
+                .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving subtitle file: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving subtitle file: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    @GetMapping("aspect_ratio/{userId}/original/{filename:.+}")
+    public ResponseEntity<Resource> serveAspectRatioFile(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String filename) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                user = projectController.getUserFromToken(token);
+            }
+
+            // If token is provided, verify user has access
+            if (user != null && !user.getId().equals(userId)) {
+                System.err.println("Unauthorized access to aspect ratio file: userId=" + user.getId() + ", requested userId=" + userId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define aspect ratio file path
+            String aspectRatioDirectory = "aspect_ratio/" + userId + "/original/";
+            File aspectRatioFile = new File(aspectRatioDirectory, filename);
+
+            // Verify file existence
+            if (!aspectRatioFile.exists() || !aspectRatioFile.isFile()) {
+                System.err.println("Aspect ratio file not found: " + aspectRatioDirectory + filename);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Create resource
+            Resource resource = new FileSystemResource(aspectRatioFile);
+
+            // Determine content type dynamically
+            String contentType = projectController.determineContentType(filename);
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving aspect ratio file: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving aspect ratio file: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    @GetMapping("image_editor/{userId}/assets/{filename:.+}")
+    public ResponseEntity<Resource> serveImageEditorAsset(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String filename) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                user = projectController.getUserFromToken(token);
+            }
+
+            // If token is provided, verify user has access
+            if (user != null && !user.getId().equals(userId)) {
+                System.err.println("Unauthorized access to image editor asset: userId=" + user.getId() + ", requested userId=" + userId);
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            // Define asset file path
+            String assetsDirectory = "image_editor/" + userId + "/assets/";
+            File assetFile = new File(assetsDirectory, filename);
+
+            // Verify file existence
+            if (!assetFile.exists() || !assetFile.isFile()) {
+                System.err.println("Image editor asset not found: " + assetsDirectory + filename);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Create resource and determine content type
+            Resource resource = new FileSystemResource(assetFile);
+            String contentType = projectController.determineContentType(filename);
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving image editor asset: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving image editor asset: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
 }

@@ -25,6 +25,8 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 public class PodcastClipService {
@@ -213,7 +215,21 @@ public class PodcastClipService {
         }
 
         List<Map<String, Object>> clipMetadata = generateClips(inputFile, selectedClips, processedDirPath, user.getId(), mediaId, backgroundImage, segments);
-        media.setClipsJson(objectMapper.writeValueAsString(clipMetadata));
+
+// Create ZIP file
+        String zipFileName = "media_" + mediaId + "_clips.zip";
+        String zipFilePath = processedDirPath + File.separator + zipFileName;
+        createZipOfClips(clipMetadata, processedDirPath, zipFilePath);
+
+// Add ZIP info to media
+        String zipPath = "podcast_clips/" + user.getId() + "/processed/media_" + mediaId + "/" + zipFileName;
+        String zipCdnUrl = "http://localhost:8080/" + zipPath;
+        Map<String, Object> zipInfo = new HashMap<>();
+        zipInfo.put("zipPath", zipPath);
+        zipInfo.put("zipCdnUrl", zipCdnUrl);
+        zipInfo.put("clips", clipMetadata);
+
+        media.setClipsJson(objectMapper.writeValueAsString(zipInfo));
         media.setStatus("SUCCESS");
         media.setProgress(100.0);
         podcastClipMediaRepository.save(media);
@@ -222,9 +238,47 @@ public class PodcastClipService {
             Files.deleteIfExists(inputFile.toPath());
         }
 
-        logger.info("Successfully processed clips for user: {}, mediaId: {}", user.getId(), mediaId);
+        logger.info("Successfully processed clips for user: {}, mediaId: {}, ZIP created at: {}", user.getId(), mediaId, zipFilePath);
         Files.deleteIfExists(backgroundImage.toPath());
         return media;
+    }
+
+    private void createZipOfClips(List<Map<String, Object>> clipMetadata, String processedDirPath, String zipFilePath) throws IOException {
+        logger.info("Creating ZIP file at: {}", zipFilePath);
+
+        try (FileOutputStream fos = new FileOutputStream(zipFilePath);
+             ZipOutputStream zos = new ZipOutputStream(fos)) {
+
+            for (Map<String, Object> clip : clipMetadata) {
+                String processedPath = (String) clip.get("processedPath");
+                String fileName = processedPath.substring(processedPath.lastIndexOf('/') + 1);
+                File clipFile = new File(processedDirPath + File.separator + fileName);
+
+                if (clipFile.exists()) {
+                    try (FileInputStream fis = new FileInputStream(clipFile)) {
+                        ZipEntry zipEntry = new ZipEntry(fileName);
+                        zos.putNextEntry(zipEntry);
+
+                        byte[] buffer = new byte[8192];
+                        int length;
+                        while ((length = fis.read(buffer)) > 0) {
+                            zos.write(buffer, 0, length);
+                        }
+                        zos.closeEntry();
+                    }
+                    logger.debug("Added {} to ZIP", fileName);
+
+                    // Delete the individual clip file after adding to ZIP
+                    if (clipFile.delete()) {
+                        logger.debug("Deleted individual clip: {}", fileName);
+                    } else {
+                        logger.warn("Failed to delete individual clip: {}", fileName);
+                    }
+                }
+            }
+
+            logger.info("ZIP file created successfully with {} clips", clipMetadata.size());
+        }
     }
 
     public List<PodcastClipMedia> getUserPodcastClipMedia(User user) {
@@ -493,6 +547,7 @@ public class PodcastClipService {
 
     private List<SubtitleDTO> generateSubtitlesForClip(List<Map<String, Object>> allSegments, double clipStart, double clipEnd, Long mediaId, int clipIndex) {
         List<SubtitleDTO> clipSubtitles = new ArrayList<>();
+        int maxWordsPerSubtitle = 4; // Maximum 4 words per subtitle
 
         for (Map<String, Object> segment : allSegments) {
             double segStart = (double) segment.get("start");
@@ -501,34 +556,58 @@ public class PodcastClipService {
 
             // Check if segment overlaps with clip
             if (segEnd > clipStart && segStart < clipEnd) {
-                // Adjust timing relative to clip start
-                double relativeStart = Math.max(0, segStart - clipStart);
-                double relativeEnd = Math.min(clipEnd - clipStart, segEnd - clipStart);
+                if (segText == null || segText.trim().isEmpty()) {
+                    continue;
+                }
 
-                if (relativeEnd > relativeStart && segText != null && !segText.trim().isEmpty()) {
-                    SubtitleDTO subtitle = new SubtitleDTO();
-                    subtitle.setId(UUID.randomUUID().toString());
-                    subtitle.setTimelineStartTime(relativeStart);
-                    subtitle.setTimelineEndTime(relativeEnd);
-                    subtitle.setText(segText.trim());
+                // Split segment text into words
+                String[] words = segText.trim().split("\\s+");
+                if (words.length == 0) {
+                    continue;
+                }
 
-                    // Podcast-optimized styling
-                    subtitle.setFontFamily("Arial"); // Use Arial to avoid font warning
-                    subtitle.setFontColor("#FFFFFF");
-                    subtitle.setBackgroundColor("#000000");
-                    subtitle.setBackgroundOpacity(0.85);
-                    subtitle.setPositionX(0);
-                    subtitle.setPositionY(450); // Lower position for podcast
-                    subtitle.setAlignment("center");
-                    subtitle.setScale(1.2); // REDUCED scale - this is key!
-                    subtitle.setBackgroundH(40); // REDUCED
-                    subtitle.setBackgroundW(60); // REDUCED
-                    subtitle.setBackgroundBorderRadius(15);
-                    subtitle.setTextBorderColor("#000000");
-                    subtitle.setTextBorderWidth(2); // REDUCED
-                    subtitle.setTextBorderOpacity(1.0);
+                // Calculate time per word
+                double segmentDuration = segEnd - segStart;
+                double timePerWord = segmentDuration / words.length;
 
-                    clipSubtitles.add(subtitle);
+                // Group words into chunks of maxWordsPerSubtitle
+                for (int i = 0; i < words.length; i += maxWordsPerSubtitle) {
+                    int endIdx = Math.min(i + maxWordsPerSubtitle, words.length);
+                    String chunkText = String.join(" ", Arrays.copyOfRange(words, i, endIdx));
+
+                    // Calculate timing for this chunk
+                    double chunkStart = segStart + (i * timePerWord);
+                    double chunkEnd = segStart + (endIdx * timePerWord);
+
+                    // Adjust timing relative to clip start
+                    double relativeStart = Math.max(0, chunkStart - clipStart);
+                    double relativeEnd = Math.min(clipEnd - clipStart, chunkEnd - clipStart);
+
+                    if (relativeEnd > relativeStart && !chunkText.trim().isEmpty()) {
+                        SubtitleDTO subtitle = new SubtitleDTO();
+                        subtitle.setId(UUID.randomUUID().toString());
+                        subtitle.setTimelineStartTime(relativeStart);
+                        subtitle.setTimelineEndTime(relativeEnd);
+                        subtitle.setText(chunkText.trim());
+
+                        // Podcast-optimized styling
+                        subtitle.setFontFamily("Arial");
+                        subtitle.setFontColor("#FFFFFF");
+                        subtitle.setBackgroundColor("#000000");
+                        subtitle.setBackgroundOpacity(0.85);
+                        subtitle.setPositionX(0);
+                        subtitle.setPositionY(450);
+                        subtitle.setAlignment("center");
+                        subtitle.setScale(1.2);
+                        subtitle.setBackgroundH(40);
+                        subtitle.setBackgroundW(40);
+                        subtitle.setBackgroundBorderRadius(15);
+                        subtitle.setTextBorderColor("#000000");
+                        subtitle.setTextBorderWidth(2);
+                        subtitle.setTextBorderOpacity(1.0);
+
+                        clipSubtitles.add(subtitle);
+                    }
                 }
             }
         }

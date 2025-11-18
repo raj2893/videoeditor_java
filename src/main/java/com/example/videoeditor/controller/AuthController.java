@@ -121,6 +121,13 @@ public class AuthController {
 
     @PostMapping("/google")
     public ResponseEntity<AuthResponse> googleLogin(@RequestBody GoogleAuthRequest request) throws Exception {
+        if (request == null || request.getToken() == null || request.getToken().isEmpty()) {
+            logger.error("GOOGLE LOGIN FAILED: Empty or null token");
+            return ResponseEntity.badRequest()
+                .body(new AuthResponse(null, null, null, "Invalid Google token", false));
+        }
+
+        logger.info("GOOGLE LOGIN: Valid token received, length = {}", request.getToken().length());
         return ResponseEntity.ok(authService.googleLogin(request.getToken()));
     }
 

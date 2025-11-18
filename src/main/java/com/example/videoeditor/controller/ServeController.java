@@ -557,4 +557,95 @@ public class ServeController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
+
+    @GetMapping("image_editor/{userId}/exports/{filename:.+}")
+    public ResponseEntity<Resource> serveImageEditorExport(
+        @RequestHeader(value = "Authorization", required = false) String token,
+        @PathVariable Long userId,
+        @PathVariable String filename) {
+
+        try {
+            User currentUser = null;
+            if (token != null && !token.isEmpty()) {
+                currentUser = projectController.getUserFromToken(token);
+            }
+
+            if (currentUser != null && !currentUser.getId().equals(userId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(null);
+            }
+
+            String exportDirectory = "image_editor/" + userId + "/exports/";
+            File exportFile = new File(exportDirectory, filename);
+
+            if (!exportFile.exists() || !exportFile.isFile()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            Resource resource = new FileSystemResource(exportFile);
+
+            String contentType = projectController.determineContentType(filename);
+            if (contentType == null || contentType.isEmpty()) {
+                contentType = "application/octet-stream"; // safe fallback
+            }
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                // ---- DOWNLOAD ----
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                    "attachment; filename=\"" + filename + "\"")
+                // ---- CORS (required for fetch → blob → download) ----
+                .header(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS,
+                    HttpHeaders.CONTENT_DISPOSITION + ", " + HttpHeaders.CONTENT_TYPE)
+                .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving image-editor export: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Unexpected error serving export: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    @GetMapping("image_editor/elements/{filename:.+}")
+    public ResponseEntity<Resource> serveImageEditorElement(
+        @PathVariable String filename) {
+
+        try {
+            String elementsDirectory = "image_editor/elements/";
+            File elementFile = new File(elementsDirectory, filename);
+
+            if (!elementFile.exists() || !elementFile.isFile()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            Resource resource = new FileSystemResource(elementFile);
+
+            String contentType = projectController.determineContentType(filename);
+            if (contentType == null || contentType.isEmpty()) {
+                contentType = "application/octet-stream"; // safe fallback
+            }
+
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                // ---- DOWNLOAD ----
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                    "attachment; filename=\"" + filename + "\"")
+                // ---- CORS (required for fetch → blob → download) ----
+                .header(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS,
+                    HttpHeaders.CONTENT_DISPOSITION + ", " + HttpHeaders.CONTENT_TYPE)
+                .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving image-editor element: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Unexpected error serving element: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
 }

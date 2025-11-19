@@ -77,6 +77,7 @@ public class SecurityConfig implements WebMvcConfigurer {
             .requestMatchers("/projects/{projectId}/audio/{filename}").permitAll()
             .requestMatchers("audio/projects/{projectId}/{filename}").permitAll()
             .requestMatchers("audio/projects/{projectId}/extracted/{filename}").permitAll()
+            .requestMatchers("AiVoicesDemo/{languageFolder}/{genderFolder}/{humanName}").permitAll()
             .requestMatchers("/projects/{projectId}/videos/{filename}").permitAll()
             .requestMatchers("videos/projects/{projectId}/{filename}").permitAll()
             .requestMatchers("subtitles/{userId}/original/{filename}").permitAll()

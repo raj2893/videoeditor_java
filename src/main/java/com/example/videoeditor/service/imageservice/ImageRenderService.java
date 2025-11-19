@@ -187,22 +187,18 @@ public class ImageRenderService {
         double cropBottom = layer.getCropBottom() != null ? layer.getCropBottom() : 0;
         double cropLeft = layer.getCropLeft() != null ? layer.getCropLeft() : 0;
 
-        // IMPORTANT: layer.width and layer.height are the FINAL visible dimensions
-        // We need to work backwards to get the scaled dimensions before crop
-
-        // Step 1: Calculate what the dimensions would be AFTER scaling but BEFORE cropping
+        // Calculate dimensions
         double cropHorizPercent = cropLeft + cropRight;
         double cropVertPercent = cropTop + cropBottom;
         double scaledWidthBeforeCrop = layer.getWidth() / ((100 - cropHorizPercent) / 100.0);
         double scaledHeightBeforeCrop = layer.getHeight() / ((100 - cropVertPercent) / 100.0);
 
-        // Step 2: Scale the image first
+        // Scale the image
         command.add("-resize");
         command.add(((int)Math.round(scaledWidthBeforeCrop)) + "x" + ((int)Math.round(scaledHeightBeforeCrop)) + "!");
 
-        // Step 3: Apply crop (as percentages of the SCALED image)
+        // Apply crop
         if (cropTop > 0 || cropRight > 0 || cropBottom > 0 || cropLeft > 0) {
-            // Calculate crop offsets and dimensions on the scaled image
             int cropX = (int)Math.round((cropLeft / 100.0) * scaledWidthBeforeCrop);
             int cropY = (int)Math.round((cropTop / 100.0) * scaledHeightBeforeCrop);
             int cropW = (int)Math.round(scaledWidthBeforeCrop * (1 - (cropLeft + cropRight) / 100.0));
@@ -213,13 +209,13 @@ public class ImageRenderService {
             command.add("+repage");
         }
 
-        // Apply rotation
+        // **FIXED: Rotation without extent - let it expand naturally**
         if (layer.getRotation() != null && layer.getRotation() != 0) {
             command.add("-background");
             command.add("transparent");
             command.add("-rotate");
             command.add(String.valueOf(layer.getRotation()));
-            command.add("+repage");
+            // Don't use +repage here - we need the virtual canvas info
         }
 
         // Apply opacity
@@ -262,8 +258,26 @@ public class ImageRenderService {
 
         String outputPath = tempDirPath + File.separator + "layer_" + layer.getId() + "_text.png";
 
-        int width  = layer.getWidth()  != null ? layer.getWidth().intValue()  : 200;
-        int height = layer.getHeight() != null ? layer.getHeight().intValue() : 50;
+        // Calculate dimensions based on font size and text content
+        int fontSize = layer.getFontSize() != null ? layer.getFontSize() : 32;
+        String text = layer.getText() != null ? layer.getText() : "Text";
+
+        // Apply text transform to get actual displayed text
+        if ("uppercase".equalsIgnoreCase(layer.getTextTransform())) text = text.toUpperCase();
+        if ("lowercase".equalsIgnoreCase(layer.getTextTransform())) text = text.toLowerCase();
+        if ("capitalize".equalsIgnoreCase(layer.getTextTransform())) text = capitalize(text);
+
+        // Estimate text dimensions (width = chars × fontSize × 0.6, height = fontSize × 1.5)
+        int estimatedWidth = (int)(text.length() * fontSize * 0.6);
+        int estimatedHeight = (int)(fontSize * 1.5);
+
+        // Use background dimensions if they exist, otherwise use estimated text dimensions
+        int width = (layer.getBackgroundWidth() != null && layer.getBackgroundWidth() > 0)
+            ? layer.getBackgroundWidth().intValue()
+            : estimatedWidth;
+        int height = (layer.getBackgroundHeight() != null && layer.getBackgroundHeight() > 0)
+            ? layer.getBackgroundHeight().intValue()
+            : estimatedHeight;
 
         // Calculate extra padding for underline
         int extraBottomPadding = 0;
@@ -271,24 +285,39 @@ public class ImageRenderService {
             extraBottomPadding = Math.max(8, (layer.getFontSize() != null ? layer.getFontSize() : 32) / 4);
         }
 
+        // Add extra padding for border stroke to prevent cutting
+        int borderStrokeWidth = (layer.getBackgroundBorderWidth() != null) ? layer.getBackgroundBorderWidth() : 0;
+        int extraPadding = borderStrokeWidth * 2; // Padding on all sides
+
         List<String> cmd = new ArrayList<>();
         cmd.add(imageMagickPath);
         cmd.add("-size");
-        cmd.add(width + "x" + (height + extraBottomPadding));
+        cmd.add((width + extraPadding) + "x" + (height + extraBottomPadding + extraPadding));
         cmd.add("xc:transparent");
         cmd.add("-set");
         cmd.add("colorspace");
         cmd.add("sRGB");
 
-        // ----- background behind text -----
-        // ----- background behind text with border -----
+        // ----- background behind text with border (FIXED) -----
         if (layer.getBackgroundColor() != null && layer.getBackgroundOpacity() != null
             && layer.getBackgroundOpacity() > 0) {
 
             String bgColor = layer.getBackgroundColor() +
                 String.format("%02x", (int)(layer.getBackgroundOpacity() * 255));
 
-            // Draw background rectangle
+            int bgWidth = width;
+            int bgHeight = height + extraBottomPadding;
+
+            // Use custom background dimensions if provided
+            if (layer.getBackgroundWidth() != null && layer.getBackgroundWidth() > 0) {
+                bgWidth = layer.getBackgroundWidth().intValue();
+                width = bgWidth;
+            }
+            if (layer.getBackgroundHeight() != null && layer.getBackgroundHeight() > 0) {
+                bgHeight = layer.getBackgroundHeight().intValue();
+                height = bgHeight;
+            }
+
             int borderRadius = layer.getBackgroundBorderRadius() != null ?
                 layer.getBackgroundBorderRadius() : 8;
 
@@ -296,19 +325,23 @@ public class ImageRenderService {
             cmd.add(bgColor);
 
             // Add border if specified
-            if (layer.getBackgroundBorder() != null) {
+            if (layer.getBackgroundBorder() != null && layer.getBackgroundBorderWidth() != null) {
                 cmd.add("-stroke");
                 cmd.add(layer.getBackgroundBorder());
                 cmd.add("-strokewidth");
-                cmd.add("2");
+                cmd.add(String.valueOf(layer.getBackgroundBorderWidth()));
             } else {
                 cmd.add("-stroke");
                 cmd.add("none");
             }
 
+            // FIXED: Offset the rectangle by half the stroke width to prevent cutting
+            int offset = borderStrokeWidth;
             cmd.add("-draw");
-            cmd.add("roundrectangle 0,0 " + (width-1) + "," + (height + extraBottomPadding - 1) +
-                " " + borderRadius + "," + borderRadius);
+            cmd.add(String.format("roundrectangle %d,%d %d,%d %d,%d",
+                offset, offset,
+                bgWidth + offset - 1, bgHeight + offset - 1,
+                borderRadius, borderRadius));
         }
 
         // Reset stroke for text
@@ -334,12 +367,6 @@ public class ImageRenderService {
             cmd.add("-style");
             cmd.add("italic");
         }
-
-        // ----- text transform -----
-        String text = layer.getText() != null ? layer.getText() : "Text";
-        if ("uppercase".equalsIgnoreCase(layer.getTextTransform()))   text = text.toUpperCase();
-        if ("lowercase".equalsIgnoreCase(layer.getTextTransform()))   text = text.toLowerCase();
-        if ("capitalize".equalsIgnoreCase(layer.getTextTransform()))  text = capitalize(text);
 
         // ----- outline (stroke) -----
         if (layer.getOutlineWidth() != null && layer.getOutlineWidth() > 0
@@ -406,7 +433,7 @@ public class ImageRenderService {
             "line-through".equalsIgnoreCase(layer.getTextDecoration())) {
 
             String decoratedPath = tempDirPath + File.separator + "layer_" + layer.getId() + "_decorated.png";
-            applyTextDecorationProperly(outputPath, decoratedPath, layer, width, height + extraBottomPadding);
+            applyTextDecorationProperly(outputPath, decoratedPath, layer, width + extraPadding, height + extraBottomPadding + extraPadding);
             Files.deleteIfExists(Paths.get(outputPath));
             outputPath = decoratedPath;
         }
@@ -421,7 +448,7 @@ public class ImageRenderService {
             rotateCmd.add("transparent");
             rotateCmd.add("-rotate");
             rotateCmd.add(String.valueOf(layer.getRotation()));
-            rotateCmd.add("+repage");
+            // Don't use +repage here - we need the virtual canvas info for correct positioning
 
             // Apply opacity if exists
             if (layer.getOpacity() != null && layer.getOpacity() < 1.0) {
@@ -477,8 +504,19 @@ public class ImageRenderService {
 
         String outputPath = tempDirPath + File.separator + "layer_" + layer.getId() + "_multicolor.png";
 
-        int width = layer.getWidth() != null ? layer.getWidth().intValue() : 200;
-        int height = layer.getHeight() != null ? layer.getHeight().intValue() : 50;
+        // Calculate dimensions based on font size and text content
+        int fontSize = layer.getFontSize() != null ? layer.getFontSize() : 32;
+        String text = layer.getText() != null ? layer.getText() : "Text";
+
+        int estimatedWidth = (int)(text.length() * fontSize * 0.6);
+        int estimatedHeight = (int)(fontSize * 1.5);
+
+        int width = (layer.getBackgroundWidth() != null && layer.getBackgroundWidth() > 0)
+            ? layer.getBackgroundWidth().intValue()
+            : estimatedWidth;
+        int height = (layer.getBackgroundHeight() != null && layer.getBackgroundHeight() > 0)
+            ? layer.getBackgroundHeight().intValue()
+            : estimatedHeight;
 
         // Calculate extra padding for underline
         int extraBottomPadding = 0;
@@ -486,22 +524,38 @@ public class ImageRenderService {
             extraBottomPadding = Math.max(8, (layer.getFontSize() != null ? layer.getFontSize() : 32) / 4);
         }
 
+        // Add extra padding for border stroke to prevent cutting
+        int borderStrokeWidth = (layer.getBackgroundBorderWidth() != null) ? layer.getBackgroundBorderWidth() : 0;
+        int extraPadding = borderStrokeWidth * 2;
+
         // Create base with background (if any)
         List<String> baseCmd = new ArrayList<>();
         baseCmd.add(imageMagickPath);
         baseCmd.add("-size");
-        baseCmd.add(width + "x" + (height + extraBottomPadding));
+        baseCmd.add((width + extraPadding) + "x" + (height + extraBottomPadding + extraPadding));
         baseCmd.add("xc:transparent");
         baseCmd.add("-set");
         baseCmd.add("colorspace");
         baseCmd.add("sRGB");
 
-        // Add background with border if specified
+        // Add background with border if specified (FIXED)
         if (layer.getBackgroundColor() != null && layer.getBackgroundOpacity() != null
             && layer.getBackgroundOpacity() > 0) {
 
             String bgColor = layer.getBackgroundColor() +
                 String.format("%02x", (int)(layer.getBackgroundOpacity() * 255));
+
+            int bgWidth = width;
+            int bgHeight = height + extraBottomPadding;
+
+            if (layer.getBackgroundWidth() != null && layer.getBackgroundWidth() > 0) {
+                bgWidth = layer.getBackgroundWidth().intValue();
+                width = bgWidth;
+            }
+            if (layer.getBackgroundHeight() != null && layer.getBackgroundHeight() > 0) {
+                bgHeight = layer.getBackgroundHeight().intValue();
+                height = bgHeight;
+            }
 
             int borderRadius = layer.getBackgroundBorderRadius() != null ?
                 layer.getBackgroundBorderRadius() : 8;
@@ -509,20 +563,23 @@ public class ImageRenderService {
             baseCmd.add("-fill");
             baseCmd.add(bgColor);
 
-            if (layer.getBackgroundBorder() != null) {
+            if (layer.getBackgroundBorder() != null && layer.getBackgroundBorderWidth() != null) {
                 baseCmd.add("-stroke");
                 baseCmd.add(layer.getBackgroundBorder());
                 baseCmd.add("-strokewidth");
-                baseCmd.add(String.valueOf(layer.getBackgroundBorderWidth() != null ?
-                    layer.getBackgroundBorderWidth() : 2));
+                baseCmd.add(String.valueOf(layer.getBackgroundBorderWidth()));
             } else {
                 baseCmd.add("-stroke");
                 baseCmd.add("none");
             }
 
+            // FIXED: Offset the rectangle by the stroke width
+            int offset = borderStrokeWidth;
             baseCmd.add("-draw");
-            baseCmd.add("roundrectangle 0,0 " + (width-1) + "," + (height + extraBottomPadding - 1) +
-                " " + borderRadius + "," + borderRadius);
+            baseCmd.add(String.format("roundrectangle %d,%d %d,%d %d,%d",
+                offset, offset,
+                bgWidth + offset - 1, bgHeight + offset - 1,
+                borderRadius, borderRadius));
         }
 
         baseCmd.add(outputPath);
@@ -533,7 +590,6 @@ public class ImageRenderService {
             layer.getFontFamily(),
             layer.getFontWeight(),
             layer.getFontStyle());
-        int fontSize = layer.getFontSize() != null ? layer.getFontSize() : 32;
 
         // Process segments
         List<LayerDTO.TextSegmentDTO> segments = layer.getTextSegments();
@@ -552,22 +608,26 @@ public class ImageRenderService {
         int totalTextWidth = estimateTextWidth(fullText, fontSize, fontPath);
         int startX = 0;
 
+        // Account for padding when calculating alignment
+        int effectiveWidth = width + extraPadding;
+        int effectiveHeight = height + extraBottomPadding + extraPadding;
+
         if ("center".equals(horizontalAlign)) {
-            startX = (width - totalTextWidth) / 2;
+            startX = (effectiveWidth - totalTextWidth) / 2;
         } else if ("right".equals(horizontalAlign)) {
-            startX = width - totalTextWidth - 10;
+            startX = effectiveWidth - totalTextWidth - 10;
         } else {
-            startX = 10;
+            startX = 10 + (extraPadding / 2);
         }
 
         // Calculate Y position based on vertical alignment
         int baseY = 0;
         if ("top".equals(verticalAlign)) {
-            baseY = fontSize;
+            baseY = fontSize + (extraPadding / 2);
         } else if ("bottom".equals(verticalAlign)) {
-            baseY = height - 10;
+            baseY = effectiveHeight - 10;
         } else { // middle
-            baseY = (height / 2) + (fontSize / 3);
+            baseY = (effectiveHeight / 2) + (fontSize / 3);
         }
 
         // Render each segment
@@ -575,11 +635,6 @@ public class ImageRenderService {
         int lastIndex = 0;
 
         for (int i = 0; i <= segments.size(); i++) {
-            String segmentText;
-            String segmentColor;
-            int segmentStart;
-            int segmentEnd;
-
             if (i < segments.size()) {
                 LayerDTO.TextSegmentDTO segment = segments.get(i);
 
@@ -607,13 +662,71 @@ public class ImageRenderService {
             }
         }
 
-        // Apply text decorations if needed
+        // Apply text decorations if needed (use the actual width and height with padding)
         if ("underline".equalsIgnoreCase(layer.getTextDecoration()) ||
             "line-through".equalsIgnoreCase(layer.getTextDecoration())) {
             String decoratedPath = tempDirPath + File.separator + "layer_" + layer.getId() + "_decorated.png";
-            applyTextDecorationProperly(outputPath, decoratedPath, layer, width, height + extraBottomPadding);
+            applyTextDecorationProperly(outputPath, decoratedPath, layer, effectiveWidth, effectiveHeight);
             Files.deleteIfExists(Paths.get(outputPath));
             outputPath = decoratedPath;
+        }
+
+        // ----- Apply rotation AFTER decoration -----
+        if (layer.getRotation() != null && layer.getRotation() != 0) {
+            String rotatedPath = tempDirPath + File.separator + "layer_" + layer.getId() + "_rotated.png";
+            List<String> rotateCmd = new ArrayList<>();
+            rotateCmd.add(imageMagickPath);
+            rotateCmd.add(outputPath);
+            rotateCmd.add("-background");
+            rotateCmd.add("transparent");
+            rotateCmd.add("-rotate");
+            rotateCmd.add(String.valueOf(layer.getRotation()));
+            // Don't use +repage here - we need the virtual canvas info for correct positioning
+
+            // Apply opacity if exists
+            if (layer.getOpacity() != null && layer.getOpacity() < 1.0) {
+                rotateCmd.add("-channel");
+                rotateCmd.add("Alpha");
+                rotateCmd.add("-evaluate");
+                rotateCmd.add("multiply");
+                rotateCmd.add(String.valueOf(layer.getOpacity()));
+                rotateCmd.add("+channel");
+            }
+
+            // Apply shadow if exists
+            if (layer.getShadow() != null) {
+                applyShadow(rotateCmd, layer.getShadow());
+            }
+
+            rotateCmd.add(rotatedPath);
+            executeImageMagickCommand(rotateCmd, "Rotate multi-color text layer");
+            Files.deleteIfExists(Paths.get(outputPath));
+            return rotatedPath;
+        }
+
+        // ----- Apply opacity (if no rotation) -----
+        if (layer.getOpacity() != null && layer.getOpacity() < 1.0) {
+            List<String> opacityCmd = new ArrayList<>();
+            opacityCmd.add(imageMagickPath);
+            opacityCmd.add(outputPath);
+            opacityCmd.add("-channel");
+            opacityCmd.add("Alpha");
+            opacityCmd.add("-evaluate");
+            opacityCmd.add("multiply");
+            opacityCmd.add(String.valueOf(layer.getOpacity()));
+            opacityCmd.add("+channel");
+            opacityCmd.add(outputPath);
+            executeImageMagickCommand(opacityCmd, "Apply opacity to multi-color text");
+        }
+
+        // ----- Apply shadow (if no rotation) -----
+        if (layer.getShadow() != null) {
+            List<String> shadowCmd = new ArrayList<>();
+            shadowCmd.add(imageMagickPath);
+            shadowCmd.add(outputPath);
+            applyShadow(shadowCmd, layer.getShadow());
+            shadowCmd.add(outputPath);
+            executeImageMagickCommand(shadowCmd, "Apply shadow to multi-color text");
         }
 
         return outputPath;
@@ -682,29 +795,12 @@ public class ImageRenderService {
     private void applyTextDecorationProperly(String inputPath, String outputPath, LayerDTO layer, int width, int height)
         throws IOException, InterruptedException {
 
-        // Use ImageMagick to get actual text metrics by trimming
-        String tempTrimPath = inputPath.replace(".png", "_trim.png");
-
-        // First, trim the image to get actual text bounds
-        List<String> trimCmd = new ArrayList<>();
-        trimCmd.add(imageMagickPath);
-        trimCmd.add(inputPath);
-        trimCmd.add("-trim");
-        trimCmd.add("+repage");
-        trimCmd.add(tempTrimPath);
-        executeImageMagickCommand(trimCmd, "Trim text to get bounds");
-
-        // Get dimensions of trimmed image
-        BufferedImage trimmedImg = ImageIO.read(new File(tempTrimPath));
-        int textWidth = trimmedImg.getWidth();
-        int textHeight = trimmedImg.getHeight();
-
-        // Get the trim info to know where the text actually is
+        // Use ImageMagick to detect actual content bounds (non-transparent pixels)
         List<String> identifyCmd = new ArrayList<>();
         identifyCmd.add(imageMagickPath);
         identifyCmd.add("identify");
         identifyCmd.add("-format");
-        identifyCmd.add("%@");
+        identifyCmd.add("%@");  // Returns: WIDTHxHEIGHT+X+Y
         identifyCmd.add(inputPath);
 
         ProcessBuilder pb = new ProcessBuilder(identifyCmd);
@@ -718,26 +814,64 @@ public class ImageRenderService {
                 output.append(line);
             }
         }
-        process.waitFor();
 
-        // Parse the trim box (format: WIDTHxHEIGHT+X+Y)
+        boolean completed = process.waitFor(30, TimeUnit.SECONDS);
+        if (!completed) {
+            process.destroyForcibly();
+            logger.warn("Identify command timed out");
+        }
+
         String trimBox = output.toString().trim();
+        logger.debug("Trim box result: {}", trimBox);
+
+        // Parse trim box: WIDTHxHEIGHT+X+Y
         int textX = 0;
         int textY = 0;
+        int textWidth = width;
+        int textHeight = height;
 
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+)x(\\d+)\\+(\\d+)\\+(\\d+)");
         java.util.regex.Matcher matcher = pattern.matcher(trimBox);
+
         if (matcher.find()) {
             textWidth = Integer.parseInt(matcher.group(1));
             textHeight = Integer.parseInt(matcher.group(2));
             textX = Integer.parseInt(matcher.group(3));
             textY = Integer.parseInt(matcher.group(4));
+
+            logger.debug("Detected text bounds: width={}, height={}, x={}, y={}", textWidth, textHeight, textX, textY);
+        } else {
+            logger.warn("Could not parse trim box: '{}'. Using full dimensions.", trimBox);
+            // Fallback: try to estimate based on alignment
+            int fontSize = layer.getFontSize() != null ? layer.getFontSize() : 32;
+            String text = layer.getText() != null ? layer.getText() : "";
+
+            // Rough estimation
+            textWidth = (int)(text.length() * fontSize * 0.55);
+            textHeight = (int)(fontSize * 1.2);
+
+            String horizontalAlign = layer.getTextAlign() != null ? layer.getTextAlign().toLowerCase() : "center";
+            String verticalAlign = layer.getVerticalAlign() != null ? layer.getVerticalAlign().toLowerCase() : "middle";
+
+            // Estimate position based on alignment
+            if ("center".equals(horizontalAlign)) {
+                textX = (width - textWidth) / 2;
+            } else if ("right".equals(horizontalAlign)) {
+                textX = width - textWidth - 10;
+            } else {
+                textX = 10;
+            }
+
+            if ("middle".equals(verticalAlign)) {
+                textY = (height - textHeight) / 2;
+            } else if ("top".equals(verticalAlign)) {
+                textY = 10;
+            } else {
+                textY = height - textHeight - 10;
+            }
         }
 
-        // Clean up temp trim file
-        Files.deleteIfExists(Paths.get(tempTrimPath));
-
-        // Now draw the decoration line on the original image
+        // Draw the decoration line
         List<String> cmd = new ArrayList<>();
         cmd.add(imageMagickPath);
         cmd.add(inputPath);
@@ -745,17 +879,22 @@ public class ImageRenderService {
         cmd.add("colorspace");
         cmd.add("sRGB");
 
+        // Determine color
         String color = layer.getColor() != null ? layer.getColor() : "#000000";
-        int fontSize = layer.getFontSize() != null ? layer.getFontSize() : 32;
-        int strokeWidth = Math.max(1, fontSize / 20); // Thinner line
+        if ("line-through".equalsIgnoreCase(layer.getTextDecoration()) && layer.getLinethroughColor() != null) {
+            color = layer.getLinethroughColor();
+        }
 
-        // Calculate line position
+        int fontSize = layer.getFontSize() != null ? layer.getFontSize() : 32;
+        int strokeWidth = Math.max(2, fontSize / 16);
+
+        // Calculate horizontal extent of the line
         int leftMargin = textX;
         int rightMargin = textX + textWidth;
 
         if ("underline".equalsIgnoreCase(layer.getTextDecoration())) {
-            // Position underline with proper gap below text
-            int gap = Math.max(2, fontSize / 10);
+            // Position underline below text with proper gap
+            int gap = Math.max(3, fontSize / 10);
             int yPosition = textY + textHeight + gap;
 
             cmd.add("-stroke");
@@ -763,18 +902,19 @@ public class ImageRenderService {
             cmd.add("-strokewidth");
             cmd.add(String.valueOf(strokeWidth));
             cmd.add("-draw");
-            cmd.add("line " + leftMargin + "," + yPosition + " " + rightMargin + "," + yPosition);
+            cmd.add(String.format("line %d,%d %d,%d", leftMargin, yPosition, rightMargin, yPosition));
 
         } else if ("line-through".equalsIgnoreCase(layer.getTextDecoration())) {
-            // Position line-through at middle of actual text
-            int yPosition = textY + (textHeight / 2);
+            // FIXED: Position at vertical center of actual text
+            // Use 45% from top to account for typical font metrics
+            int yPosition = textY + (int)(textHeight * 0.45);
 
             cmd.add("-stroke");
             cmd.add(color);
             cmd.add("-strokewidth");
             cmd.add(String.valueOf(strokeWidth));
             cmd.add("-draw");
-            cmd.add("line " + leftMargin + "," + yPosition + " " + rightMargin + "," + yPosition);
+            cmd.add(String.format("line %d,%d %d,%d", leftMargin, yPosition, rightMargin, yPosition));
         }
 
         cmd.add(outputPath);
@@ -911,6 +1051,29 @@ public class ImageRenderService {
 
         int x = layer.getX() != null ? layer.getX().intValue() : 0;
         int y = layer.getY() != null ? layer.getY().intValue() : 0;
+
+        // **FIXED: Calculate rotation offset**
+        if (layer.getRotation() != null && layer.getRotation() != 0) {
+            // Get the dimensions of the rotated image
+            BufferedImage rotatedImg = ImageIO.read(new File(layerImagePath));
+            int rotatedWidth = rotatedImg.getWidth();
+            int rotatedHeight = rotatedImg.getHeight();
+
+            // Original dimensions before rotation
+            double origWidth = layer.getWidth();
+            double origHeight = layer.getHeight();
+
+            // Calculate the center point of the original image
+            double centerX = x + origWidth / 2;
+            double centerY = y + origHeight / 2;
+
+            // The rotated image is larger, so we need to offset to keep the same center
+            int newX = (int)Math.round(centerX - rotatedWidth / 2);
+            int newY = (int)Math.round(centerY - rotatedHeight / 2);
+
+            x = newX;
+            y = newY;
+        }
 
         List<String> command = new ArrayList<>();
         command.add(imageMagickPath);

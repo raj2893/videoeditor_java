@@ -14,6 +14,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
@@ -140,6 +142,25 @@ public class AuthController {
             logger.error("Developer login error: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(new AuthResponse(null, request.getEmail(), null, e.getMessage(), false));
+        }
+    }
+
+    @PostMapping("/google/callback")
+    public ResponseEntity<AuthResponse> googleCallback(@RequestBody Map<String, String> request) {
+        try {
+            String authCode = request.get("code");
+            if (authCode == null || authCode.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(new AuthResponse(null, null, null, "No authorization code provided", false));
+            }
+
+            logger.info("Received auth code from mobile app, exchanging for tokens...");
+            AuthResponse response = authService.googleLoginWithCode(authCode);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Google callback error: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new AuthResponse(null, null, null, e.getMessage(), false));
         }
     }
 }

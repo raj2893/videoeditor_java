@@ -19,6 +19,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class SoleTTSService {
@@ -28,7 +31,7 @@ public class SoleTTSService {
     private final SoleTTSRepository soleTTSRepository;
     private final UserTtsUsageRepository userTtsUsageRepository;
 
-    private final String baseDir = "D:\\Backend\\videoEditor-main";
+    private final String baseDir = "D:\\Backend\\videoeditor_java";
     String credentialsPath = baseDir + File.separator + "credentials" + File.separator + "video-editor-tts-24b472478ab838d2168992684517cacfab4c11da.json";
 
     public SoleTTSService(
@@ -42,7 +45,8 @@ public class SoleTTSService {
             User user,
             String text,
             String voiceName,
-            String languageCode) throws IOException, InterruptedException {
+            String languageCode,
+            Map<String, String> ssmlConfig) throws IOException, InterruptedException {
         // Validate input
         if (text == null || text.trim().isEmpty()) {
             throw new IllegalArgumentException("Text is required and cannot be empty");
@@ -75,7 +79,20 @@ public class SoleTTSService {
         soleTTS.setUser(user);
 
         try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create(settings)) {
-            SynthesisInput input = SynthesisInput.newBuilder().setText(text).build();
+            // Build SSML text if config is provided
+            String inputText = (ssmlConfig != null && !ssmlConfig.isEmpty())
+                    ? buildSSMLText(text, ssmlConfig)
+                    : text;
+
+            // Use setSsml instead of setText when SSML is present
+            SynthesisInput.Builder inputBuilder = SynthesisInput.newBuilder();
+            if (ssmlConfig != null && !ssmlConfig.isEmpty()) {
+                inputBuilder.setSsml(inputText);
+            } else {
+                inputBuilder.setText(inputText);
+            }
+            SynthesisInput input = inputBuilder.build();
+
             VoiceSelectionParams voice = VoiceSelectionParams.newBuilder()
                     .setLanguageCode(languageCode)
                     .setName(voiceName)
@@ -109,9 +126,6 @@ public class SoleTTSService {
             updateUserTtsUsage(user, text.length());
 
             return soleTTS;
-        } finally {
-            // Note: Unlike the R2 version, we don't delete the audio file since it's stored locally
-            // If you want to delete it after some time, implement a cleanup mechanism
         }
     }
 
@@ -130,18 +144,43 @@ public class SoleTTSService {
         userTtsUsageRepository.save(usage);
     }
 
-    // Placeholder for waveform generation (reuse from VideoEditingService)
-    private String generateAndSaveWaveformJson(String audioPath, Long userId) throws IOException, InterruptedException {
-        String waveformFileName = "waveform_" + System.currentTimeMillis() + ".json";
-        String waveformPath = "audio/sole_tts/" + userId + "/waveforms/" + waveformFileName;
-        // Implementation depends on your existing waveform generation logic
-        // Assume it saves the waveform JSON to baseDir + waveformPath
-        File waveformDir = new File(baseDir, "audio/sole_tts/" + userId + "/waveforms");
-        waveformDir.mkdirs();
-        // Simulate waveform generation (replace with actual implementation)
-        File waveformFile = new File(waveformDir, waveformFileName);
-        // Write dummy waveform data (replace with your actual logic)
-        Files.write(waveformFile.toPath(), "{}".getBytes());
-        return waveformPath;
+    private String buildSSMLText(String text, Map<String, String> ssmlConfig) {
+        if (ssmlConfig == null || ssmlConfig.isEmpty()) {
+            return text;
+        }
+
+        StringBuilder ssml = new StringBuilder("<speak>");
+
+        // Build prosody tag attributes
+        List<String> prosodyAttrs = new ArrayList<>();
+        if (ssmlConfig.containsKey("rate")) {
+            prosodyAttrs.add("rate=\"" + ssmlConfig.get("rate") + "\"");
+        }
+        if (ssmlConfig.containsKey("pitch")) {
+            prosodyAttrs.add("pitch=\"" + ssmlConfig.get("pitch") + "\"");
+        }
+        if (ssmlConfig.containsKey("volume")) {
+            prosodyAttrs.add("volume=\"" + ssmlConfig.get("volume") + "\"");
+        }
+
+        if (!prosodyAttrs.isEmpty()) {
+            ssml.append("<prosody ").append(String.join(" ", prosodyAttrs)).append(">");
+        }
+
+        // Add emphasis if specified
+        if (ssmlConfig.containsKey("emphasis")) {
+            ssml.append("<emphasis level=\"").append(ssmlConfig.get("emphasis")).append("\">");
+            ssml.append(text);
+            ssml.append("</emphasis>");
+        } else {
+            ssml.append(text);
+        }
+
+        if (!prosodyAttrs.isEmpty()) {
+            ssml.append("</prosody>");
+        }
+
+        ssml.append("</speak>");
+        return ssml.toString();
     }
 }

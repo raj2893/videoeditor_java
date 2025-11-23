@@ -49,7 +49,6 @@ public class ImageEditorService {
     public ImageProject createProject(User user, CreateImageProjectRequest request) {
         logger.info("Creating new project for user: {}", user.getId());
 
-        // Validate input
         if (request.getProjectName() == null || request.getProjectName().trim().isEmpty()) {
             throw new IllegalArgumentException("Project name is required");
         }
@@ -65,20 +64,25 @@ public class ImageEditorService {
         project.setProjectName(request.getProjectName());
         project.setCanvasWidth(request.getCanvasWidth());
         project.setCanvasHeight(request.getCanvasHeight());
-        project.setCanvasBackgroundColor(request.getCanvasBackgroundColor() != null ? 
-                                        request.getCanvasBackgroundColor() : "#FFFFFF");
+        project.setCanvasBackgroundColor(request.getCanvasBackgroundColor() != null ?
+                request.getCanvasBackgroundColor() : "#FFFFFF");
         project.setStatus("DRAFT");
 
-        // Initialize empty design JSON
+        // Initialize with pages array containing one page
         try {
             Map<String, Object> initialDesign = Map.of(
-                "version", "1.0",
-                "canvas", Map.of(
-                    "width", request.getCanvasWidth(),
-                    "height", request.getCanvasHeight(),
-                    "backgroundColor", project.getCanvasBackgroundColor()
-                ),
-                "layers", List.of()
+                    "version", "1.0",
+                    "pages", List.of(
+                            Map.of(
+                                    "id", "page-" + System.currentTimeMillis(),
+                                    "canvas", Map.of(
+                                            "width", request.getCanvasWidth(),
+                                            "height", request.getCanvasHeight(),
+                                            "backgroundColor", project.getCanvasBackgroundColor()
+                                    ),
+                                    "layers", List.of()
+                            )
+                    )
             );
             project.setDesignJson(objectMapper.writeValueAsString(initialDesign));
         } catch (IOException e) {
@@ -147,51 +151,70 @@ public class ImageEditorService {
      * Export project to image
      */
     @Transactional
-    public ImageProject exportProject(User user, Long projectId, ExportImageRequest request) 
+    public ImageProject exportProject(User user, Long projectId, ExportImageRequest request, Integer pageIndex)
             throws IOException, InterruptedException {
-        
-        logger.info("Exporting project: {} for user: {}", projectId, user.getId());
+
+        logger.info("Exporting project: {} page: {} for user: {}", projectId, pageIndex, user.getId());
 
         ImageProject project = imageProjectRepository.findByIdAndUser(projectId, user)
-            .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
 
         if (project.getDesignJson() == null || project.getDesignJson().trim().isEmpty()) {
             throw new IllegalArgumentException("Project has no design to export");
         }
 
-        // Validate export format
+        // Parse the design JSON to extract specific page
+        Map<String, Object> fullDesign = objectMapper.readValue(project.getDesignJson(), Map.class);
+        List<Map<String, Object>> pages = (List<Map<String, Object>>) fullDesign.get("pages");
+
+        if (pages == null || pages.isEmpty()) {
+            throw new IllegalArgumentException("No pages found in project");
+        }
+
+        // Get the specific page to export (default to 0 if not specified)
+        int targetPageIndex = pageIndex != null ? pageIndex : 0;
+        if (targetPageIndex < 0 || targetPageIndex >= pages.size()) {
+            throw new IllegalArgumentException("Invalid page index");
+        }
+
+        Map<String, Object> targetPage = pages.get(targetPageIndex);
+
+        // Create a single-page design for export
+        Map<String, Object> exportDesign = Map.of(
+                "version", fullDesign.get("version"),
+                "canvas", targetPage.get("canvas"),
+                "layers", targetPage.get("layers")
+        );
+
         String format = request.getFormat() != null ? request.getFormat().toUpperCase() : "PNG";
         if (!format.equals("PNG") && !format.equals("JPG") && !format.equals("JPEG") && !format.equals("PDF")) {
             throw new IllegalArgumentException("Invalid export format. Supported: PNG, JPG, PDF");
         }
 
-        // Set status to PROCESSING
         project.setStatus("PROCESSING");
         imageProjectRepository.save(project);
 
         try {
-            // Render the design
             String relativePath = imageRenderService.renderDesign(
-                project.getDesignJson(),
-                format,
-                request.getQuality(),
-                user.getId(),
-                projectId
+                    objectMapper.writeValueAsString(exportDesign),
+                    format,
+                    request.getQuality(),
+                    user.getId(),
+                    projectId
             );
 
-            // Update project with export info
             String cdnUrl = "http://localhost:8080/" + relativePath;
             project.setLastExportedUrl(cdnUrl);
             project.setLastExportFormat(format);
             project.setStatus("COMPLETED");
-            
+
             imageProjectRepository.save(project);
-            logger.info("Project exported successfully: {}", projectId);
+            logger.info("Project page {} exported successfully: {}", targetPageIndex, projectId);
 
             return project;
 
         } catch (Exception e) {
-            logger.error("Failed to export project: {}", projectId, e);
+            logger.error("Failed to export project page: {}", projectId, e);
             project.setStatus("FAILED");
             imageProjectRepository.save(project);
             throw e;

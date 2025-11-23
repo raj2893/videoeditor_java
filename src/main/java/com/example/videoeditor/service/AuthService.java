@@ -9,6 +9,8 @@ import com.example.videoeditor.entity.VerificationToken;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.repository.VerificationTokenRepository;
 import com.example.videoeditor.security.JwtUtil;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
@@ -30,6 +32,12 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Optional;
@@ -46,6 +54,9 @@ public class AuthService {
 
     @Value("${spring.security.oauth2.client.registration.google.client-id}")
     private String googleClientId;
+
+    @Value("$spring.security.oauth2.client.registration.google.client-secret")
+    private String googleClientSecret;
 
     public AuthService(UserRepository userRepository, VerificationTokenRepository verificationTokenRepository,
                        PasswordEncoder passwordEncoder, JwtUtil jwtUtil, EmailService emailService, DeveloperRepository developerRepository) {
@@ -430,5 +441,39 @@ public class AuthService {
         developer.setPassword(passwordEncoder.encode(password));
         developer.setActive(true);
         return developerRepository.save(developer);
+    }
+
+    public AuthResponse googleLoginWithCode(String authorizationCode) throws Exception {
+        // Exchange authorization code for tokens
+        HttpClient client = HttpClient.newHttpClient();
+
+        String tokenEndpoint = "https://oauth2.googleapis.com/token";
+        String requestBody = String.format(
+                "code=%s&client_id=%s&client_secret=%s&redirect_uri=%s&grant_type=authorization_code",
+                URLEncoder.encode(authorizationCode, StandardCharsets.UTF_8),
+                URLEncoder.encode(googleClientId, StandardCharsets.UTF_8),
+                URLEncoder.encode(googleClientSecret, StandardCharsets.UTF_8),
+                URLEncoder.encode("com.raj2893.scenith://redirect", StandardCharsets.UTF_8)
+        );
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(tokenEndpoint))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Failed to exchange authorization code for tokens");
+        }
+
+        // Parse response to get ID token
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode tokenResponse = mapper.readTree(response.body());
+        String idToken = tokenResponse.get("id_token").asText();
+
+        // Now verify and process the ID token
+        return googleLogin(idToken);
     }
 }

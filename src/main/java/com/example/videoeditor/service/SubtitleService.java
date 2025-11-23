@@ -45,16 +45,16 @@ public class SubtitleService {
   private final ObjectMapper objectMapper;
   private final UserRepository userRepository; // Added dependency
 
-  @Value("${app.base-dir:D:\\Backend\\videoEditor-main}")
+  @Value("${app.base-dir:D:\\Backend\\videoeditor_java}")
   private String baseDir;
 
-  @Value("${python.path:C:\\Users\\raj.p\\AppData\\Local\\Programs\\Python\\Python311\\python.exe}")
+  @Value("${python.path:C:\\Users\\praj1\\AppData\\Local\\Programs\\Python\\Python311\\python.exe}")
   private String pythonPath;
 
-  @Value("${app.subtitle-script-path:D:\\Backend\\videoEditor-main\\scripts\\whisper_subtitle.py}")
+  @Value("${app.subtitle-script-path:D:\\Backend\\videoeditor_java\\scripts\\whisper_subtitle.py}")
   private String subtitleScriptPath;
 
-  @Value("${app.ffmpeg-path:C:\\Users\\raj.p\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe}")
+  @Value("${app.ffmpeg-path:C:\\Users\\praj1\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe}")
   private String ffmpegPath;
 
   public SubtitleService(

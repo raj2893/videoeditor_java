@@ -115,26 +115,23 @@ public class ImageEditorController {
      * Export project to image
      * POST /api/image-editor/projects/{id}/export
      */
-    @PostMapping("/projects/{id}/export")
-    public ResponseEntity<?> exportProject(
+    @PostMapping("/projects/{projectId}/export")
+    public ResponseEntity<Map<String, String>> exportProject(
             @RequestHeader("Authorization") String token,
-            @PathVariable Long id,
-            @RequestBody ExportImageRequest request) {
+            @PathVariable Long projectId,
+            @RequestBody ExportImageRequest request,
+            @RequestParam(required = false) Integer pageIndex) {
+
         try {
             User user = imageEditorService.getUserFromToken(token);
-            ImageProject project = imageEditorService.exportProject(user, id, request);
+            ImageProject project = imageEditorService.exportProject(user, projectId, request, pageIndex);
+
             return ResponseEntity.ok(Map.of(
-                "message", "Export successful",
-                "exportUrl", project.getLastExportedUrl(),
-                "format", project.getLastExportFormat(),
-                "project", project
+                    "message", "Export successful",
+                    "exportUrl", project.getLastExportedUrl()
             ));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("message", e.getMessage()));
-        } catch (IOException | InterruptedException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("message", "Export failed: " + e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         }
     }
 

@@ -648,4 +648,42 @@ public class ServeController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
         }
     }
+
+    @GetMapping("AiVoicesDemo/{languageFolder}/{genderFolder}/{humanName:.+}")
+    public ResponseEntity<Resource> serveAiVoiceDemo(
+            @PathVariable String languageFolder,
+            @PathVariable String genderFolder,
+            @PathVariable String humanName) {
+
+        try {
+            // Define AI voices demo file path
+            String aiVoicesDemoDirectory = "AiVoicesDemo/" + languageFolder + "/" + genderFolder + "/";
+            File audioFile = new File(aiVoicesDemoDirectory, humanName);
+
+            // Verify file existence
+            if (!audioFile.exists() || !audioFile.isFile()) {
+                System.err.println("AI voice demo file not found: " + aiVoicesDemoDirectory + humanName);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+            }
+
+            // Create resource
+            Resource resource = new FileSystemResource(audioFile);
+
+            // Determine content type for audio file
+            String contentType = projectController.determineAudioContentType(humanName);
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + humanName + "\"")
+                    .body(resource);
+
+        } catch (RuntimeException e) {
+            System.err.println("Error serving AI voice demo: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        } catch (Exception e) {
+            System.err.println("Error serving AI voice demo: " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
 }

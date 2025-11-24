@@ -97,4 +97,13 @@ public class LayerDTO {
   private Double backgroundWidth;
 
   private String linethroughColor;
+
+  @Data
+  public static class FilterDTO {
+    private String type;
+    private Double value;
+
+    // For filters that need multiple values (like temperature/tint)
+    private Double value2;
+  }
 }

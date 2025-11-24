@@ -1137,45 +1137,190 @@ public class ImageRenderService {
     }
 
     /**
-     * Apply filters to image
+     * Apply filters to image - Enhanced version matching CSS output
      */
-    private void applyFilters(List<String> command, List<FilterDTO> filters) {
+    private void applyFilters(List<String> command, List<LayerDTO.FilterDTO> filters) {
         if (filters == null || filters.isEmpty()) return;
-        
-        for (FilterDTO filter : filters) {
+
+        for (LayerDTO.FilterDTO filter : filters) {
             String type = filter.getType().toLowerCase();
             double value = filter.getValue();
-            
+
             switch (type) {
-                case "blur":
-                    command.add("-blur");
-                    command.add("0x" + value);
-                    break;
                 case "brightness":
-                    command.add("-modulate");
-                    command.add((value * 100) + ",100,100");
-                    break;
-                case "contrast":
-                    int contrastValue = (int) ((value - 1) * 100);
+                    // CSS: brightness(0% to 200%), where 100% is normal
+                    // ImageMagick: -brightness-contrast uses -100 to 100
+                    // Map: -100 (0% in CSS) to 0 (100%) to 100 (200%)
+                    int brightVal = (int) Math.round(value);
                     command.add("-brightness-contrast");
-                    command.add("0x" + contrastValue);
+                    command.add(brightVal + "x0");
                     break;
+
+                case "contrast":
+                    // CSS: contrast(0% to 200%), where 100% is normal
+                    // ImageMagick: -brightness-contrast uses -100 to 100
+                    int contrastVal = (int) Math.round(value);
+                    command.add("-brightness-contrast");
+                    command.add("0x" + contrastVal);
+                    break;
+
+                case "saturation":
+                    // CSS: saturate(0% to 200%), where 100% is normal
+                    // ImageMagick: -modulate saturation uses 0-200, where 100 is normal
+                    int satVal = (int) Math.round(100 + value);
+                    satVal = Math.max(0, Math.min(200, satVal));
+                    command.add("-modulate");
+                    command.add("100," + satVal + ",100");
+                    break;
+
+                case "hue-rotate":
+                    // CSS: hue-rotate(0deg to 360deg)
+                    // ImageMagick: -modulate hue uses relative percentage
+                    // 360 degrees = 200 in modulate (wraps around)
+                    double hueShift = (value / 360.0) * 200.0;
+                    command.add("-modulate");
+                    command.add(String.format("100,100,%.2f", 100 + hueShift));
+                    break;
+
+                case "blur":
+                    // CSS: blur(0px to 20px) - actual Gaussian blur
+                    // ImageMagick: -blur uses radius x sigma format
+                    if (value > 0) {
+                        // CSS blur is visual, ImageMagick needs adjustment
+                        // CSS blur is roughly 2x stronger visually
+                        double adjustedBlur = value * 0.5;
+                        command.add("-blur");
+                        command.add(String.format("0x%.2f", adjustedBlur));
+                    }
+                    break;
+
+                case "sharpen":
+                    // CSS doesn't have sharpen, we approximate with contrast
+                    // ImageMagick: -sharpen uses radius x sigma
+                    if (value > 0) {
+                        // Sharpen is subtle - use adaptive sharpen for better results
+                        command.add("-adaptive-sharpen");
+                        command.add(String.format("0x%.2f", value * 0.3));
+                    }
+                    break;
+
+                case "temperature":
+                    // CSS approximation: warm = sepia + hue-rotate
+                    // Range: -100 (cool/blue) to 100 (warm/orange)
+                    if (value != 0) {
+                        if (value > 0) {
+                            // Warm: add yellow/orange cast
+                            // Sepia gives warm base, then adjust hue
+                            double sepiaAmount = value * 0.15; // Subtle sepia
+                            command.add("-sepia-tone");
+                            command.add(String.format("%.1f%%", sepiaAmount));
+
+                            // Slight hue shift toward orange
+                            double hueAdjust = -value * 0.08; // Maps to CSS hue-rotate
+                            command.add("-modulate");
+                            command.add(String.format("100,100,%.2f", 100 + hueAdjust));
+                        } else {
+                            // Cool: shift hue toward blue
+                            double coolFactor = -value;
+                            double hueAdjust = coolFactor * 0.4; // Maps to CSS hue-rotate
+                            command.add("-modulate");
+                            command.add(String.format("100,100,%.2f", 100 + hueAdjust));
+
+                            // Reduce saturation slightly for cool look
+                            command.add("-modulate");
+                            command.add(String.format("100,%.0f,100", 100 - (coolFactor * 0.05)));
+                        }
+                    }
+                    break;
+
+                case "tint":
+                    // CSS approximation: hue-rotate for tint
+                    // Range: -100 (green) to 100 (magenta)
+                    if (value != 0) {
+                        // Map to hue rotation
+                        double hueAdjust = value * 1.2; // Matches CSS tint approximation
+                        command.add("-modulate");
+                        command.add(String.format("100,100,%.2f", 100 + hueAdjust));
+                    }
+                    break;
+
+                case "exposure":
+                    // CSS approximation: brightness adjustment
+                    // Range: -2 to 2 EV stops
+                    // EV stop formula: 2^value
+                    if (value != 0) {
+                        double factor = Math.pow(2, value);
+                        // CSS shows this as brightness(factor * 100%)
+                        // ImageMagick: use gamma adjustment for more accurate exposure
+                        if (value > 0) {
+                            // Increase exposure - brighten
+                            command.add("-gamma");
+                            command.add(String.format("%.3f", 1.0 / factor)); // Inverse for brightening
+                        } else {
+                            // Decrease exposure - darken
+                            command.add("-gamma");
+                            command.add(String.format("%.3f", factor));
+                        }
+                    }
+                    break;
+
+                case "highlights":
+                    // CSS approximation: brightness adjustment
+                    // Range: -100 to 100
+                    // In CSS, this is shown as subtle brightness change (value * 0.3)
+                    if (value != 0) {
+                        // Use gamma to target highlights
+                        double factor = value / 100.0;
+                        if (factor > 0) {
+                            // Reduce highlights - darken bright areas
+                            command.add("-level");
+                            command.add(String.format("0%%,%.1f%%", 100 - (factor * 20)));
+                        } else {
+                            // Boost highlights - brighten bright areas
+                            command.add("-level");
+                            command.add(String.format("0%%,%.1f%%", 100 - (factor * 20)));
+                        }
+                    }
+                    break;
+
+                case "shadows":
+                    // CSS approximation: brightness adjustment
+                    // Range: -100 to 100
+                    if (value != 0) {
+                        double factor = value / 100.0;
+                        if (factor > 0) {
+                            // Lift shadows - brighten dark areas
+                            command.add("-level");
+                            command.add(String.format("%.1f%%,100%%", factor * 15));
+                        } else {
+                            // Crush shadows - darken dark areas
+                            command.add("-level");
+                            command.add(String.format("%.1f%%,100%%", factor * 15));
+                        }
+                    }
+                    break;
+
+                case "vibrance":
+                    // CSS: saturate(value%)
+                    // Range: 0 to 200, where 100 is normal
+                    if (value != 100) {
+                        int vibranceVal = (int) value;
+                        command.add("-modulate");
+                        command.add("100," + vibranceVal + ",100");
+                    }
+                    break;
+
+                // Legacy filters
                 case "grayscale":
                     command.add("-colorspace");
                     command.add("Gray");
                     break;
+
                 case "sepia":
                     command.add("-sepia-tone");
-                    command.add(((int)(value * 100)) + "%");
+                    command.add(((int)value) + "%");
                     break;
-                case "saturate":
-                    command.add("-modulate");
-                    command.add("100," + (value * 100) + ",100");
-                    break;
-                case "hue-rotate":
-                    command.add("-modulate");
-                    command.add("100,100," + (100 + value));
-                    break;
+
                 case "invert":
                     command.add("-negate");
                     break;

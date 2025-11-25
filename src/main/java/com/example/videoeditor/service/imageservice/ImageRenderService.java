@@ -363,6 +363,11 @@ public class ImageRenderService {
                 layer.getFontFamily(),
                 layer.getFontWeight(),
                 layer.getFontStyle());
+        File fontFile = new File(fontPath);
+        if (!fontFile.exists()) {
+            logger.error("Font file missing before ImageMagick command: {}", fontPath);
+            fontPath = new File(tempDirPath + "arial.ttf").getAbsolutePath();
+        }
         cmd.add("-font");
         cmd.add(fontPath);
         cmd.add("-pointsize");
@@ -617,6 +622,11 @@ public class ImageRenderService {
                 layer.getFontFamily(),
                 layer.getFontWeight(),
                 layer.getFontStyle());
+        File fontFile = new File(fontPath);
+        if (!fontFile.exists()) {
+            logger.error("Font file missing before ImageMagick command: {}", fontPath);
+            fontPath = new File(tempDirPath + "arial.ttf").getAbsolutePath();
+        }
 
         List<LayerDTO.TextSegmentDTO> segments = layer.getTextSegments();
         if (segments == null || segments.isEmpty()) {
@@ -1348,206 +1358,177 @@ public class ImageRenderService {
     }
 
     private String resolveFontPath(String fontFamily, String fontWeight, String fontStyle) {
-        // 1. build a key that contains weight & style
-        String key = fontFamily;
-        if ("bold".equalsIgnoreCase(fontWeight)) key += " Bold";
-        if ("italic".equalsIgnoreCase(fontStyle)) key += " Italic";
-        if ("bold".equalsIgnoreCase(fontWeight) && "italic".equalsIgnoreCase(fontStyle)) key += " Bold Italic";
+        if (fontFamily == null) return getFontPathByFamily("Arial");
 
-        // 2. reuse the huge map you already have (getFontPathByFamily)
-        return getFontPathByFamily(key);      // <-- call your existing method
+        String key = fontFamily.trim();
+
+        boolean isBold = "bold".equalsIgnoreCase(fontWeight);
+        boolean isItalic = "italic".equalsIgnoreCase(fontStyle);
+
+        if (isBold && isItalic) {
+            key += " Bold Italic";
+        } else if (isBold) {
+            key += " Bold";
+        } else if (isItalic) {
+            key += " Italic";
+        }
+        String fontPath = getFontPathByFamily(key);
+
+        // ADD THIS VERIFICATION
+        File fontFile = new File(fontPath);
+        if (!fontFile.exists()) {
+            logger.error("CRITICAL: Font file does not exist at path: {}", fontPath);
+            logger.error("Font requested: {}, Weight: {}, Style: {}", fontFamily, fontWeight, fontStyle);
+        } else {
+            logger.info("Font verified and exists: {}", fontPath);
+        }
+
+        return fontPath;
     }
 
     private String getFontPathByFamily(String fontFamily) {
-        final String FONTS_RESOURCE_PATH = "/fonts/";
-        final String TEMP_FONT_DIR = System.getProperty("java.io.tmpdir") + "/scenith-fonts/";
-
-        File tempDir = new File(TEMP_FONT_DIR);
-        if (!tempDir.exists() && !tempDir.mkdirs()) {
-            logger.error("Failed to create temporary font directory: {}", TEMP_FONT_DIR);
-            return "C:/Windows/Fonts/Arial.ttf";
-        }
-
-        String defaultFontPath = getFontFilePath("arial.ttf", FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
+        final String WINDOWS_FONTS = "C:/Windows/Fonts/";
 
         if (fontFamily == null || fontFamily.trim().isEmpty()) {
             logger.warn("Font family is null or empty. Using default font: arial.ttf");
-            return defaultFontPath;
+            return WINDOWS_FONTS + "arial.ttf";
         }
 
         Map<String, String> fontMap = new HashMap<>();
-        fontMap.put("Arial", "arial.ttf");
-        fontMap.put("Times New Roman", "times.ttf");
-        fontMap.put("Courier New", "cour.ttf");
-        fontMap.put("Calibri", "calibri.ttf");
-        fontMap.put("Verdana", "verdana.ttf");
-        fontMap.put("Georgia", "georgia.ttf");
-        fontMap.put("Comic Sans MS", "comic.ttf");
-        fontMap.put("Impact", "impact.ttf");
-        fontMap.put("Tahoma", "tahoma.ttf");
 
-        // Arial variants
-        fontMap.put("Arial Bold", "arialbd.ttf");
-        fontMap.put("Arial Italic", "ariali.ttf");
-        fontMap.put("Arial Bold Italic", "arialbi.ttf");
-        fontMap.put("Arial Black", "ariblk.ttf");
+        // System fonts - use Windows directly
+        fontMap.put("Arial", WINDOWS_FONTS + "arial.ttf");
+        fontMap.put("Arial Bold", WINDOWS_FONTS + "arialbd.ttf");
+        fontMap.put("Arial Italic", WINDOWS_FONTS + "ariali.ttf");
+        fontMap.put("Arial Bold Italic", WINDOWS_FONTS + "arialbi.ttf");
+        fontMap.put("Arial Black", WINDOWS_FONTS + "ariblk.ttf");
 
-        // Georgia variants
-        fontMap.put("Georgia Bold", "georgiab.ttf");
-        fontMap.put("Georgia Italic", "georgiai.ttf");
-        fontMap.put("Georgia Bold Italic", "georgiaz.ttf");
+        fontMap.put("Times New Roman", WINDOWS_FONTS + "times.ttf");
+        fontMap.put("Times New Roman Bold", WINDOWS_FONTS + "timesbd.ttf");
+        fontMap.put("Times New Roman Italic", WINDOWS_FONTS + "timesi.ttf");
+        fontMap.put("Times New Roman Bold Italic", WINDOWS_FONTS + "timesbi.ttf");
 
-        // Times New Roman variants
-        fontMap.put("Times New Roman Bold", "timesbd.ttf");
-        fontMap.put("Times New Roman Italic", "timesi.ttf");
-        fontMap.put("Times New Roman Bold Italic", "timesbi.ttf");
+        fontMap.put("Courier New", WINDOWS_FONTS + "cour.ttf");
+        fontMap.put("Calibri", WINDOWS_FONTS + "calibri.ttf");
+        fontMap.put("Verdana", WINDOWS_FONTS + "verdana.ttf");
+        fontMap.put("Georgia", WINDOWS_FONTS + "georgia.ttf");
+        fontMap.put("Georgia Bold", WINDOWS_FONTS + "georgiab.ttf");
+        fontMap.put("Georgia Italic", WINDOWS_FONTS + "georgiai.ttf");
+        fontMap.put("Georgia Bold Italic", WINDOWS_FONTS + "georgiaz.ttf");
 
-        // Alumni Sans Pinstripe
-        fontMap.put("Alumni Sans Pinstripe", "AlumniSansPinstripe-Regular.ttf");
+        fontMap.put("Comic Sans MS", WINDOWS_FONTS + "comic.ttf");
+        fontMap.put("Impact", WINDOWS_FONTS + "impact.ttf");  // ← THIS IS THE KEY ONE
+        fontMap.put("Tahoma", WINDOWS_FONTS + "tahoma.ttf");
 
-        // Lexend Giga variants
-        fontMap.put("Lexend Giga", "LexendGiga-Regular.ttf");
-        fontMap.put("Lexend Giga Black", "LexendGiga-Black.ttf");
-        fontMap.put("Lexend Giga Bold", "LexendGiga-Bold.ttf");
+        // Custom fonts from resources - extract to temp
+        final String FONTS_RESOURCE_PATH = "/fonts/";
+        final String TEMP_FONT_DIR = baseDir + File.separator + "fonts_cache" + File.separator;
 
-
-        // Montserrat Alternates variants
-        fontMap.put("Montserrat Alternates", "MontserratAlternates-ExtraLight.ttf");
-        fontMap.put("Montserrat Alternates Black", "MontserratAlternates-Black.ttf");
-        fontMap.put("Montserrat Alternates Medium Italic", "MontserratAlternates-MediumItalic.ttf");
-
-        // Noto Sans Mono variants
-        fontMap.put("Noto Sans Mono", "NotoSansMono-Regular.ttf");
-        fontMap.put("Noto Sans Mono Bold", "NotoSansMono-Bold.ttf");
-
-
-        // Poiret One
-        fontMap.put("Poiret One", "PoiretOne-Regular.ttf");
-
-        // Arimo variants
-        fontMap.put("Arimo", "Arimo-Regular.ttf");
-        fontMap.put("Arimo Bold", "Arimo-Bold.ttf");
-        fontMap.put("Arimo Bold Italic", "Arimo-BoldItalic.ttf");
-        fontMap.put("Arimo Italic", "Arimo-Italic.ttf");
-
-
-        // Carlito variants
-        fontMap.put("Carlito", "Carlito-Regular.ttf");
-        fontMap.put("Carlito Bold", "Carlito-Bold.ttf");
-        fontMap.put("Carlito Bold Italic", "Carlito-BoldItalic.ttf");
-        fontMap.put("Carlito Italic", "Carlito-Italic.ttf");
-
-        // Comic Neue variants
-        fontMap.put("Comic Neue", "ComicNeue-Regular.ttf");
-        fontMap.put("Comic Neue Bold", "ComicNeue-Bold.ttf");
-        fontMap.put("Comic Neue Bold Italic", "ComicNeue-BoldItalic.ttf");
-        fontMap.put("Comic Neue Italic", "ComicNeue-Italic.ttf");
-
-
-        // Courier Prime variants
-        fontMap.put("Courier Prime", "CourierPrime-Regular.ttf");
-        fontMap.put("Courier Prime Bold", "CourierPrime-Bold.ttf");
-        fontMap.put("Courier Prime Bold Italic", "CourierPrime-BoldItalic.ttf");
-        fontMap.put("Courier Prime Italic", "CourierPrime-Italic.ttf");
-
-        // Gelasio variants
-        fontMap.put("Gelasio", "Gelasio-Regular.ttf");
-        fontMap.put("Gelasio Bold", "Gelasio-Bold.ttf");
-        fontMap.put("Gelasio Bold Italic", "Gelasio-BoldItalic.ttf");
-        fontMap.put("Gelasio Italic", "Gelasio-Italic.ttf");
-
-
-        // Tinos variants
-        fontMap.put("Tinos", "Tinos-Regular.ttf");
-        fontMap.put("Tinos Bold", "Tinos-Bold.ttf");
-        fontMap.put("Tinos Bold Italic", "Tinos-BoldItalic.ttf");
-        fontMap.put("Tinos Italic", "Tinos-Italic.ttf");
-
-        // Amatic SC variants
-        fontMap.put("Amatic SC", "AmaticSC-Regular.ttf");
-        fontMap.put("Amatic SC Bold", "AmaticSC-Bold.ttf");
-
-// Barriecito
-        fontMap.put("Barriecito", "Barriecito-Regular.ttf");
-
-// Barrio
-        fontMap.put("Barrio", "Barrio-Regular.ttf");
-
-// Birthstone
-        fontMap.put("Birthstone", "Birthstone-Regular.ttf");
-
-// Bungee Hairline
-        fontMap.put("Bungee Hairline", "BungeeHairline-Regular.ttf");
-
-// Butcherman
-        fontMap.put("Butcherman", "Butcherman-Regular.ttf");
-
-// Doto variants
-        fontMap.put("Doto Black", "Doto-Black.ttf");
-        fontMap.put("Doto ExtraBold", "Doto-ExtraBold.ttf");
-        fontMap.put("Doto Rounded Bold", "Doto_Rounded-Bold.ttf");
-
-// Fascinate Inline
-        fontMap.put("Fascinate Inline", "FascinateInline-Regular.ttf");
-
-// Freckle Face
-        fontMap.put("Freckle Face", "FreckleFace-Regular.ttf");
-
-// Fredericka the Great
-        fontMap.put("Fredericka the Great", "FrederickatheGreat-Regular.ttf");
-
-// Imperial Script
-        fontMap.put("Imperial Script", "ImperialScript-Regular.ttf");
-
-// Kings
-        fontMap.put("Kings", "Kings-Regular.ttf");
-
-// Kirang Haerang
-        fontMap.put("Kirang Haerang", "KirangHaerang-Regular.ttf");
-
-// Lavishly Yours
-        fontMap.put("Lavishly Yours", "LavishlyYours-Regular.ttf");
-
-// Mountains of Christmas variants
-        fontMap.put("Mountains of Christmas", "MountainsofChristmas-Regular.ttf");
-        fontMap.put("Mountains of Christmas Bold", "MountainsofChristmas-Bold.ttf");
-
-// Rampart One
-        fontMap.put("Rampart One", "RampartOne-Regular.ttf");
-
-// Rubik Wet Paint
-        fontMap.put("Rubik Wet Paint", "RubikWetPaint-Regular.ttf");
-
-// Tangerine variants
-        fontMap.put("Tangerine", "Tangerine-Regular.ttf");
-        fontMap.put("Tangerine Bold", "Tangerine-Bold.ttf");
-
-// Yesteryear
-        fontMap.put("Yesteryear", "Yesteryear-Regular.ttf");
+        Map<String, String> customFonts = new HashMap<>();
+        customFonts.put("Alumni Sans Pinstripe", "AlumniSansPinstripe-Regular.ttf");
+        customFonts.put("Lexend Giga", "LexendGiga-Regular.ttf");
+        customFonts.put("Lexend Giga Black", "LexendGiga-Black.ttf");
+        customFonts.put("Lexend Giga Bold", "LexendGiga-Bold.ttf");
+        customFonts.put("Montserrat Alternates", "MontserratAlternates-ExtraLight.ttf");
+        customFonts.put("Montserrat Alternates Black", "MontserratAlternates-Black.ttf");
+        customFonts.put("Montserrat Alternates Medium Italic", "MontserratAlternates-MediumItalic.ttf");
+        customFonts.put("Noto Sans Mono", "NotoSansMono-Regular.ttf");
+        customFonts.put("Noto Sans Mono Bold", "NotoSansMono-Bold.ttf");
+        customFonts.put("Poiret One", "PoiretOne-Regular.ttf");
+        customFonts.put("Arimo", "Arimo-Regular.ttf");
+        customFonts.put("Arimo Bold", "Arimo-Bold.ttf");
+        customFonts.put("Arimo Bold Italic", "Arimo-BoldItalic.ttf");
+        customFonts.put("Arimo Italic", "Arimo-Italic.ttf");
+        customFonts.put("Carlito", "Carlito-Regular.ttf");
+        customFonts.put("Carlito Bold", "Carlito-Bold.ttf");
+        customFonts.put("Carlito Bold Italic", "Carlito-BoldItalic.ttf");
+        customFonts.put("Carlito Italic", "Carlito-Italic.ttf");
+        customFonts.put("Comic Neue", "ComicNeue-Regular.ttf");
+        customFonts.put("Comic Neue Bold", "ComicNeue-Bold.ttf");
+        customFonts.put("Comic Neue Bold Italic", "ComicNeue-BoldItalic.ttf");
+        customFonts.put("Comic Neue Italic", "ComicNeue-Italic.ttf");
+        customFonts.put("Courier Prime", "CourierPrime-Regular.ttf");
+        customFonts.put("Courier Prime Bold", "CourierPrime-Bold.ttf");
+        customFonts.put("Courier Prime Bold Italic", "CourierPrime-BoldItalic.ttf");
+        customFonts.put("Courier Prime Italic", "CourierPrime-Italic.ttf");
+        customFonts.put("Gelasio", "Gelasio-Regular.ttf");
+        customFonts.put("Gelasio Bold", "Gelasio-Bold.ttf");
+        customFonts.put("Gelasio Bold Italic", "Gelasio-BoldItalic.ttf");
+        customFonts.put("Gelasio Italic", "Gelasio-Italic.ttf");
+        customFonts.put("Tinos", "Tinos-Regular.ttf");
+        customFonts.put("Tinos Bold", "Tinos-Bold.ttf");
+        customFonts.put("Tinos Bold Italic", "Tinos-BoldItalic.ttf");
+        customFonts.put("Tinos Italic", "Tinos-Italic.ttf");
+        customFonts.put("Amatic SC", "AmaticSC-Regular.ttf");
+        customFonts.put("Amatic SC Bold", "AmaticSC-Bold.ttf");
+        customFonts.put("Barriecito", "Barriecito-Regular.ttf");
+        customFonts.put("Barrio", "Barrio-Regular.ttf");
+        customFonts.put("Birthstone", "Birthstone-Regular.ttf");
+        customFonts.put("Bungee Hairline", "BungeeHairline-Regular.ttf");
+        customFonts.put("Butcherman", "Butcherman-Regular.ttf");
+        customFonts.put("Doto Black", "Doto-Black.ttf");
+        customFonts.put("Doto ExtraBold", "Doto-ExtraBold.ttf");
+        customFonts.put("Doto Rounded Bold", "Doto_Rounded-Bold.ttf");
+        customFonts.put("Fascinate Inline", "FascinateInline-Regular.ttf");
+        customFonts.put("Freckle Face", "FreckleFace-Regular.ttf");
+        customFonts.put("Fredericka the Great", "FrederickatheGreat-Regular.ttf");
+        customFonts.put("Imperial Script", "ImperialScript-Regular.ttf");
+        customFonts.put("Kings", "Kings-Regular.ttf");
+        customFonts.put("Kirang Haerang", "KirangHaerang-Regular.ttf");
+        customFonts.put("Lavishly Yours", "LavishlyYours-Regular.ttf");
+        customFonts.put("Mountains of Christmas", "MountainsofChristmas-Regular.ttf");
+        customFonts.put("Mountains of Christmas Bold", "MountainsofChristmas-Bold.ttf");
+        customFonts.put("Rampart One", "RampartOne-Regular.ttf");
+        customFonts.put("Rubik Wet Paint", "RubikWetPaint-Regular.ttf");
+        customFonts.put("Tangerine", "Tangerine-Regular.ttf");
+        customFonts.put("Tangerine Bold", "Tangerine-Bold.ttf");
+        customFonts.put("Yesteryear", "Yesteryear-Regular.ttf");
 
         String processedFontFamily = fontFamily.trim();
+
+        // Check if it's a system font first
         if (fontMap.containsKey(processedFontFamily)) {
-            String fontFileName = fontMap.get(processedFontFamily);
-            String fontPath = getFontFilePath(fontFileName, FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
-            logger.debug("Found font match for: {} -> {}", processedFontFamily, fontPath);
+            String fontPath = fontMap.get(processedFontFamily);
+            logger.info("Using Windows system font: {} -> {}", processedFontFamily, fontPath);
             return fontPath;
         }
 
+        // Check if it's a custom font
+        if (customFonts.containsKey(processedFontFamily)) {
+            String fontFileName = customFonts.get(processedFontFamily);
+            String fontPath = extractFontFromResources(fontFileName, FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
+            logger.info("Using custom font: {} -> {}", processedFontFamily, fontPath);
+            return fontPath;
+        }
+
+        // Case-insensitive fallback
         for (Map.Entry<String, String> entry : fontMap.entrySet()) {
             if (entry.getKey().equalsIgnoreCase(processedFontFamily)) {
-                String fontFileName = entry.getValue();
-                String fontPath = getFontFilePath(fontFileName, FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
-                logger.debug("Found case-insensitive font match for: {} -> {}", processedFontFamily, fontPath);
-                return fontPath;
+                logger.info("Found case-insensitive system font match: {}", entry.getKey());
+                return entry.getValue();
             }
         }
 
-        logger.warn("Font family '{}' not found. Using default: arial.ttf", fontFamily);
-        return defaultFontPath;
+        for (Map.Entry<String, String> entry : customFonts.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(processedFontFamily)) {
+                String fontFileName = entry.getValue();
+                logger.info("Found case-insensitive custom font match: {}", entry.getKey());
+                return extractFontFromResources(fontFileName, FONTS_RESOURCE_PATH, TEMP_FONT_DIR);
+            }
+        }
+
+        logger.warn("Font family '{}' not found. Using default: Arial", fontFamily);
+        return WINDOWS_FONTS + "arial.ttf";
     }
 
-    private String getFontFilePath(String fontFileName, String fontsResourcePath, String tempFontDir) {
+    private String extractFontFromResources(String fontFileName, String fontsResourcePath, String tempFontDir) {
         try {
+            File tempDir = new File(tempFontDir);
+            if (!tempDir.exists() && !tempDir.mkdirs()) {
+                logger.error("Failed to create font cache directory: {}", tempFontDir);
+                return "C:/Windows/Fonts/arial.ttf";
+            }
+
             File tempFontFile = new File(tempFontDir + fontFileName);
             if (tempFontFile.exists()) {
                 return tempFontFile.getAbsolutePath();
@@ -1557,18 +1538,17 @@ public class ImageRenderService {
             InputStream fontStream = getClass().getResourceAsStream(resourcePath);
             if (fontStream == null) {
                 logger.error("Font file not found in resources: {}", resourcePath);
-                return "C:/Windows/Fonts/Arial.ttf";
+                return "C:/Windows/Fonts/arial.ttf";
             }
 
-            Path tempPath = tempFontFile.toPath();
-            Files.copy(fontStream, tempPath, StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(fontStream, tempFontFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             fontStream.close();
 
-            logger.debug("Extracted font to: {}", tempFontFile.getAbsolutePath());
+            logger.info("Extracted custom font: {}", tempFontFile.getAbsolutePath());
             return tempFontFile.getAbsolutePath();
         } catch (IOException e) {
-            logger.error("Error accessing font file: {}. Error: {}", fontFileName, e.getMessage());
-            return "C:/Windows/Fonts/Arial.ttf";
+            logger.error("Error extracting font: {}", fontFileName, e);
+            return "C:/Windows/Fonts/arial.ttf";
         }
     }
 

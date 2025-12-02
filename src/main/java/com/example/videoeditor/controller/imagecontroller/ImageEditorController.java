@@ -260,4 +260,25 @@ public class ImageEditorController {
                 .body(Map.of("message", "Failed to retrieve elements: " + e.getMessage()));
         }
     }
+
+    /**
+     * Remove background from an asset
+     * POST /api/image-editor/assets/{id}/remove-background
+     */
+    @PostMapping("/assets/{id}/remove-background")
+    public ResponseEntity<?> removeBackground(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long id) {
+        try {
+            User user = imageEditorService.getUserFromToken(token);
+            ImageAsset newAsset = imageAssetService.removeBackground(user, id);
+            return ResponseEntity.ok(newAsset);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", e.getMessage()));
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Background removal failed: " + e.getMessage()));
+        }
+    }
 }

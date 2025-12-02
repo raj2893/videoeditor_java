@@ -630,9 +630,6 @@ public class ServeController {
 
             return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                // ---- DOWNLOAD ----
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                    "attachment; filename=\"" + filename + "\"")
                 // ---- CORS (required for fetch → blob → download) ----
                 .header(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
                 .header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS,

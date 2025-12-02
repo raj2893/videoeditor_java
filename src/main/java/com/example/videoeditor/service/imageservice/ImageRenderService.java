@@ -176,9 +176,21 @@ public class ImageRenderService {
         command.add("sRGB");
 
         // Get natural dimensions from source image
-        BufferedImage sourceImg = ImageIO.read(new File(sourceImagePath));
-        double naturalWidth = sourceImg.getWidth();
-        double naturalHeight = sourceImg.getHeight();
+        double naturalWidth;
+        double naturalHeight;
+
+        if (sourceImagePath.toLowerCase().endsWith(".svg")) {
+            // For SVG, use layer dimensions directly (SVGs are scalable)
+            naturalWidth = layer.getWidth();
+            naturalHeight = layer.getHeight();
+        } else {
+            BufferedImage sourceImg = ImageIO.read(new File(sourceImagePath));
+            if (sourceImg == null) {
+                throw new IOException("Failed to read image file: " + sourceImagePath);
+            }
+            naturalWidth = sourceImg.getWidth();
+            naturalHeight = sourceImg.getHeight();
+        }
 
         // Get scale and crop values
         double scale = layer.getScale() != null ? layer.getScale() : 1.0;
@@ -1084,6 +1096,9 @@ public class ImageRenderService {
 
             // Get the dimensions of the rotated image
             BufferedImage rotatedImg = ImageIO.read(new File(layerImagePath));
+            if (rotatedImg == null) {
+                throw new IOException("Failed to read rotated image: " + layerImagePath);
+            }
             int rotatedWidth = rotatedImg.getWidth();
             int rotatedHeight = rotatedImg.getHeight();
 
@@ -1584,7 +1599,7 @@ public class ImageRenderService {
     /**
      * Download image from URL or copy from local path
      */
-    private String downloadOrCopyImage(String src, String tempDirPath, String layerId) throws IOException {
+    private String downloadOrCopyImage(String src, String tempDirPath, String layerId) throws IOException, InterruptedException {
         String outputPath = tempDirPath + File.separator + "source_" + layerId + ".png";
         
         if (src.startsWith("http://") || src.startsWith("https://")) {
@@ -1598,7 +1613,15 @@ public class ImageRenderService {
             String fullPath = baseDir + File.separator + src;
             Files.copy(Paths.get(fullPath), Paths.get(outputPath), StandardCopyOption.REPLACE_EXISTING);
         }
-        
+
+        // Convert SVG to PNG if needed
+        if (outputPath.toLowerCase().endsWith(".svg") || src.toLowerCase().endsWith(".svg")) {
+            String pngOutputPath = tempDirPath + File.separator + "source_" + layerId + "_converted.png";
+            convertSvgToPng(outputPath, pngOutputPath);
+            Files.deleteIfExists(Paths.get(outputPath));
+            return pngOutputPath;
+        }
+
         return outputPath;
     }
 
@@ -1662,5 +1685,22 @@ public class ImageRenderService {
         } catch (IOException e) {
             logger.warn("Failed to cleanup temp directory: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Convert SVG to PNG using ImageMagick
+     */
+    private void convertSvgToPng(String svgPath, String pngPath) throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add(imageMagickPath);
+        command.add("-density");
+        command.add("300"); // High DPI for quality
+        command.add("-background");
+        command.add("transparent");
+        command.add(svgPath);
+        command.add("-flatten");
+        command.add(pngPath);
+
+        executeImageMagickCommand(command, "Convert SVG to PNG");
     }
 }

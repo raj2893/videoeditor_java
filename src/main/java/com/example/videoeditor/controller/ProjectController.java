@@ -1768,6 +1768,8 @@ public class ProjectController {
         if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
         if (filename.endsWith(".gif")) return "image/gif";
         if (filename.endsWith(".webp")) return "image/webp";
+        if (filename.endsWith(".svg")) return "image/svg+xml";
+
         return "application/octet-stream"; // Default fallback
     }
 

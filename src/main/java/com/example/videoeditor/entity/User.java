@@ -50,6 +50,9 @@ public class User {
     // Add this field to your User.java entity class
     private String profilePicture;
 
+    @Column
+    private LocalDateTime planExpiresAt;
+
     // Add getter and setter
     public String getProfilePicture() {
         return profilePicture;
@@ -131,4 +134,21 @@ public class User {
     public void setRole(Role role) {
         this.role = role;
     }
+
+    public LocalDateTime getPlanExpiresAt() {
+        return planExpiresAt;
+    }
+
+    public void setPlanExpiresAt(LocalDateTime planExpiresAt) {
+        this.planExpiresAt = planExpiresAt;
+    }
+
+    public long getMonthlyTtsLimit() {
+        return switch (this.role) {
+            case BASIC -> 5000;
+            case CREATOR -> 10000;
+            case STUDIO -> 20000;
+        };
+    }
+
 }

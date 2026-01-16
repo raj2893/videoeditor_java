@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 @RestController
@@ -59,6 +60,12 @@ public class AuthController {
                         logger.error("User not found for email: {}", userEmail);
                         return new RuntimeException("User not found");
                     });
+
+            if (user.getPlanExpiresAt() != null && LocalDateTime.now().isAfter(user.getPlanExpiresAt())) {
+                user.setRole(User.Role.BASIC);
+                user.setPlanExpiresAt(null);
+                userRepository.save(user);
+            }
 
             logger.info("User found: email={}, name={}, profilePicture={}, googleAuth={}",
                     user.getEmail(), user.getName(), user.getProfilePicture(), user.isGoogleAuth());

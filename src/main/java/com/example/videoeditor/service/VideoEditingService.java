@@ -54,8 +54,8 @@ public class VideoEditingService {
     private final GlobalElementRepository globalElementRepository;
     private UserTtsUsageRepository userTtsUsageRepository;
 
-    private final String ffmpegPath = "C:\\Users\\raj.p\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe";
-    private final String baseDir = "D:\\Backend\\videoEditor-main"; // Base directory constant
+    private final String ffmpegPath = "C:\\Users\\praj1\\Downloads\\ffmpeg-2025-02-17-git-b92577405b-full_build\\bin\\ffmpeg.exe";
+    private final String baseDir = "D:\\Backend\\videoeditor_java"; // Base directory constant
     private final String pythonPath = System.getenv().getOrDefault("PYTHON_PATH", "C:\\Users\\raj.p\\AppData\\Local\\Programs\\Python\\Python311\\python.exe");
     private final String pythonScriptPath = baseDir + File.separator + "scripts" + File.separator + "whisper_subtitle.py";
     private final String backgroundRemovalScriptPath = baseDir + File.separator + "scripts" + File.separator + "remove_background.py";

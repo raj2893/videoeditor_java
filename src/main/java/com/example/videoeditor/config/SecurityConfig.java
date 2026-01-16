@@ -19,6 +19,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import javax.annotation.PostConstruct;
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -73,6 +75,8 @@ public class SecurityConfig implements WebMvcConfigurer {
             .requestMatchers("image/standalone/{userId}/processed/{filename}").permitAll()
             .requestMatchers("/image_editor/{userId}/exports/{filename}").permitAll()
             .requestMatchers("/image_editor/elements/{filename}").permitAll()
+            .requestMatchers("/api/image-editor/elements").permitAll()
+            .requestMatchers("/api/image-editor/elements/**").permitAll()
             .requestMatchers("elements/{filename}").permitAll()
             .requestMatchers("/projects/{projectId}/audio/{filename}").permitAll()
             .requestMatchers("audio/projects/{projectId}/{filename}").permitAll()
@@ -86,6 +90,8 @@ public class SecurityConfig implements WebMvcConfigurer {
             .requestMatchers("/projects/**", "/projects/{projectId}/add-to-timeline").authenticated()
             .requestMatchers(HttpMethod.GET, "/videos/edited-videos/**").permitAll()
             .requestMatchers("/videos/**", "/videos/*").permitAll()
+            .requestMatchers("/api/payments/mock-payment").permitAll()
+            .requestMatchers("/api/admin/*").permitAll()
             .anyRequest().authenticated()
         )
         .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

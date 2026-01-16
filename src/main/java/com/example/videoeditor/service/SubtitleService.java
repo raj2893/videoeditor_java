@@ -108,116 +108,142 @@ public class SubtitleService {
     return subtitleMedia;
   }
 
-  public SubtitleMedia generateSubtitles(User user, Long mediaId, Map<String, String> styleParams) throws IOException, InterruptedException {
-    logger.info("Generating subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
+    public SubtitleMedia generateSubtitles(User user, Long mediaId, Map<String, String> styleParams) throws IOException, InterruptedException {
+        logger.info("Generating subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
 
-    SubtitleMedia subtitleMedia = subtitleMediaRepository.findById(mediaId)
-        .orElseThrow(() -> {
-          logger.error("Media not found for id: {}", mediaId);
-          return new IllegalArgumentException("Media not found");
-        });
+        SubtitleMedia subtitleMedia = subtitleMediaRepository.findById(mediaId)
+                .orElseThrow(() -> {
+                    logger.error("Media not found for id: {}", mediaId);
+                    return new IllegalArgumentException("Media not found");
+                });
 
-    if (!subtitleMedia.getUser().getId().equals(user.getId())) {
-      logger.error("User {} not authorized to generate subtitles for media {}", user.getId(), mediaId);
-      throw new IllegalArgumentException("Not authorized to generate subtitles for this media");
+        if (!subtitleMedia.getUser().getId().equals(user.getId())) {
+            logger.error("User {} not authorized to generate subtitles for media {}", user.getId(), mediaId);
+            throw new IllegalArgumentException("Not authorized to generate subtitles for this media");
+        }
+
+        subtitleMedia.setStatus("PROCESSING");
+        subtitleMediaRepository.save(subtitleMedia);
+        logger.info("✅ Set status to PROCESSING for mediaId: {}", mediaId);
+
+        String inputFilePath = baseDir + File.separator + subtitleMedia.getOriginalPath();
+        File inputFile = new File(inputFilePath);
+
+        // Wrap everything in try-catch to ensure status updates on failure
+        File audioFile = null;
+        try {
+            logger.info("🔍 Checking input file: {}", inputFilePath);
+            if (!inputFile.exists()) {
+                logger.error("❌ Input file does not exist: {}", inputFilePath);
+                throw new IOException("Input file does not exist");
+            }
+            if (inputFile.length() == 0) {
+                logger.error("❌ Input file is empty: {}", inputFilePath);
+                throw new IOException("Input file is empty");
+            }
+            logger.info("✅ Input file OK, size: {} bytes", inputFile.length());
+
+            logger.info("🎵 Extracting audio for mediaId: {}", mediaId);
+            String audioFilePath = extractAudio(inputFile, mediaId);
+            audioFile = new File(audioFilePath);
+            logger.info("✅ Audio extracted: {}, size: {} bytes", audioFilePath, audioFile.length());
+
+            logger.info("⏱️ Getting audio duration...");
+            double audioDuration = getAudioDuration(audioFile);
+            logger.info("✅ Audio duration: {} seconds", audioDuration);
+
+            if (audioDuration <= 0) {
+                logger.error("❌ Audio file has invalid duration: {}", audioDuration);
+                throw new IOException("Audio file has invalid duration");
+            }
+
+            logger.info("🤖 Running Whisper script...");
+            List<Map<String, Object>> rawSubtitles = runWhisperScript(audioFile);
+            logger.info("✅ Whisper returned {} subtitles", rawSubtitles.size());
+
+            if (rawSubtitles.isEmpty()) {
+                logger.warn("⚠️ No subtitles generated for mediaId: {}", mediaId);
+                throw new IOException("No subtitles generated");
+            }
+
+            logger.info("📝 Processing {} raw subtitles into SubtitleDTO objects", rawSubtitles.size());
+            List<SubtitleDTO> subtitles = new ArrayList<>();
+            for (Map<String, Object> raw : rawSubtitles) {
+                double startTime = ((Number) raw.get("start")).doubleValue();
+                double endTime = ((Number) raw.get("end")).doubleValue();
+                String text = (String) raw.get("text");
+
+                startTime = Math.max(0, startTime);
+                endTime = Math.min(audioDuration, endTime);
+
+                if (endTime > startTime && text != null && !text.trim().isEmpty()) {
+                    SubtitleDTO subtitle = new SubtitleDTO();
+                    subtitle.setId(UUID.randomUUID().toString());
+                    subtitle.setTimelineStartTime(startTime);
+                    subtitle.setTimelineEndTime(endTime);
+                    subtitle.setText(text.trim());
+
+                    // Apply style parameters if provided, else use defaults
+                    subtitle.setFontFamily(styleParams != null && styleParams.containsKey("fontFamily") ?
+                            styleParams.get("fontFamily") : "Montserrat Alternates Black");
+                    subtitle.setFontColor(styleParams != null && styleParams.containsKey("fontColor") ?
+                            styleParams.get("fontColor") : "black");
+                    subtitle.setBackgroundColor(styleParams != null && styleParams.containsKey("backgroundColor") ?
+                            styleParams.get("backgroundColor") : "white");
+                    subtitle.setBackgroundOpacity(1.0);
+                    subtitle.setPositionX(0);
+                    subtitle.setPositionY(350);
+                    subtitle.setAlignment("center");
+                    subtitle.setScale(1.5);
+                    subtitle.setBackgroundH(50);
+                    subtitle.setBackgroundW(50);
+                    subtitle.setBackgroundBorderRadius(15);
+
+                    subtitles.add(subtitle);
+                }
+            }
+
+            logger.info("✅ Created {} SubtitleDTO objects", subtitles.size());
+
+            String subtitlesJson = objectMapper.writeValueAsString(subtitles);
+            logger.info("✅ Serialized subtitles to JSON, length: {} characters", subtitlesJson.length());
+
+            subtitleMedia.setSubtitlesJson(subtitlesJson);
+            subtitleMedia.setStatus("SUCCESS");
+            subtitleMediaRepository.save(subtitleMedia);
+            logger.info("🎉 Successfully generated subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
+
+            return subtitleMedia;
+
+        } catch (Exception e) {
+            // THIS IS THE CRITICAL FIX - Always update status on failure
+            logger.error("❌ EXCEPTION during subtitle generation for mediaId {}: {}", mediaId, e.getMessage(), e);
+            logger.error("Exception type: {}", e.getClass().getName());
+
+            subtitleMedia.setStatus("FAILED");
+            subtitleMediaRepository.save(subtitleMedia);
+            logger.info("⚠️ Set status to FAILED for mediaId: {}", mediaId);
+
+            // Re-throw so controller can handle it
+            if (e instanceof IOException) {
+                throw (IOException) e;
+            } else if (e instanceof InterruptedException) {
+                throw (InterruptedException) e;
+            } else {
+                throw new IOException("Subtitle generation failed: " + e.getMessage(), e);
+            }
+        } finally {
+            // Always clean up audio file
+            if (audioFile != null && audioFile.exists()) {
+                try {
+                    Files.delete(audioFile.toPath());
+                    logger.debug("🗑️ Deleted temporary audio file: {}", audioFile.getAbsolutePath());
+                } catch (IOException e) {
+                    logger.error("Failed to delete temporary audio file {}: {}", audioFile.getAbsolutePath(), e.getMessage());
+                }
+            }
+        }
     }
-
-    subtitleMedia.setStatus("PROCESSING");
-    subtitleMediaRepository.save(subtitleMedia);
-
-    String inputFilePath = baseDir + File.separator + subtitleMedia.getOriginalPath();
-    File inputFile = new File(inputFilePath);
-    if (!inputFile.exists() || inputFile.length() == 0) {
-      logger.error("Input file is missing or empty: {}", inputFilePath);
-      subtitleMedia.setStatus("FAILED");
-      subtitleMediaRepository.save(subtitleMedia);
-      throw new IOException("Input file is missing or empty");
-    }
-
-    String audioFilePath = extractAudio(inputFile, mediaId);
-    File audioFile = new File(audioFilePath);
-
-    // Get audio duration
-    double audioDuration = getAudioDuration(audioFile);
-    if (audioDuration <= 0) {
-      logger.error("Audio file has invalid duration: {}", audioFilePath);
-      subtitleMedia.setStatus("FAILED");
-      subtitleMediaRepository.save(subtitleMedia);
-      Files.delete(audioFile.toPath());
-      throw new IOException("Audio file has invalid duration");
-    }
-
-    List<Map<String, Object>> rawSubtitles;
-    try {
-      rawSubtitles = runWhisperScript(audioFile);
-    } catch (Exception e) {
-      logger.error("Failed to generate subtitles for mediaId {}: {}", mediaId, e.getMessage());
-      subtitleMedia.setStatus("FAILED");
-      subtitleMediaRepository.save(subtitleMedia);
-      Files.delete(audioFile.toPath());
-      throw e;
-    }
-
-    if (rawSubtitles.isEmpty()) {
-      logger.warn("No subtitles generated for mediaId: {}", mediaId);
-      subtitleMedia.setStatus("FAILED");
-      subtitleMediaRepository.save(subtitleMedia);
-      Files.delete(audioFile.toPath());
-      throw new IOException("No subtitles generated");
-    }
-
-    List<SubtitleDTO> subtitles = new ArrayList<>();
-    for (Map<String, Object> raw : rawSubtitles) {
-      double startTime = ((Number) raw.get("start")).doubleValue();
-      double endTime = ((Number) raw.get("end")).doubleValue();
-      String text = (String) raw.get("text");
-
-      startTime = Math.max(0, startTime);
-      endTime = Math.min(audioDuration, endTime);
-
-      if (endTime > startTime && text != null && !text.trim().isEmpty()) {
-        SubtitleDTO subtitle = new SubtitleDTO();
-        subtitle.setId(UUID.randomUUID().toString());
-        subtitle.setTimelineStartTime(startTime);
-        subtitle.setTimelineEndTime(endTime);
-        subtitle.setText(text.trim());
-
-        // Apply style parameters if provided, else use defaults
-        subtitle.setFontFamily(styleParams != null && styleParams.containsKey("fontFamily") ?
-            styleParams.get("fontFamily") : "Montserrat Alternates Black");
-        subtitle.setFontColor(styleParams != null && styleParams.containsKey("fontColor") ?
-            styleParams.get("fontColor") : "black");
-        subtitle.setBackgroundColor(styleParams != null && styleParams.containsKey("backgroundColor") ?
-            styleParams.get("backgroundColor") : "white");
-        subtitle.setBackgroundOpacity(1.0);
-        subtitle.setPositionX(0);
-        subtitle.setPositionY(350);
-        subtitle.setAlignment("center");
-        subtitle.setScale(1.5);
-        subtitle.setBackgroundH(50);
-        subtitle.setBackgroundW(50);
-        subtitle.setBackgroundBorderRadius(15);
-
-        subtitles.add(subtitle);
-      }
-    }
-
-    subtitleMedia.setSubtitlesJson(objectMapper.writeValueAsString(subtitles));
-    subtitleMedia.setStatus("SUCCESS");
-    subtitleMediaRepository.save(subtitleMedia);
-
-    if (audioFile.exists()) {
-      try {
-        Files.delete(audioFile.toPath());
-        logger.debug("Deleted temporary audio file: {}", audioFile.getAbsolutePath());
-      } catch (IOException e) {
-        logger.error("Failed to delete temporary audio file {}: {}", audioFile.getAbsolutePath(), e.getMessage());
-      }
-    }
-
-    logger.info("Successfully generated subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
-    return subtitleMedia;
-  }
 
   public SubtitleMedia updateSingleSubtitle(User user, Long mediaId, String subtitleId, SubtitleDTO updatedSubtitle) throws IOException {
     logger.info("Updating single subtitle for user: {}, mediaId: {}, subtitleId: {}", user.getId(), mediaId, subtitleId);
@@ -526,67 +552,94 @@ public class SubtitleService {
     return audioFilePath;
   }
 
-  public List<Map<String, Object>> runWhisperScript(File audioFile) throws IOException, InterruptedException {
-    File scriptFile = new File(subtitleScriptPath);
-    if (!scriptFile.exists()) {
-      logger.error("Subtitle script not found: {}", scriptFile.getAbsolutePath());
-      throw new IOException("Subtitle script not found: " + scriptFile.getAbsolutePath());
+    public List<Map<String, Object>> runWhisperScript(File audioFile) throws IOException, InterruptedException {
+        File scriptFile = new File(subtitleScriptPath);
+        if (!scriptFile.exists()) {
+            logger.error("Subtitle script not found: {}", scriptFile.getAbsolutePath());
+            throw new IOException("Subtitle script not found: " + scriptFile.getAbsolutePath());
+        }
+
+        List<String> command = Arrays.asList(
+                pythonPath,
+                scriptFile.getAbsolutePath(),
+                audioFile.getAbsolutePath()
+        );
+
+        logger.debug("Executing Whisper command: {}", String.join(" ", command));
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(false);
+        Process process = pb.start();
+
+        StringBuilder output = new StringBuilder();
+        StringBuilder errorOutput = new StringBuilder();
+
+        // CRITICAL FIX: Read both streams concurrently to prevent deadlock
+        Thread stdoutThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    synchronized (output) {
+                        output.append(line);
+                    }
+                    logger.debug("Whisper stdout: {}", line);
+                }
+            } catch (IOException e) {
+                logger.error("Error reading stdout: {}", e.getMessage());
+            }
+        });
+
+        Thread stderrThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    synchronized (errorOutput) {
+                        errorOutput.append(line).append("\n");
+                    }
+                    logger.debug("Whisper stderr: {}", line);
+                }
+            } catch (IOException e) {
+                logger.error("Error reading stderr: {}", e.getMessage());
+            }
+        });
+
+        stdoutThread.start();
+        stderrThread.start();
+
+        // Wait for process with timeout
+        boolean finished = process.waitFor(15, TimeUnit.MINUTES);
+
+        // Wait for threads to finish reading
+        stdoutThread.join(5000);
+        stderrThread.join(5000);
+
+        if (!finished) {
+            process.destroyForcibly();
+            logger.error("Whisper script timed out after 5 minutes");
+            throw new IOException("Whisper transcription timed out after 5 minutes");
+        }
+
+        int exitCode = process.exitValue();
+        if (exitCode != 0) {
+            logger.error("Whisper script failed with exit code {}: {}", exitCode, errorOutput.toString());
+            throw new IOException("Whisper transcription failed with exit code " + exitCode + ": " + errorOutput.toString());
+        }
+
+        String outputStr = output.toString().trim();
+        if (outputStr.isEmpty()) {
+            logger.warn("No output from Whisper script. Stderr: {}", errorOutput.toString());
+            throw new IOException("No output from Whisper script. Check logs: " + errorOutput.toString());
+        }
+
+        try {
+            List<Map<String, Object>> subtitles = objectMapper.readValue(outputStr, new TypeReference<List<Map<String, Object>>>() {
+            });
+            logger.debug("Parsed {} subtitles from Whisper output", subtitles.size());
+            return subtitles;
+        } catch (JsonProcessingException e) {
+            logger.error("Failed to parse Whisper output as JSON: {}. Output: {}. Stderr: {}", e.getMessage(), outputStr, errorOutput.toString());
+            throw new IOException("Invalid JSON output from Whisper script: " + outputStr, e);
+        }
     }
-
-    List<String> command = Arrays.asList(
-        pythonPath,
-        scriptFile.getAbsolutePath(),
-        audioFile.getAbsolutePath()
-    );
-
-    logger.debug("Executing Whisper command: {}", String.join(" ", command));
-    ProcessBuilder pb = new ProcessBuilder(command);
-    pb.redirectErrorStream(false); // Separate stdout and stderr
-    Process process = pb.start();
-
-    StringBuilder output = new StringBuilder();
-    StringBuilder errorOutput = new StringBuilder();
-
-    // Read stdout
-    try (BufferedReader stdoutReader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-      String line;
-      while ((line = stdoutReader.readLine()) != null) {
-        output.append(line);
-        logger.debug("Whisper stdout: {}", line);
-      }
-    }
-
-    // Read stderr
-    try (BufferedReader stderrReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-      String line;
-      while ((line = stderrReader.readLine()) != null) {
-        errorOutput.append(line).append("\n");
-        logger.debug("Whisper stderr: {}", line);
-      }
-    }
-
-    int exitCode = process.waitFor();
-    if (exitCode != 0) {
-      logger.error("Whisper script failed with exit code {}: {}", exitCode, errorOutput.toString());
-      throw new IOException("Whisper transcription failed with exit code " + exitCode + ": " + errorOutput.toString());
-    }
-
-    String outputStr = output.toString().trim();
-    if (outputStr.isEmpty()) {
-      logger.warn("No output from Whisper script: {}", errorOutput.toString());
-      throw new IOException("No output from Whisper script: " + errorOutput.toString());
-    }
-
-    try {
-      List<Map<String, Object>> subtitles = objectMapper.readValue(outputStr, new TypeReference<List<Map<String, Object>>>() {
-      });
-      logger.debug("Parsed {} subtitles from Whisper output", subtitles.size());
-      return subtitles;
-    } catch (JsonProcessingException e) {
-      logger.error("Failed to parse Whisper output as JSON: {}. Output: {}. Stderr: {}", e.getMessage(), outputStr, errorOutput.toString());
-      throw new IOException("Invalid JSON output from Whisper script: " + outputStr, e);
-    }
-  }
 
   private Map<String, Object> getVideoInfo(File inputFile) throws IOException, InterruptedException {
     List<String> command = Arrays.asList(
@@ -1182,14 +1235,32 @@ public class SubtitleService {
         parseColor(ts.getTextBorderColor(), null, "text border", ts.getId()) : null;
 
     double baseFontSize = 24.0 * maxScale * RESOLUTION_MULTIPLIER;
-    Font font;
-    try {
-      font = Font.createFont(Font.TRUETYPE_FONT, new File(getFontPathByFamily(ts.getFontFamily())))
-          .deriveFont((float) baseFontSize);
-    } catch (Exception e) {
-      logger.error("Failed to load font for subtitle {}: {}, using Arial", ts.getId(), ts.getFontFamily(), e);
-      font = new Font("Arial", Font.PLAIN, (int) baseFontSize);
-    }
+      Font font;
+      try {
+          String fontPath;
+          // Auto-detect Hindi and override font
+          if (containsHindiCharacters(ts.getText())) {
+              logger.info("Hindi text detected for subtitle {}, using Noto Sans Devanagari", ts.getId());
+              fontPath = getFontFilePath("NotoSansDevanagari-Regular.ttf", "/fonts/",
+                      System.getProperty("java.io.tmpdir") + "/scenith-fonts/");
+          } else {
+              fontPath = getFontPathByFamily(ts.getFontFamily());
+          }
+
+          font = Font.createFont(Font.TRUETYPE_FONT, new File(fontPath))
+                  .deriveFont((float) baseFontSize);
+      } catch (Exception e) {
+          logger.error("Failed to load font for subtitle {}: {}, using Noto Sans Devanagari fallback", ts.getId(), ts.getFontFamily(), e);
+          try {
+              String hindiFontPath = getFontFilePath("NotoSansDevanagari-Regular.ttf", "/fonts/",
+                      System.getProperty("java.io.tmpdir") + "/scenith-fonts/");
+              font = Font.createFont(Font.TRUETYPE_FONT, new File(hindiFontPath))
+                      .deriveFont((float) baseFontSize);
+          } catch (Exception ex) {
+              logger.error("Failed to load Hindi font, using system default", ex);
+              font = new Font("Arial", Font.PLAIN, (int) baseFontSize);
+          }
+      }
 
     double letterSpacing = ts.getLetterSpacing() != null ? ts.getLetterSpacing() : 0.0;
     double scaledLetterSpacing = letterSpacing * maxScale * RESOLUTION_MULTIPLIER;
@@ -1541,6 +1612,7 @@ public class SubtitleService {
 
 // Yesteryear
     fontMap.put("Yesteryear", "Yesteryear-Regular.ttf");
+    fontMap.put("Noto Sans Devanagari", "NotoSansDevanagari-Regular.ttf");
 
     String processedFontFamily = fontFamily.trim();
     if (fontMap.containsKey(processedFontFamily)) {
@@ -1629,6 +1701,16 @@ public class SubtitleService {
       logger.error("Failed to parse FFprobe output for {}: {}", videoFile.getAbsolutePath(), output.toString());
       throw new IOException("Failed to parse FFprobe output: " + output.toString());
     }
+  }
+
+  private boolean containsHindiCharacters(String text) {
+      if (text == null) return false;
+      for (char c : text.toCharArray()) {
+          if (c >= 0x0900 && c <= 0x097F) {
+              return true;
+          }
+      }
+      return false;
   }
 
 }

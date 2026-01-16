@@ -103,17 +103,24 @@ public class ImageRenderService {
      * Create base canvas with background color
      */
     private void createBaseCanvas(CanvasDTO canvas, String outputPath) throws IOException, InterruptedException {
-        String bgColor = canvas.getBackgroundColor() != null ? canvas.getBackgroundColor() : "#FFFFFF";
-
         List<String> command = new ArrayList<>();
         command.add(imageMagickPath);
-        command.add("-size");
-        command.add(canvas.getWidth() + "x" + canvas.getHeight());
-        command.add("xc:" + bgColor);
+        Boolean isTransparent = canvas.getTransparent();
+        if (isTransparent != null && isTransparent) {
+            command.add("-size");
+            command.add(canvas.getWidth() + "x" + canvas.getHeight());
+            command.add("xc:transparent");
+        } else {
+            String bgColor = canvas.getBackgroundColor() != null ? canvas.getBackgroundColor() : "#FFFFFF";
+            command.add("-size");
+            command.add(canvas.getWidth() + "x" + canvas.getHeight());
+            command.add("xc:" + bgColor);
+        }
         command.add("-set");
         command.add("colorspace");
         command.add("sRGB");
-        command.add(outputPath);
+
+        command.add("PNG32:" + outputPath);
 
         executeImageMagickCommand(command, "Create base canvas");
     }
@@ -159,30 +166,45 @@ public class ImageRenderService {
     /**
      * Process IMAGE layer
      */
-    /**
-     * Process IMAGE layer
-     */
     private String processImageLayer(LayerDTO layer, String tempDirPath, Integer canvasWidth, Integer canvasHeight)
-        throws IOException, InterruptedException {
+            throws IOException, InterruptedException {
 
         String outputPath = tempDirPath + File.separator + "layer_" + layer.getId() + "_image.png";
         String sourceImagePath = downloadOrCopyImage(layer.getSrc(), tempDirPath, layer.getId());
 
+        boolean isSvg = sourceImagePath.toLowerCase().endsWith(".svg");
+
         List<String> command = new ArrayList<>();
         command.add(imageMagickPath);
+
+        // For SVG, specify density BEFORE reading the file
+        if (isSvg) {
+            command.add("-density");
+            command.add("300");  // High DPI for quality
+            command.add("-background");
+            command.add("transparent");
+        }
+
         command.add(sourceImagePath);
         command.add("-set");
         command.add("colorspace");
         command.add("sRGB");
 
-        // Get natural dimensions from source image
+        // Get dimensions
         double naturalWidth;
         double naturalHeight;
 
-        if (sourceImagePath.toLowerCase().endsWith(".svg")) {
-            // For SVG, use layer dimensions directly (SVGs are scalable)
+        if (isSvg) {
+            // For SVG, try to read viewBox if layer dimensions aren't set
             naturalWidth = layer.getWidth();
             naturalHeight = layer.getHeight();
+
+            // Fallback to reasonable defaults if not set
+            if (naturalWidth == 0 || naturalHeight == 0) {
+                logger.warn("SVG layer {} has no dimensions set, using defaults", layer.getId());
+                naturalWidth = 500;  // Reasonable default
+                naturalHeight = 500;
+            }
         } else {
             BufferedImage sourceImg = ImageIO.read(new File(sourceImagePath));
             if (sourceImg == null) {
@@ -1571,7 +1593,7 @@ public class ImageRenderService {
      * Export final image in specified format
      */
     private void exportFinalImage(String inputPath, String outputPath, String format, Integer quality)
-        throws IOException, InterruptedException {
+            throws IOException, InterruptedException {
 
         List<String> command = new ArrayList<>();
         command.add(imageMagickPath);
@@ -1581,17 +1603,26 @@ public class ImageRenderService {
         command.add("sRGB");
 
         if ("JPG".equalsIgnoreCase(format) || "JPEG".equalsIgnoreCase(format)) {
+            // JPG doesn't support transparency - flatten with white background
             command.add("-background");
             command.add("white");
             command.add("-flatten");
             command.add("-quality");
             command.add(String.valueOf(quality != null ? quality : 90));
+            command.add(outputPath);
+        } else if ("PNG".equalsIgnoreCase(format)) {
+            // PNG with transparency support - explicitly use PNG32 format
+            command.add("-quality");
+            command.add(String.valueOf(quality != null ? quality : 90));
+            command.add("PNG32:" + outputPath); // Force PNG32 format with alpha channel
         } else if ("PDF".equalsIgnoreCase(format)) {
             command.add("-density");
             command.add("300");
+            command.add(outputPath);
+        } else {
+            // Default case for other formats
+            command.add(outputPath);
         }
-
-        command.add(outputPath);
 
         executeImageMagickCommand(command, "Export final image");
     }
@@ -1600,28 +1631,23 @@ public class ImageRenderService {
      * Download image from URL or copy from local path
      */
     private String downloadOrCopyImage(String src, String tempDirPath, String layerId) throws IOException, InterruptedException {
-        String outputPath = tempDirPath + File.separator + "source_" + layerId + ".png";
-        
+        String outputPath = tempDirPath + File.separator + "source_" + layerId;
+
+        // Preserve original extension
         if (src.startsWith("http://") || src.startsWith("https://")) {
-            // Download from URL
-            logger.debug("Downloading image from: {}", src);
+            String extension = src.substring(src.lastIndexOf('.'));
+            outputPath += extension;
             try (InputStream in = new URL(src).openStream()) {
                 Files.copy(in, Paths.get(outputPath), StandardCopyOption.REPLACE_EXISTING);
             }
         } else {
-            // Copy from local path
             String fullPath = baseDir + File.separator + src;
+            String extension = src.substring(src.lastIndexOf('.'));
+            outputPath += extension;
             Files.copy(Paths.get(fullPath), Paths.get(outputPath), StandardCopyOption.REPLACE_EXISTING);
         }
 
-        // Convert SVG to PNG if needed
-        if (outputPath.toLowerCase().endsWith(".svg") || src.toLowerCase().endsWith(".svg")) {
-            String pngOutputPath = tempDirPath + File.separator + "source_" + layerId + "_converted.png";
-            convertSvgToPng(outputPath, pngOutputPath);
-            Files.deleteIfExists(Paths.get(outputPath));
-            return pngOutputPath;
-        }
-
+        // NO conversion here - keep SVG as SVG
         return outputPath;
     }
 
@@ -1685,22 +1711,5 @@ public class ImageRenderService {
         } catch (IOException e) {
             logger.warn("Failed to cleanup temp directory: {}", e.getMessage());
         }
-    }
-
-    /**
-     * Convert SVG to PNG using ImageMagick
-     */
-    private void convertSvgToPng(String svgPath, String pngPath) throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>();
-        command.add(imageMagickPath);
-        command.add("-density");
-        command.add("300"); // High DPI for quality
-        command.add("-background");
-        command.add("transparent");
-        command.add(svgPath);
-        command.add("-flatten");
-        command.add(pngPath);
-
-        executeImageMagickCommand(command, "Convert SVG to PNG");
     }
 }

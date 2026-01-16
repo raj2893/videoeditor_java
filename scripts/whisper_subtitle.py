@@ -17,7 +17,7 @@ def generate_subtitles(audio_path):
         if not os.path.exists(audio_path):
             print(f"Audio file does not exist: {audio_path}", file=sys.stderr)
             sys.exit(1)
-        model = whisper.load_model("base")
+        model = whisper.load_model("medium")
         print("Model loaded, starting transcription", file=sys.stderr)
 
         # Redirect stdout to stderr during transcription

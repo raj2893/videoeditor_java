@@ -2,8 +2,10 @@ package com.example.videoeditor.service;
 
 import com.example.videoeditor.entity.SoleTTS;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.UserDailyTtsUsage;
 import com.example.videoeditor.entity.UserTtsUsage;
 import com.example.videoeditor.repository.SoleTTSRepository;
+import com.example.videoeditor.repository.UserDailyTtsUsageRepository;
 import com.example.videoeditor.repository.UserTtsUsageRepository;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.texttospeech.v1.*;
@@ -17,6 +19,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -30,15 +33,17 @@ public class SoleTTSService {
 
     private final SoleTTSRepository soleTTSRepository;
     private final UserTtsUsageRepository userTtsUsageRepository;
+    private final UserDailyTtsUsageRepository userDailyTtsUsageRepository;
 
     private final String baseDir = "D:\\Backend\\videoeditor_java";
     String credentialsPath = baseDir + File.separator + "credentials" + File.separator + "video-editor-tts-24b472478ab838d2168992684517cacfab4c11da.json";
 
     public SoleTTSService(
             SoleTTSRepository soleTTSRepository,
-            UserTtsUsageRepository userTtsUsageRepository) {
+            UserTtsUsageRepository userTtsUsageRepository, UserDailyTtsUsageRepository userDailyTtsUsageRepository) {
         this.soleTTSRepository = soleTTSRepository;
         this.userTtsUsageRepository = userTtsUsageRepository;
+        this.userDailyTtsUsageRepository = userDailyTtsUsageRepository;
     }
 
     public SoleTTS generateTTS(
@@ -58,19 +63,37 @@ public class SoleTTSService {
             throw new IllegalArgumentException("Language code is required");
         }
 
-        if (text.length() > 5000) {
-            throw new IllegalArgumentException("Text exceeds max characters allowed per request limit (~5,000 characters)");
+        // Check max chars per request
+        long maxCharsPerRequest = user.getMaxCharsPerRequest();
+        if (maxCharsPerRequest > 0 && text.length() > maxCharsPerRequest) {
+            throw new IllegalArgumentException(
+                    "Text exceeds max characters allowed per request for " + user.getRole() +
+                            " plan (Limit: " + maxCharsPerRequest + " characters per request)"
+            );
         }
 
-        // Check user TTS usage
-        long userUsage = getUserTtsUsage(user);
+        // Check monthly TTS usage (skip if unlimited)
         long monthlyLimit = user.getMonthlyTtsLimit();
+        if (monthlyLimit > 0) { // Only check if there's a limit (-1 means unlimited)
+            long userUsage = getUserTtsUsage(user);
+            if (userUsage + text.length() > monthlyLimit) {
+                throw new IllegalStateException(
+                        "AI Voice Generation limit exceeded for plan: " + user.getRole() +
+                                " (Limit: " + monthlyLimit + ", Used: " + userUsage + ")"
+                );
+            }
+        }
 
-        if (userUsage + text.length() > monthlyLimit) {
-            throw new IllegalStateException(
-                    "AI Voice Generation limit exceeded for plan: " + user.getRole() +
-                            " (Limit: " + monthlyLimit + ", Used: " + userUsage + ")"
-            );
+        // Check daily TTS usage (skip if unlimited)
+        long dailyLimit = user.getDailyTtsLimit();
+        if (dailyLimit > 0) { // -1 means no daily limit
+            long dailyUsage = getUserDailyTtsUsage(user);
+            if (dailyUsage + text.length() > dailyLimit) {
+                throw new IllegalStateException(
+                        "Daily AI Voice Generation limit exceeded for plan: " + user.getRole() +
+                                " (Daily Limit: " + dailyLimit + ", Used Today: " + dailyUsage + ")"
+                );
+            }
         }
 
         // Generate audio using Google Cloud TTS
@@ -128,6 +151,7 @@ public class SoleTTSService {
 
             // Update TTS usage
             updateUserTtsUsage(user, text.length());
+            updateUserDailyTtsUsage(user, text.length());
 
             return soleTTS;
         }
@@ -186,5 +210,20 @@ public class SoleTTSService {
 
         ssml.append("</speak>");
         return ssml.toString();
+    }
+
+    public long getUserDailyTtsUsage(User user) {
+        LocalDate today = LocalDate.now();
+        return userDailyTtsUsageRepository.findByUserAndUsageDate(user, today)
+                .map(UserDailyTtsUsage::getCharactersUsed)
+                .orElse(0L);
+    }
+
+    private void updateUserDailyTtsUsage(User user, long characters) {
+        LocalDate today = LocalDate.now();
+        UserDailyTtsUsage usage = userDailyTtsUsageRepository.findByUserAndUsageDate(user, today)
+                .orElseGet(() -> new UserDailyTtsUsage(user, today));
+        usage.setCharactersUsed(usage.getCharactersUsed() + characters);
+        userDailyTtsUsageRepository.save(usage);
     }
 }

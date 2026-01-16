@@ -7,9 +7,9 @@ import lombok.*;
 @Table(name = "video_filter_jobs")
 @Getter
 @Setter
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class VideoFilterJob {
 
     @Id
@@ -26,39 +26,51 @@ public class VideoFilterJob {
     @Column(name = "filter_name", length = 100)
     private String filterName;
 
+    @Builder.Default
     @Column(name = "brightness", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double brightness = 0.0;
 
+    @Builder.Default
     @Column(name = "contrast", columnDefinition = "DECIMAL(5,2) DEFAULT 1.0")
     private Double contrast = 1.0;
 
+    @Builder.Default
     @Column(name = "saturation", columnDefinition = "DECIMAL(5,2) DEFAULT 1.0")
     private Double saturation = 1.0;
 
+    @Builder.Default
     @Column(name = "temperature", columnDefinition = "DECIMAL(7,2) DEFAULT 6500.0")
     private Double temperature = 6500.0;
 
+    @Builder.Default
     @Column(name = "gamma", columnDefinition = "DECIMAL(5,2) DEFAULT 1.0")
     private Double gamma = 1.0;
 
+    @Builder.Default
     @Column(name = "shadows", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double shadows = 0.0;
 
+    @Builder.Default
     @Column(name = "highlights", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double highlights = 0.0;
 
+    @Builder.Default
     @Column(name = "vibrance", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double vibrance = 0.0;
 
+    @Builder.Default
     @Column(name = "hue", columnDefinition = "DECIMAL(6,2) DEFAULT 0.0")
     private Double hue = 0.0;
 
+    @Builder.Default
     @Column(name = "exposure", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double exposure = 0.0;
 
+    @Builder.Default
     @Column(name = "tint", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double tint = 0.0;
 
+    @Builder.Default
     @Column(name = "sharpness", columnDefinition = "DECIMAL(5,2) DEFAULT 0.0")
     private Double sharpness = 0.0;
 
@@ -68,10 +80,12 @@ public class VideoFilterJob {
     @Column(name = "lut_path", length = 500)
     private String lutPath;
 
+    @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private ProcessingStatus status = ProcessingStatus.PENDING;
 
+    @Builder.Default
     @Column(name = "progress_percentage", columnDefinition = "INTEGER DEFAULT 0")
     private Integer progressPercentage = 0;
 

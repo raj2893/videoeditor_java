@@ -8,10 +8,14 @@ import com.example.videoeditor.entity.imageentity.ImageAsset;
 import com.example.videoeditor.entity.imageentity.ImageElement;
 import com.example.videoeditor.entity.imageentity.ImageProject;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.service.imageservice.ElementDownloadService;
 import com.example.videoeditor.service.imageservice.ImageAssetService;
 import com.example.videoeditor.service.imageservice.ImageEditorService;
 import com.example.videoeditor.service.imageservice.ImageElementService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -29,7 +33,7 @@ public class ImageEditorController {
     private final ImageEditorService imageEditorService;
     private final ImageAssetService imageAssetService;
     private final ImageElementService imageElementService;
-
+    private final ElementDownloadService elementDownloadService;
 
     /**
      * Create new project
@@ -245,7 +249,6 @@ public class ImageEditorController {
 
     @GetMapping("/elements")
     public ResponseEntity<?> getElements(
-        @RequestHeader("Authorization") String token,
         @RequestParam(value = "category", required = false) String category) {
         try {
             List<ImageElement> elements;
@@ -279,6 +282,81 @@ public class ImageEditorController {
         } catch (IOException | InterruptedException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Background removal failed: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Apply template to project
+     * POST /api/image-editor/projects/{projectId}/apply-template/{templateId}
+     */
+    @PostMapping("/projects/{projectId}/apply-template/{templateId}")
+    public ResponseEntity<?> applyTemplate(
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long projectId,
+            @PathVariable Long templateId) {
+        try {
+            User user = imageEditorService.getUserFromToken(token);
+            ImageProject project = imageEditorService.applyTemplateToProject(user, projectId, templateId);
+            return ResponseEntity.ok(project);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to apply template: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Download element in specified format
+     * GET /api/image-editor/elements/{id}/download
+     */
+    @GetMapping("/elements/{id}/download")
+    public ResponseEntity<Resource> downloadElement(
+            @PathVariable Long id,
+            @RequestParam String format,
+            @RequestParam(required = false) String resolution,
+            @RequestHeader(value = "Authorization", required = false) String token,
+            HttpServletRequest request) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                try {
+                    user = imageEditorService.getUserFromToken(token);
+                } catch (Exception e) {
+                    // User not logged in, continue as anonymous
+                }
+            }
+
+            String ipAddress = request.getRemoteAddr();
+
+            ElementDownloadService.DownloadResult result =
+                    elementDownloadService.downloadElement(id, format, resolution, user, ipAddress);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + result.getFilename() + "\"")
+                    .contentType(org.springframework.http.MediaType.parseMediaType(result.getContentType()))
+                    .body(result.getResource());
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /**
+     * Get download statistics for element
+     * GET /api/image-editor/elements/{id}/stats
+     */
+    @GetMapping("/elements/{id}/stats")
+    public ResponseEntity<?> getElementStats(@PathVariable Long id) {
+        try {
+            Long downloadCount = elementDownloadService.getDownloadCount(id);
+            return ResponseEntity.ok(Map.of("downloads", downloadCount));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to retrieve stats"));
         }
     }
 }

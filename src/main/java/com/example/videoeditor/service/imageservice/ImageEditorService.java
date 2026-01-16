@@ -5,6 +5,7 @@ import com.example.videoeditor.dto.imagedto.ExportImageRequest;
 import com.example.videoeditor.dto.imagedto.UpdateImageProjectRequest;
 import com.example.videoeditor.entity.imageentity.ImageProject;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.imageentity.ImageTemplate;
 import com.example.videoeditor.repository.imagerepository.ImageProjectRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
@@ -28,18 +29,20 @@ public class ImageEditorService {
     private final ImageRenderService imageRenderService;
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
+    private final ImageTemplateService templateService;
 
     public ImageEditorService(
             ImageProjectRepository imageProjectRepository,
             UserRepository userRepository,
             ImageRenderService imageRenderService,
             JwtUtil jwtUtil,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper, ImageTemplateService templateService) {
         this.imageProjectRepository = imageProjectRepository;
         this.userRepository = userRepository;
         this.imageRenderService = imageRenderService;
         this.jwtUtil = jwtUtil;
         this.objectMapper = objectMapper;
+        this.templateService = templateService;
     }
 
     /**
@@ -231,6 +234,49 @@ public class ImageEditorService {
 
         imageProjectRepository.delete(project);
         logger.info("Project deleted: {}", projectId);
+    }
+
+    /**
+     * Apply template to project
+     */
+    @Transactional
+    public ImageProject applyTemplateToProject(User user, Long projectId, Long templateId) {
+        logger.info("Applying template {} to project: {}", templateId, projectId);
+
+        ImageProject project = imageProjectRepository.findByIdAndUser(projectId, user)
+                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+
+        ImageTemplate template = templateService.getTemplateById(templateId);
+
+        // Update project with template data
+        project.setCanvasWidth(template.getCanvasWidth());
+        project.setCanvasHeight(template.getCanvasHeight());
+        project.setDesignJson(template.getDesignJson());
+
+        // Parse and update canvas background color from template
+        try {
+            Map<String, Object> design = objectMapper.readValue(template.getDesignJson(), Map.class);
+            if (design.containsKey("pages")) {
+                List<Map<String, Object>> pages = (List<Map<String, Object>>) design.get("pages");
+                if (!pages.isEmpty()) {
+                    Map<String, Object> firstPage = pages.get(0);
+                    Map<String, Object> canvas = (Map<String, Object>) firstPage.get("canvas");
+                    if (canvas != null && canvas.containsKey("backgroundColor")) {
+                        project.setCanvasBackgroundColor((String) canvas.get("backgroundColor"));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Could not parse canvas background from template", e);
+        }
+
+        imageProjectRepository.save(project);
+
+        // Increment template usage
+        templateService.incrementUsageCount(templateId);
+
+        logger.info("Template applied successfully to project: {}", projectId);
+        return project;
     }
 
     /**

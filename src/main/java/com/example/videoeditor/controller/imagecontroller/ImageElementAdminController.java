@@ -1,7 +1,10 @@
 package com.example.videoeditor.controller.imagecontroller;
 
+import com.example.videoeditor.entity.User;
 import com.example.videoeditor.entity.imageentity.ImageElement;
+import com.example.videoeditor.service.imageservice.ImageEditorService;
 import com.example.videoeditor.service.imageservice.ImageElementService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -9,15 +12,18 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping("/api/admin/image-elements")
 public class ImageElementAdminController {
 
-    @Autowired
-    private ImageElementService imageElementService;
+    private final ImageElementService imageElementService;
+    private final ImageEditorService imageEditorService;
 
     /**
      * Upload new element
@@ -26,14 +32,41 @@ public class ImageElementAdminController {
     @PostMapping("/upload")
     public ResponseEntity<?> uploadElement(
             @RequestHeader("Authorization") String token,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "name", required = false) String name,
+            @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "category", defaultValue = "general") String category,
             @RequestParam(value = "tags", required = false) String tags) {
         try {
-            // TODO: Add admin role check using token
-            ImageElement element = imageElementService.uploadElement(file, name, category, tags);
-            return ResponseEntity.ok(element);
+            User user = imageEditorService.getUserFromToken(token);
+            if (!user.isAdmin()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Access denied: Admin role required"));
+            }
+            if (files == null || files.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "No files provided"));
+            }
+
+            List<ImageElement> savedElements = new ArrayList<>();
+            for (MultipartFile file : files) {
+                if (file.isEmpty()) continue;
+
+                String originalName = file.getOriginalFilename();
+                String elementName = originalName != null
+                        ? originalName.replaceFirst("[.][^.]+$", "")  // remove extension
+                        : "unnamed_" + UUID.randomUUID().toString().substring(0, 8);
+
+                ImageElement element = imageElementService.uploadElement(
+                        file,
+                        elementName,           // ← original name without extension
+                        category,
+                        tags
+                );
+                savedElements.add(element);
+            }
+            if (savedElements.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "No valid files uploaded"));
+            }
+            return ResponseEntity.ok(savedElements);
+
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("message", e.getMessage()));
@@ -50,6 +83,11 @@ public class ImageElementAdminController {
     @GetMapping
     public ResponseEntity<?> getAllElements(@RequestHeader("Authorization") String token) {
         try {
+            User user = imageEditorService.getUserFromToken(token);
+            if (!user.isAdmin()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Access denied: Admin role required"));
+            }
             // TODO: Add admin role check
             List<ImageElement> elements = imageElementService.getAllElements();
             return ResponseEntity.ok(elements);
@@ -73,6 +111,11 @@ public class ImageElementAdminController {
             @RequestParam(value = "isActive", required = false) Boolean isActive,
             @RequestParam(value = "displayOrder", required = false) Integer displayOrder) {
         try {
+            User user = imageEditorService.getUserFromToken(token);
+            if (!user.isAdmin()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Access denied: Admin role required"));
+            }
             // TODO: Add admin role check
             ImageElement element = imageElementService.updateElement(id, name, category, tags, isActive, displayOrder);
             return ResponseEntity.ok(element);
@@ -94,6 +137,11 @@ public class ImageElementAdminController {
             @RequestHeader("Authorization") String token,
             @PathVariable Long id) {
         try {
+            User user = imageEditorService.getUserFromToken(token);
+            if (!user.isAdmin()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Access denied: Admin role required"));
+            }
             // TODO: Add admin role check
             imageElementService.deleteElement(id);
             return ResponseEntity.ok(Map.of("message", "Element deleted successfully"));

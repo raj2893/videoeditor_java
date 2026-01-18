@@ -3,6 +3,8 @@ package com.example.videoeditor.entity;
 import jakarta.persistence.*;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 @Entity
 @Data
 @Table(name = "subtitle_media")
@@ -40,6 +42,26 @@ public class SubtitleMedia {
     private String status;
 
     private Double progress;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "last_modified")
+    private LocalDateTime lastModified;
+
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        lastModified = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        lastModified = LocalDateTime.now();
+    }
+
+    @Column(length = 10)
+    private String quality; // e.g., "720p", "1080p"
 
     public SubtitleMedia() {
         this.status = "PENDING";

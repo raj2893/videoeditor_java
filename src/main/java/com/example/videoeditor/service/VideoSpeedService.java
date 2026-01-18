@@ -1,7 +1,9 @@
 package com.example.videoeditor.service;
 
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.UserProcessingUsage;
 import com.example.videoeditor.entity.VideoSpeed;
+import com.example.videoeditor.repository.UserProcessingUsageRepository;
 import com.example.videoeditor.repository.VideoSpeedRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -20,9 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.YearMonth;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +31,7 @@ public class VideoSpeedService {
     private static final Logger logger = LoggerFactory.getLogger(VideoSpeedService.class);
 
     private final VideoSpeedRepository videoSpeedRepository;
+    private final UserProcessingUsageRepository userProcessingUsageRepository;
     private final ObjectMapper objectMapper;
 
     @Value("${video-editor.base-path-speed}")
@@ -92,22 +94,27 @@ public class VideoSpeedService {
     }
 
     @Transactional
-    public VideoSpeed initiateExport(Long id, User user) throws IOException {
+    public VideoSpeed initiateExport(Long id, User user, String quality) throws IOException, InterruptedException {
         VideoSpeed video = videoSpeedRepository.findByIdAndUser(id, user)
-            .orElseThrow(() -> new RuntimeException("Video not found or unauthorized: " + id));
+                .orElseThrow(() -> new RuntimeException("Video not found or unauthorized: " + id));
 
-        // Allow export for UPLOADED, FAILED, or COMPLETED videos
         if ("PENDING".equals(video.getStatus()) || "PROCESSING".equals(video.getStatus())) {
             throw new IllegalStateException("Video is already being processed");
         }
 
-        // Verify original file exists
         Path filePath = Paths.get(video.getOriginalFilePath());
         if (!Files.exists(filePath)) {
             throw new IllegalStateException("Original video file not found: " + filePath);
         }
 
-        // Reset fields for re-export
+        // Get video duration and validate limits
+        double videoDuration = getVideoDuration(video.getOriginalFilePath());
+        validateProcessingLimits(user, quality, videoDuration);
+
+        // Set quality
+        String finalQuality = quality != null ? quality : "720p";
+        video.setQuality(finalQuality);
+
         video.setStatus("PENDING");
         video.setProgress(10.0);
         video.setCdnUrl(null);
@@ -115,13 +122,12 @@ public class VideoSpeedService {
         video.setLastModified(LocalDateTime.now());
         videoSpeedRepository.save(video);
 
-        // Process video with FFmpeg
-        processVideoWithFFmpeg(video);
+        processVideoWithFFmpeg(video, finalQuality);
 
         return video;
     }
 
-    private void processVideoWithFFmpeg(VideoSpeed video) throws IOException {
+    private void processVideoWithFFmpeg(VideoSpeed video, String quality) throws IOException {
         String inputPath = video.getOriginalFilePath();
         String outputFileName = "output_" + System.currentTimeMillis() + ".mp4";
         Path outputDir = Paths.get(basePath, video.getUser().getId().toString());
@@ -133,16 +139,23 @@ public class VideoSpeedService {
         videoSpeedRepository.save(video);
 
         try {
-            // Validate FFmpeg path
             File ffmpegFile = new File(ffmpegPath);
             if (!ffmpegFile.exists() || !ffmpegFile.canExecute()) {
                 throw new IOException("FFmpeg executable not found or not executable: " + ffmpegPath);
             }
 
-            // Build FFmpeg command
+            Map<String, String> qualitySettings = getFFmpegQualitySettings(quality);
+
             String ffmpegCommand = String.format(
-                "%s -i %s -filter:v setpts=%f*PTS -c:v libx264 -c:a aac -y %s",
-                ffmpegPath, inputPath, 1.0 / video.getSpeed(), outputPath
+                    "%s -i \"%s\" -filter:v \"setpts=%f*PTS,scale=%s\" -filter:a \"atempo=%f\" -c:v libx264 -preset %s -crf %s -c:a aac -y \"%s\"",
+                    ffmpegPath,
+                    inputPath,
+                    1.0 / video.getSpeed(),
+                    qualitySettings.get("scale"),
+                    video.getSpeed(),  // ✅ Audio speed fix
+                    qualitySettings.get("preset"),
+                    qualitySettings.get("crf"),
+                    outputPath
             );
             logger.info("Executing FFmpeg command: {}", ffmpegCommand);
 
@@ -171,6 +184,7 @@ public class VideoSpeedService {
                     video.setProgress(100.0);
                     video.setOutputFilePath(outputPath);
                     video.setCdnUrl(outputPath); // Set cdnUrl to local output path
+                    incrementUsageCount(video.getUser());
                 } else {
                     video.setStatus("FAILED");
                     video.setProgress(0.0);
@@ -217,5 +231,127 @@ public class VideoSpeedService {
                 contentType.equals("video/mov") ||
                 contentType.equals("video/avi")
         );
+    }
+
+    private void validateProcessingLimits(User user, String quality, double videoDuration) throws IllegalArgumentException {
+        if (quality != null && !user.isQualityAllowed(quality)) {
+            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " + user.getMaxAllowedQuality());
+        }
+
+        int maxPerMonth = user.getMaxVideoProcessingPerMonth();
+        if (maxPerMonth > 0) {
+            String currentYearMonth = YearMonth.now().toString();
+            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
+                    user, "VIDEO_SPEED", currentYearMonth);
+
+            int currentCount = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
+            if (currentCount >= maxPerMonth) {
+                throw new IllegalArgumentException("Monthly processing limit reached (" + maxPerMonth + "). Upgrade your plan for more.");
+            }
+        }
+
+        int maxMinutes = user.getMaxVideoLengthMinutes();
+        if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
+            throw new IllegalArgumentException("Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
+        }
+    }
+
+    private void incrementUsageCount(User user) {
+        String currentYearMonth = YearMonth.now().toString();
+        Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
+                user, "VIDEO_SPEED", currentYearMonth);
+
+        UserProcessingUsage usage;
+        if (usageOpt.isPresent()) {
+            usage = usageOpt.get();
+            usage.setProcessCount(usage.getProcessCount() + 1);
+        } else {
+            usage = new UserProcessingUsage();
+            usage.setUser(user);
+            usage.setServiceType("VIDEO_SPEED");
+            usage.setYearMonth(currentYearMonth);
+            usage.setProcessCount(1);
+        }
+        userProcessingUsageRepository.save(usage);
+    }
+
+    private Map<String, String> getFFmpegQualitySettings(String quality) {
+        Map<String, String> settings = new HashMap<>();
+        switch (quality != null ? quality.toLowerCase() : "720p") {
+            case "144p":
+                settings.put("scale", "-2:144");
+                settings.put("crf", "28");
+                settings.put("preset", "veryfast");
+                break;
+            case "240p":
+                settings.put("scale", "-2:240");
+                settings.put("crf", "27");
+                settings.put("preset", "veryfast");
+                break;
+            case "360p":
+                settings.put("scale", "-2:360");
+                settings.put("crf", "26");
+                settings.put("preset", "fast");
+                break;
+            case "480p":
+                settings.put("scale", "-2:480");
+                settings.put("crf", "25");
+                settings.put("preset", "fast");
+                break;
+            case "720p":
+                settings.put("scale", "-2:720");
+                settings.put("crf", "23");
+                settings.put("preset", "medium");
+                break;
+            case "1080p":
+                settings.put("scale", "-2:1080");
+                settings.put("crf", "22");
+                settings.put("preset", "medium");
+                break;
+            case "1440p":
+            case "2k":
+                settings.put("scale", "-2:1440");
+                settings.put("crf", "20");
+                settings.put("preset", "slow");
+                break;
+            case "4k":
+                settings.put("scale", "-2:2160");
+                settings.put("crf", "18");
+                settings.put("preset", "slow");
+                break;
+            default:
+                settings.put("scale", "-2:720");
+                settings.put("crf", "23");
+                settings.put("preset", "medium");
+        }
+        return settings;
+    }
+
+    private double getVideoDuration(String videoPath) throws IOException, InterruptedException {
+        List<String> command = Arrays.asList(
+                ffmpegPath.replace("ffmpeg.exe", "ffprobe.exe"),
+                "-i", videoPath,
+                "-show_entries", "format=duration",
+                "-v", "quiet",
+                "-of", "json"
+        );
+
+        ProcessBuilder pb = new ProcessBuilder(command);
+        Process process = pb.start();
+        StringBuilder output = new StringBuilder();
+
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line);
+            }
+        }
+
+        process.waitFor();
+
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, Object> result = mapper.readValue(output.toString(), Map.class);
+        Map<String, Object> format = (Map<String, Object>) result.get("format");
+        return Double.parseDouble(format.get("duration").toString());
     }
 }

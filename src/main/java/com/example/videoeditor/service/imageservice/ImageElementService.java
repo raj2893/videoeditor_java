@@ -165,4 +165,31 @@ public class ImageElementService {
     public List<ImageElement> getAllElements() {
         return elementRepository.findAll();
     }
+
+    /**
+     * Bulk update elements
+     */
+    @Transactional
+    public int bulkUpdateElements(List<Long> elementIds, String category, String tags, Boolean isActive) {
+        logger.info("Bulk updating {} elements", elementIds.size());
+
+        List<ImageElement> elements = elementRepository.findAllById(elementIds);
+
+        for (ImageElement element : elements) {
+            if (category != null && !category.trim().isEmpty()) {
+                element.setCategory(category);
+            }
+            if (tags != null) {
+                element.setTags(tags);
+            }
+            if (isActive != null) {
+                element.setIsActive(isActive);
+            }
+        }
+
+        elementRepository.saveAll(elements);
+        logger.info("Bulk update completed for {} elements", elements.size());
+
+        return elements.size();
+    }
 }

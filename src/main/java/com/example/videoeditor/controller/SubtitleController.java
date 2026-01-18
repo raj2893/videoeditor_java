@@ -107,10 +107,11 @@ public class SubtitleController {
     @PostMapping("/process/{mediaId}")
     public ResponseEntity<?> processSubtitles(
             @RequestHeader("Authorization") String token,
-            @PathVariable Long mediaId) {
+            @PathVariable Long mediaId,
+            @RequestParam(required = false) String quality) {
         try {
             User user = subtitleService.getUserFromToken(token);
-            SubtitleMedia result = subtitleService.processSubtitles(user, mediaId);
+            SubtitleMedia result = subtitleService.processSubtitles(user, mediaId, quality);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));

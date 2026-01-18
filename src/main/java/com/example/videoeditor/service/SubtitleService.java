@@ -4,7 +4,9 @@ import com.example.videoeditor.dto.Keyframe;
 import com.example.videoeditor.dto.SubtitleDTO;
 import com.example.videoeditor.entity.SubtitleMedia;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.UserProcessingUsage;
 import com.example.videoeditor.repository.SubtitleMediaRepository;
+import com.example.videoeditor.repository.UserProcessingUsageRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -28,6 +30,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +47,7 @@ public class SubtitleService {
   private final SubtitleMediaRepository subtitleMediaRepository;
   private final ObjectMapper objectMapper;
   private final UserRepository userRepository; // Added dependency
+  private final UserProcessingUsageRepository userProcessingUsageRepository;
 
   @Value("${app.base-dir:D:\\Backend\\videoeditor_java}")
   private String baseDir;
@@ -58,14 +62,15 @@ public class SubtitleService {
   private String ffmpegPath;
 
   public SubtitleService(
-      JwtUtil jwtUtil,
-      SubtitleMediaRepository subtitleMediaRepository,
-      ObjectMapper objectMapper,
-      UserRepository userRepository) {
+          JwtUtil jwtUtil,
+          SubtitleMediaRepository subtitleMediaRepository,
+          ObjectMapper objectMapper,
+          UserRepository userRepository, UserProcessingUsageRepository userProcessingUsageRepository) {
     this.jwtUtil = jwtUtil;
     this.subtitleMediaRepository = subtitleMediaRepository;
     this.objectMapper = objectMapper;
     this.userRepository = userRepository;
+      this.userProcessingUsageRepository = userProcessingUsageRepository;
   }
 
   public SubtitleMedia uploadMedia(User user, MultipartFile mediaFile) throws IOException {
@@ -682,31 +687,46 @@ public class SubtitleService {
     return info;
   }
 
-  public SubtitleMedia processSubtitles(User user, Long mediaId) throws IOException, InterruptedException {
-    logger.info("Processing subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
+    public SubtitleMedia processSubtitles(User user, Long mediaId, String quality) throws IOException, InterruptedException {
+        logger.info("Processing subtitles for user: {}, mediaId: {}, quality: {}", user.getId(), mediaId, quality);
 
-    SubtitleMedia subtitleMedia = subtitleMediaRepository.findById(mediaId)
-        .orElseThrow(() -> {
-          logger.error("Media not found for id: {}", mediaId);
-          return new IllegalArgumentException("Media not found");
-        });
+        SubtitleMedia subtitleMedia = subtitleMediaRepository.findById(mediaId)
+                .orElseThrow(() -> {
+                    logger.error("Media not found for id: {}", mediaId);
+                    return new IllegalArgumentException("Media not found");
+                });
 
-    if (!subtitleMedia.getUser().getId().equals(user.getId())) {
-      logger.error("User {} not authorized to process subtitles for media {}", user.getId(), mediaId);
-      throw new IllegalArgumentException("Not authorized to process subtitles for this media");
-    }
+        if (!subtitleMedia.getUser().getId().equals(user.getId())) {
+            logger.error("User {} not authorized to process subtitles for media {}", user.getId(), mediaId);
+            throw new IllegalArgumentException("Not authorized to process subtitles for this media");
+        }
 
-    if (subtitleMedia.getSubtitlesJson() == null || subtitleMedia.getSubtitlesJson().isEmpty()) {
-      logger.error("No subtitles available to process for mediaId: {}", mediaId);
-      throw new IllegalStateException("No subtitles available to process");
-    }
+        if (subtitleMedia.getSubtitlesJson() == null || subtitleMedia.getSubtitlesJson().isEmpty()) {
+            logger.error("No subtitles available to process for mediaId: {}", mediaId);
+            throw new IllegalStateException("No subtitles available to process");
+        }
 
-    subtitleMedia.setStatus("PROCESSING");
-    subtitleMedia.setProgress(0.0);
-    subtitleMediaRepository.save(subtitleMedia);
+        String inputFilePath = baseDir + File.separator + subtitleMedia.getOriginalPath();
+        File inputFile = new File(inputFilePath);
+        if (!inputFile.exists() || inputFile.length() == 0) {
+            logger.error("Input file is missing or empty: {}", inputFilePath);
+            throw new IOException("Input file is missing or empty");
+        }
 
-    String inputFilePath = baseDir + File.separator + subtitleMedia.getOriginalPath();
-    File inputFile = new File(inputFilePath);
+        // Get video duration for validation
+        double totalDuration = getVideoDuration(inputFile);
+
+        // Validate processing limits
+        validateProcessingLimits(user, quality, totalDuration);
+
+        // Set quality (default to 720p if not provided)
+        String finalQuality = quality != null ? quality : "720p";
+        subtitleMedia.setQuality(finalQuality);
+
+        subtitleMedia.setStatus("PROCESSING");
+        subtitleMedia.setProgress(0.0);
+        subtitleMediaRepository.save(subtitleMedia);
+
     if (!inputFile.exists() || inputFile.length() == 0) {
       logger.error("Input file is missing or empty: {}", inputFilePath);
       subtitleMedia.setStatus("FAILED");
@@ -743,7 +763,6 @@ public class SubtitleService {
       throw new IOException("No valid subtitles to process");
     }
 
-    double totalDuration = getVideoDuration(inputFile);
     if (totalDuration <= 0) {
       logger.error("Invalid video duration: {}", totalDuration);
       subtitleMedia.setStatus("FAILED");
@@ -752,7 +771,7 @@ public class SubtitleService {
     }
 
     try {
-      renderSubtitledVideo(inputFile, new File(outputFilePath), subtitles, canvasWidth, canvasHeight, fps, mediaId, totalDuration);
+        renderSubtitledVideo(inputFile, new File(outputFilePath), subtitles, canvasWidth, canvasHeight, fps, mediaId, totalDuration, finalQuality);
 
       String processedPath = "subtitles/" + user.getId() + "/processed/" + outputFileName;
       String processedCdnUrl = "http://localhost:8080/" + processedPath;
@@ -763,6 +782,8 @@ public class SubtitleService {
       subtitleMedia.setStatus("SUCCESS");
       subtitleMedia.setProgress(100.0);
       subtitleMediaRepository.save(subtitleMedia);
+
+      incrementUsageCount(user);
 
       logger.info("Successfully processed subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
       return subtitleMedia;
@@ -815,7 +836,9 @@ public class SubtitleService {
     }
   }
 
-  private void renderSubtitledVideo(File inputFile, File outputFile, List<SubtitleDTO> subtitles, int canvasWidth, int canvasHeight, float fps, Long mediaId, double totalDuration) throws IOException, InterruptedException {
+    private void renderSubtitledVideo(File inputFile, File outputFile, List<SubtitleDTO> subtitles,
+                                      int canvasWidth, int canvasHeight, float fps, Long mediaId,
+                                      double totalDuration, String quality) throws IOException, InterruptedException {
     File tempDir = new File(baseDir, "subtitles/temp/" + mediaId);
     if (!tempDir.exists() && !tempDir.mkdirs()) {
       throw new IOException("Failed to create temp directory: " + tempDir.getAbsolutePath());
@@ -832,7 +855,8 @@ public class SubtitleService {
         String safeBatchName = "batch_" + batchIndex + ".mp4";
         String tempOutput = new File(tempDir, safeBatchName).getAbsolutePath();
         tempVideoFiles.add(tempOutput);
-        renderBatch(inputFile, new File(tempOutput), subtitles, canvasWidth, canvasHeight, fps, mediaId, startTime, endTime, totalDuration, batchIndex, tempTextFiles);
+        Map<String, String> qualitySettings = getFFmpegQualitySettings(quality);
+        renderBatch(inputFile, new File(tempOutput), subtitles, canvasWidth, canvasHeight, fps, mediaId, startTime, endTime, totalDuration, batchIndex, tempTextFiles, qualitySettings);
         batchIndex++;
       }
 
@@ -862,174 +886,190 @@ public class SubtitleService {
     }
   }
 
-  private void renderBatch(File inputFile, File outputFile, List<SubtitleDTO> subtitles, int canvasWidth, int canvasHeight, float fps, Long mediaId, double batchStart, double batchEnd, double totalDuration, int batchIndex, List<File> tempTextFiles) throws IOException, InterruptedException {
-    double batchDuration = batchEnd - batchStart;
-    File batchOutputDir = outputFile.getParentFile();
-    if (!batchOutputDir.exists() && !batchOutputDir.mkdirs()) {
-      throw new IOException("Failed to create batch output directory: " + batchOutputDir.getAbsolutePath());
-    }
-    logger.debug("Rendering batch from {} to {} seconds for mediaId: {}", batchStart, batchEnd, mediaId);
+    private void renderBatch(File inputFile, File outputFile, List<SubtitleDTO> subtitles,
+                             int canvasWidth, int canvasHeight, float fps, Long mediaId,
+                             double batchStart, double batchEnd, double totalDuration, int batchIndex,
+                             List<File> tempTextFiles, Map<String, String> qualitySettings) throws IOException, InterruptedException {
 
-    List<String> command = new ArrayList<>();
-    command.add(ffmpegPath);
+        double batchDuration = batchEnd - batchStart;
+        File batchOutputDir = outputFile.getParentFile();
+        if (!batchOutputDir.exists() && !batchOutputDir.mkdirs()) {
+            throw new IOException("Failed to create batch output directory: " + batchOutputDir.getAbsolutePath());
+        }
+        logger.debug("Rendering batch from {} to {} seconds for mediaId: {}", batchStart, batchEnd, mediaId);
 
-    // Add input video with trim to batch range
-    command.add("-ss");
-    command.add(String.format("%.6f", batchStart));
-    command.add("-t");
-    command.add(String.format("%.6f", batchDuration));
-    command.add("-i");
-    command.add(inputFile.getAbsolutePath());
+        List<String> command = new ArrayList<>();
+        command.add(ffmpegPath);
 
-    StringBuilder filterComplex = new StringBuilder();
-    Map<String, String> textInputIndices = new HashMap<>();
-    int inputCount = 1;
+        // Add input video with trim to batch range
+        command.add("-ss");
+        command.add(String.format("%.6f", batchStart));
+        command.add("-t");
+        command.add(String.format("%.6f", batchDuration));
+        command.add("-i");
+        command.add(inputFile.getAbsolutePath());
 
-    List<SubtitleDTO> relevantSubtitles = subtitles.stream()
-        .filter(s -> s.getTimelineStartTime() < batchEnd && s.getTimelineEndTime() > batchStart)
-        .collect(Collectors.toList());
+        StringBuilder filterComplex = new StringBuilder();
+        Map<String, String> textInputIndices = new HashMap<>();
+        int inputCount = 1;
 
-    if (!batchOutputDir.exists() && !batchOutputDir.mkdirs()) {
-      throw new IOException("Failed to create batch dir: " + batchOutputDir);
-    }
+        List<SubtitleDTO> relevantSubtitles = subtitles.stream()
+                .filter(s -> s.getTimelineStartTime() < batchEnd && s.getTimelineEndTime() > batchStart)
+                .collect(Collectors.toList());
 
-    for (SubtitleDTO subtitle : relevantSubtitles) {
-      if (subtitle.getText() == null || subtitle.getText().trim().isEmpty()) {
-        logger.warn("Skipping subtitle with empty text for mediaId: {}, id: {}", mediaId, subtitle.getId());
-        continue;
-      }
-      if (subtitle.getTimelineEndTime() <= subtitle.getTimelineStartTime()) {
-        logger.warn("Skipping subtitle with invalid timing for mediaId: {}, id: {}", mediaId, subtitle.getId());
-        continue;
-      }
-
-      File tempDir = new File(baseDir, "subtitles/temp/" + mediaId); // already created in renderSubtitledVideo
-      String textPngPath = generateTextPng(subtitle, tempDir, canvasWidth, canvasHeight);
-      File textPngFile = new File(textPngPath);
-      if (!textPngFile.exists() || textPngFile.length() == 0) {
-        logger.warn("Subtitle PNG not created or empty for mediaId: {}, id: {}", mediaId, subtitle.getId());
-        continue;
-      }
-
-      tempTextFiles.add(new File(textPngPath));
-      command.add("-loop");
-      command.add("1");
-      command.add("-i");
-      command.add(textPngPath);
-      textInputIndices.put(subtitle.getId(), String.valueOf(inputCount++));
-    }
-
-    if (textInputIndices.isEmpty()) {
-      logger.warn("No valid subtitle PNGs for batch from {} to {} seconds, copying input segment", batchStart, batchEnd);
-      // Reset command to simple copy
-      command.clear();
-      command.add(ffmpegPath);
-      command.add("-ss");
-      command.add(String.format("%.6f", batchStart));
-      command.add("-t");
-      command.add(String.format("%.6f", batchDuration));
-      command.add("-i");
-      command.add(inputFile.getAbsolutePath());
-      command.add("-c");
-      command.add("copy");
-      command.add("-y");
-      command.add(outputFile.getAbsolutePath());
-    } else {
-      String lastOutput = "0:v";
-      int overlayCount = 0;
-
-      for (SubtitleDTO subtitle : relevantSubtitles) {
-        String inputIdx = textInputIndices.get(subtitle.getId());
-        if (inputIdx == null) {
-          continue;
+        if (!batchOutputDir.exists() && !batchOutputDir.mkdirs()) {
+            throw new IOException("Failed to create batch dir: " + batchOutputDir);
         }
 
-        double segmentStart = Math.max(subtitle.getTimelineStartTime(), batchStart) - batchStart;
-        double segmentEnd = Math.min(subtitle.getTimelineEndTime(), batchEnd) - batchStart;
-        if (segmentStart >= segmentEnd) {
-          logger.warn("Invalid segment timing for subtitle id: {}", subtitle.getId());
-          continue;
-        }
-        String outputLabel = "ov" + overlayCount++;
+        for (SubtitleDTO subtitle : relevantSubtitles) {
+            if (subtitle.getText() == null || subtitle.getText().trim().isEmpty()) {
+                logger.warn("Skipping subtitle with empty text for mediaId: {}, id: {}", mediaId, subtitle.getId());
+                continue;
+            }
+            if (subtitle.getTimelineEndTime() <= subtitle.getTimelineStartTime()) {
+                logger.warn("Skipping subtitle with invalid timing for mediaId: {}, id: {}", mediaId, subtitle.getId());
+                continue;
+            }
 
-        filterComplex.append("[").append(inputIdx).append(":v]");
-        filterComplex.append("setpts=PTS-STARTPTS+").append(String.format("%.6f", segmentStart)).append("/TB,");
+            File tempDir = new File(baseDir, "subtitles/temp/" + mediaId);
+            String textPngPath = generateTextPng(subtitle, tempDir, canvasWidth, canvasHeight);
+            File textPngFile = new File(textPngPath);
+            if (!textPngFile.exists() || textPngFile.length() == 0) {
+                logger.warn("Subtitle PNG not created or empty for mediaId: {}, id: {}", mediaId, subtitle.getId());
+                continue;
+            }
 
-        double defaultScale = subtitle.getScale() != null ? subtitle.getScale() : 1.0;
-        double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
-        double baseScale = 1.0 / resolutionMultiplier;
-
-        StringBuilder scaleExpr = new StringBuilder();
-        scaleExpr.append(String.format("%.6f", defaultScale));
-
-        // Ensure even dimensions after scaling with proper rounding
-        filterComplex.append("scale=w='2*trunc((iw*").append(baseScale).append("*").append(scaleExpr)
-            .append(")/2)':h='2*trunc((ih*").append(baseScale).append("*").append(scaleExpr)
-            .append(")/2)':flags=lanczos:eval=frame,");
-
-        double rotation = subtitle.getRotation() != null ? subtitle.getRotation() : 0.0;
-        if (Math.abs(rotation) > 0.01) {
-          filterComplex.append("rotate=a=").append(String.format("%.6f", Math.toRadians(rotation)))
-              .append(":ow='2*trunc(hypot(iw,ih)/2)'")
-              .append(":oh='2*trunc(hypot(iw,ih)/2)'")
-              .append(":c=0x00000000,");
+            tempTextFiles.add(new File(textPngPath));
+            command.add("-loop");
+            command.add("1");
+            command.add("-i");
+            command.add(textPngPath);
+            textInputIndices.put(subtitle.getId(), String.valueOf(inputCount++));
         }
 
-        filterComplex.append("format=rgba,");
-
-        double opacity = subtitle.getOpacity() != null ? subtitle.getOpacity() : 1.0;
-        if (opacity < 1.0) {
-          filterComplex.append("colorchannelmixer=aa=").append(String.format("%.6f", opacity)).append(",");
-        }
-
-        String xExpr, yExpr;
-        if (subtitle.getAlignment() != null && subtitle.getAlignment().equalsIgnoreCase("left")) {
-          xExpr = String.format("%d", subtitle.getPositionX() != null ? subtitle.getPositionX() : 0);
-        } else if (subtitle.getAlignment() != null && subtitle.getAlignment().equalsIgnoreCase("right")) {
-          xExpr = String.format("W-w-%d", subtitle.getPositionX() != null ? subtitle.getPositionX() : 0);
+        if (textInputIndices.isEmpty()) {
+            logger.warn("No valid subtitle PNGs for batch from {} to {} seconds, copying input segment with scaling", batchStart, batchEnd);
+            // Reset command to simple copy with scaling
+            command.clear();
+            command.add(ffmpegPath);
+            command.add("-ss");
+            command.add(String.format("%.6f", batchStart));
+            command.add("-t");
+            command.add(String.format("%.6f", batchDuration));
+            command.add("-i");
+            command.add(inputFile.getAbsolutePath());
+            command.add("-vf");
+            command.add("scale=" + qualitySettings.get("scale"));
+            command.add("-c:v");
+            command.add("libx264");
+            command.add("-preset");
+            command.add(qualitySettings.get("preset"));
+            command.add("-crf");
+            command.add(qualitySettings.get("crf"));
+            command.add("-pix_fmt");
+            command.add("yuv420p");
+            command.add("-c:a");
+            command.add("copy");
+            command.add("-y");
+            command.add(outputFile.getAbsolutePath());
         } else {
-          xExpr = String.format("(W-w)/2+%d", subtitle.getPositionX() != null ? subtitle.getPositionX() : 0);
+            String lastOutput = "0:v";
+            int overlayCount = 0;
+
+            for (SubtitleDTO subtitle : relevantSubtitles) {
+                String inputIdx = textInputIndices.get(subtitle.getId());
+                if (inputIdx == null) {
+                    continue;
+                }
+
+                double segmentStart = Math.max(subtitle.getTimelineStartTime(), batchStart) - batchStart;
+                double segmentEnd = Math.min(subtitle.getTimelineEndTime(), batchEnd) - batchStart;
+                if (segmentStart >= segmentEnd) {
+                    logger.warn("Invalid segment timing for subtitle id: {}", subtitle.getId());
+                    continue;
+                }
+                String outputLabel = "ov" + overlayCount++;
+
+                filterComplex.append("[").append(inputIdx).append(":v]");
+                filterComplex.append("setpts=PTS-STARTPTS+").append(String.format("%.6f", segmentStart)).append("/TB,");
+
+                double defaultScale = subtitle.getScale() != null ? subtitle.getScale() : 1.0;
+                double resolutionMultiplier = canvasWidth >= 3840 ? 1.5 : 2.0;
+                double baseScale = 1.0 / resolutionMultiplier;
+
+                StringBuilder scaleExpr = new StringBuilder();
+                scaleExpr.append(String.format("%.6f", defaultScale));
+
+                filterComplex.append("scale=w='2*trunc((iw*").append(baseScale).append("*").append(scaleExpr)
+                        .append(")/2)':h='2*trunc((ih*").append(baseScale).append("*").append(scaleExpr)
+                        .append(")/2)':flags=lanczos:eval=frame,");
+
+                double rotation = subtitle.getRotation() != null ? subtitle.getRotation() : 0.0;
+                if (Math.abs(rotation) > 0.01) {
+                    filterComplex.append("rotate=a=").append(String.format("%.6f", Math.toRadians(rotation)))
+                            .append(":ow='2*trunc(hypot(iw,ih)/2)'")
+                            .append(":oh='2*trunc(hypot(iw,ih)/2)'")
+                            .append(":c=0x00000000,");
+                }
+
+                filterComplex.append("format=rgba,");
+
+                double opacity = subtitle.getOpacity() != null ? subtitle.getOpacity() : 1.0;
+                if (opacity < 1.0) {
+                    filterComplex.append("colorchannelmixer=aa=").append(String.format("%.6f", opacity)).append(",");
+                }
+
+                String xExpr, yExpr;
+                if (subtitle.getAlignment() != null && subtitle.getAlignment().equalsIgnoreCase("left")) {
+                    xExpr = String.format("%d", subtitle.getPositionX() != null ? subtitle.getPositionX() : 0);
+                } else if (subtitle.getAlignment() != null && subtitle.getAlignment().equalsIgnoreCase("right")) {
+                    xExpr = String.format("W-w-%d", subtitle.getPositionX() != null ? subtitle.getPositionX() : 0);
+                } else {
+                    xExpr = String.format("(W-w)/2+%d", subtitle.getPositionX() != null ? subtitle.getPositionX() : 0);
+                }
+                yExpr = String.format("(H-h)/2+%d", subtitle.getPositionY() != null ? subtitle.getPositionY() : 0);
+
+                filterComplex.append("[").append(lastOutput).append("]");
+                filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
+                filterComplex.append(":enable='between(t,").append(String.format("%.6f", segmentStart)).append(",").append(String.format("%.6f", segmentEnd)).append(")'");
+                filterComplex.append("[ov").append(outputLabel).append("];");
+                lastOutput = "ov" + outputLabel;
+            }
+
+            // ✅ ADD SCALING AT THE END OF THE FILTER COMPLEX CHAIN
+            filterComplex.append("[").append(lastOutput).append("]");
+            filterComplex.append("scale=").append(qualitySettings.get("scale"));
+            filterComplex.append(",setpts=PTS-STARTPTS[vout]");
+
+            command.add("-filter_complex");
+            command.add(filterComplex.toString());
+            command.add("-map");
+            command.add("[vout]");
+            command.add("-map");
+            command.add("0:a?");
+            command.add("-c:v");
+            command.add("libx264");
+            command.add("-preset");
+            command.add(qualitySettings.get("preset"));
+            command.add("-crf");
+            command.add(qualitySettings.get("crf"));
+            command.add("-pix_fmt");
+            command.add("yuv420p");
+            command.add("-c:a");
+            command.add("aac");
+            command.add("-b:a");
+            command.add("192k");
+            command.add("-t");
+            command.add(String.format("%.6f", batchDuration));
+            command.add("-r");
+            command.add(String.format("%.2f", fps));
+            command.add("-y");
+            command.add(outputFile.getAbsolutePath());
         }
-        yExpr = String.format("(H-h)/2+%d", subtitle.getPositionY() != null ? subtitle.getPositionY() : 0);
 
-        filterComplex.append("[").append(lastOutput).append("]");
-        filterComplex.append("overlay=x='").append(xExpr).append("':y='").append(yExpr).append("':format=auto");
-        filterComplex.append(":enable='between(t,").append(String.format("%.6f", segmentStart)).append(",").append(String.format("%.6f", segmentEnd)).append(")'");
-        filterComplex.append("[ov").append(outputLabel).append("];");
-        lastOutput = "ov" + outputLabel;
-      }
-
-      filterComplex.append("[").append(lastOutput).append("]setpts=PTS-STARTPTS[vout]");
-
-      command.add("-filter_complex");
-      command.add(filterComplex.toString());
-      command.add("-map");
-      command.add("[vout]");
-      command.add("-map");
-      command.add("0:a?");
-      command.add("-c:v");
-      command.add("libx264");
-      command.add("-preset");
-      command.add("medium");
-      command.add("-crf");
-      command.add("23");
-      command.add("-pix_fmt");
-      command.add("yuv420p");
-      command.add("-c:a");
-      command.add("aac");
-      command.add("-b:a");
-      command.add("192k");
-      command.add("-t");
-      command.add(String.format("%.6f", batchDuration));
-      command.add("-r");
-      command.add(String.format("%.2f", fps));
-      command.add("-y");
-      command.add(outputFile.getAbsolutePath());
+        logger.debug("FFmpeg command for batch: {}", String.join(" ", command));
+        executeFFmpegCommand(command, mediaId, batchStart, batchDuration, totalDuration, batchIndex);
     }
-
-    logger.debug("FFmpeg command for batch: {}", String.join(" ", command));
-    executeFFmpegCommand(command, mediaId, batchStart, batchDuration, totalDuration, batchIndex);
-  }
 
   private void concatenateBatches(List<String> tempVideoFiles, String outputPath, float fps, File tempDir) throws IOException, InterruptedException {
     if (tempVideoFiles.isEmpty()) {
@@ -1712,5 +1752,103 @@ public class SubtitleService {
       }
       return false;
   }
+
+    private void validateProcessingLimits(User user, String quality, double videoDuration) throws IllegalArgumentException {
+        // Check quality
+        if (quality != null && !user.isQualityAllowed(quality)) {
+            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " + user.getMaxAllowedQuality());
+        }
+
+        // Check monthly limit
+        int maxPerMonth = user.getMaxVideoProcessingPerMonth();
+        if (maxPerMonth > 0) {
+            String currentYearMonth = YearMonth.now().toString(); // "2025-01"
+            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
+                    user, "SUBTITLE", currentYearMonth);
+
+            int currentCount = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
+            if (currentCount >= maxPerMonth) {
+                throw new IllegalArgumentException("Monthly processing limit reached (" + maxPerMonth + "). Upgrade your plan for more.");
+            }
+        }
+
+        // Check video length
+        int maxMinutes = user.getMaxVideoLengthMinutes();
+        if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
+            throw new IllegalArgumentException("Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
+        }
+    }
+
+    // Add method to increment usage after successful processing
+    private void incrementUsageCount(User user) {
+        String currentYearMonth = YearMonth.now().toString();
+        Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
+                user, "SUBTITLE", currentYearMonth);
+
+        UserProcessingUsage usage;
+        if (usageOpt.isPresent()) {
+            usage = usageOpt.get();
+            usage.setProcessCount(usage.getProcessCount() + 1);
+        } else {
+            usage = new UserProcessingUsage();
+            usage.setUser(user);
+            usage.setServiceType("SUBTITLE");
+            usage.setYearMonth(currentYearMonth);
+            usage.setProcessCount(1);
+        }
+        userProcessingUsageRepository.save(usage);
+    }
+
+    private Map<String, String> getFFmpegQualitySettings(String quality) {
+        Map<String, String> settings = new HashMap<>();
+        switch (quality != null ? quality.toLowerCase() : "720p") {
+            case "144p":
+                settings.put("scale", "-2:144");  // ✅ Width auto-calculated to maintain aspect ratio
+                settings.put("crf", "28");
+                settings.put("preset", "veryfast");
+                break;
+            case "240p":
+                settings.put("scale", "-2:240");
+                settings.put("crf", "27");
+                settings.put("preset", "veryfast");
+                break;
+            case "360p":
+                settings.put("scale", "-2:360");
+                settings.put("crf", "26");
+                settings.put("preset", "fast");
+                break;
+            case "480p":
+                settings.put("scale", "-2:480");
+                settings.put("crf", "25");
+                settings.put("preset", "fast");
+                break;
+            case "720p":
+                settings.put("scale", "-2:720");
+                settings.put("crf", "23");
+                settings.put("preset", "medium");
+                break;
+            case "1080p":
+                settings.put("scale", "-2:1080");
+                settings.put("crf", "22");
+                settings.put("preset", "medium");
+                break;
+            case "1440p":
+            case "2k":
+                settings.put("scale", "-2:1440");
+                settings.put("crf", "20");
+                settings.put("preset", "slow");
+                break;
+            case "4k":
+                settings.put("scale", "-2:2160");
+                settings.put("crf", "18");
+                settings.put("preset", "slow");
+                break;
+            default:
+                settings.put("scale", "-2:720");
+                settings.put("crf", "23");
+                settings.put("preset", "medium");
+        }
+        return settings;
+    }
 
 }

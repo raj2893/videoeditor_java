@@ -89,26 +89,27 @@ public class VideoSpeedController {
 
     @PostMapping("/{id}/export")
     public ResponseEntity<?> initiateExport(
-        @RequestHeader("Authorization") String token,
-        @PathVariable Long id) {
+            @RequestHeader("Authorization") String token,
+            @PathVariable Long id,
+            @RequestParam(required = false) String quality) {
         try {
             User user = getUserFromToken(token);
-            VideoSpeed video = videoSpeedService.initiateExport(id, user);
+            VideoSpeed video = videoSpeedService.initiateExport(id, user, quality);
             VideoSpeedResponse response = mapToResponse(video);
-            logger.info("Export initiated: id={}", id);
+            logger.info("Export initiated: id={}, quality={}", id, quality);
             return ResponseEntity.ok(response);
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             logger.error("Error initiating export: id={}, error={}", id, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Failed to initiate export: " + e.getMessage()));
-        } catch (IllegalStateException e) {
+                    .body(Map.of("error", "Failed to initiate export: " + e.getMessage()));
+        } catch (IllegalArgumentException | IllegalStateException e) {
             logger.warn("Cannot initiate export for video id={}: {}", id, e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", e.getMessage()));
         } catch (RuntimeException e) {
             logger.warn("Unauthorized or video not found for id={}: {}", id, e.getMessage());
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -153,6 +154,7 @@ public class VideoSpeedController {
         response.setStatus(video.getStatus());
         response.setProgress(video.getProgress());
         response.setSpeed(video.getSpeed());
+        response.setQuality(video.getQuality());
         response.setCdnUrl(video.getCdnUrl());
         response.setOriginalFilePath(video.getOriginalFilePath());
         return response;

@@ -47,8 +47,8 @@ public class ElementDownloadService {
      * Download element in specified format
      */
     @Transactional
-    public DownloadResult downloadElement(Long elementId, String format, String resolution, 
-                                         User user, String ipAddress) throws IOException {
+    public DownloadResult downloadElement(Long elementId, String format, String resolution,
+                                          String color, User user, String ipAddress) throws IOException {
         logger.info("Downloading element {} in format {} with resolution {}", elementId, format, resolution);
 
         // Validate element exists
@@ -67,13 +67,13 @@ public class ElementDownloadService {
 
         // Handle download based on format
         format = format.toUpperCase();
-        
+
         if ("SVG".equals(format)) {
-            return downloadSvg(filePath, element.getName());
+            return downloadSvg(filePath, element.getName(), color);
         } else if ("PNG".equals(format)) {
-            return downloadAsPng(filePath, element, resolution);
+            return downloadAsPng(filePath, element, resolution, color);  // ADD color parameter
         } else if ("JPG".equals(format) || "JPEG".equals(format)) {
-            return downloadAsJpg(filePath, element, resolution);
+            return downloadAsJpg(filePath, element, resolution, color);  // ADD color parameter
         } else {
             throw new IllegalArgumentException("Unsupported format: " + format);
         }
@@ -91,17 +91,17 @@ public class ElementDownloadService {
     /**
      * Convert and download as PNG
      */
-    private DownloadResult downloadAsPng(Path filePath, ImageElement element, String resolution) 
+    private DownloadResult downloadAsPng(Path filePath, ImageElement element, String resolution, String color)
             throws IOException {
         int[] dimensions = parseResolution(resolution, element);
         int width = dimensions[0];
         int height = dimensions[1];
 
         byte[] pngData;
-        
+
         if (element.getFileFormat().equalsIgnoreCase("SVG")) {
-            // Convert SVG to PNG using Batik
-            pngData = convertSvgToPng(filePath, width, height);
+            // Convert SVG to PNG using Batik (with color if provided)
+            pngData = convertSvgToPng(filePath, width, height, color);
         } else {
             // Convert raster image to PNG
             pngData = convertRasterToPng(filePath, width, height);
@@ -114,17 +114,17 @@ public class ElementDownloadService {
     /**
      * Convert and download as JPG
      */
-    private DownloadResult downloadAsJpg(Path filePath, ImageElement element, String resolution) 
+    private DownloadResult downloadAsJpg(Path filePath, ImageElement element, String resolution, String color)
             throws IOException {
         int[] dimensions = parseResolution(resolution, element);
         int width = dimensions[0];
         int height = dimensions[1];
 
         byte[] jpgData;
-        
+
         if (element.getFileFormat().equalsIgnoreCase("SVG")) {
-            // Convert SVG to JPG using Batik
-            jpgData = convertSvgToJpg(filePath, width, height);
+            // Convert SVG to JPG using Batik (with color if provided)
+            jpgData = convertSvgToJpg(filePath, width, height, color);
         } else {
             // Convert raster image to JPG
             jpgData = convertRasterToJpg(filePath, width, height);
@@ -137,20 +137,35 @@ public class ElementDownloadService {
     /**
      * Convert SVG to PNG using Apache Batik
      */
-    private byte[] convertSvgToPng(Path svgPath, int width, int height) throws IOException {
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-             InputStream inputStream = Files.newInputStream(svgPath)) {
-            
+    private byte[] convertSvgToPng(Path svgPath, int width, int height, String color) throws IOException {
+        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+
+            // Read and potentially modify SVG content
+            String svgContent = Files.readString(svgPath);
+
+            // Apply color if provided
+            if (color != null && !color.isEmpty()) {
+                if (!color.startsWith("#")) {
+                    color = "#" + color;
+                }
+                svgContent = svgContent.replaceAll("fill=\"#[0-9a-fA-F]{3,6}\"", "fill=\"" + color + "\"");
+                svgContent = svgContent.replaceAll("stroke=\"#[0-9a-fA-F]{3,6}\"", "stroke=\"" + color + "\"");
+                svgContent = svgContent.replaceAll("fill:#[0-9a-fA-F]{3,6}", "fill:" + color);
+                svgContent = svgContent.replaceAll("stroke:#[0-9a-fA-F]{3,6}", "stroke:" + color);
+            }
+
+            InputStream inputStream = new ByteArrayInputStream(svgContent.getBytes());
+
             PNGTranscoder transcoder = new PNGTranscoder();
             transcoder.addTranscodingHint(PNGTranscoder.KEY_WIDTH, (float) width);
             transcoder.addTranscodingHint(PNGTranscoder.KEY_HEIGHT, (float) height);
-            
+
             TranscoderInput input = new TranscoderInput(inputStream);
             TranscoderOutput output = new TranscoderOutput(outputStream);
-            
+
             transcoder.transcode(input, output);
             return outputStream.toByteArray();
-            
+
         } catch (TranscoderException e) {
             throw new IOException("Failed to convert SVG to PNG", e);
         }
@@ -159,22 +174,37 @@ public class ElementDownloadService {
     /**
      * Convert SVG to JPG using Apache Batik
      */
-    private byte[] convertSvgToJpg(Path svgPath, int width, int height) throws IOException {
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-             InputStream inputStream = Files.newInputStream(svgPath)) {
-            
+    private byte[] convertSvgToJpg(Path svgPath, int width, int height, String color) throws IOException {
+        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+
+            // Read and potentially modify SVG content
+            String svgContent = Files.readString(svgPath);
+
+            // Apply color if provided
+            if (color != null && !color.isEmpty()) {
+                if (!color.startsWith("#")) {
+                    color = "#" + color;
+                }
+                svgContent = svgContent.replaceAll("fill=\"#[0-9a-fA-F]{3,6}\"", "fill=\"" + color + "\"");
+                svgContent = svgContent.replaceAll("stroke=\"#[0-9a-fA-F]{3,6}\"", "stroke=\"" + color + "\"");
+                svgContent = svgContent.replaceAll("fill:#[0-9a-fA-F]{3,6}", "fill:" + color);
+                svgContent = svgContent.replaceAll("stroke:#[0-9a-fA-F]{3,6}", "stroke:" + color);
+            }
+
+            InputStream inputStream = new ByteArrayInputStream(svgContent.getBytes());
+
             JPEGTranscoder transcoder = new JPEGTranscoder();
             transcoder.addTranscodingHint(JPEGTranscoder.KEY_WIDTH, (float) width);
             transcoder.addTranscodingHint(JPEGTranscoder.KEY_HEIGHT, (float) height);
             transcoder.addTranscodingHint(JPEGTranscoder.KEY_QUALITY, 0.95f);
             transcoder.addTranscodingHint(JPEGTranscoder.KEY_BACKGROUND_COLOR, Color.WHITE);
-            
+
             TranscoderInput input = new TranscoderInput(inputStream);
             TranscoderOutput output = new TranscoderOutput(outputStream);
-            
+
             transcoder.transcode(input, output);
             return outputStream.toByteArray();
-            
+
         } catch (TranscoderException e) {
             throw new IOException("Failed to convert SVG to JPG", e);
         }
@@ -311,5 +341,32 @@ public class ElementDownloadService {
         public Resource getResource() { return resource; }
         public String getFilename() { return filename; }
         public String getContentType() { return contentType; }
+    }
+
+    /**
+     * Download SVG with optional color replacement
+     */
+    private DownloadResult downloadSvg(Path filePath, String elementName, String color) throws IOException {
+        String svgContent = Files.readString(filePath);
+
+        // If color is provided, replace fill and stroke colors
+        if (color != null && !color.isEmpty()) {
+            // Ensure color has # prefix
+            if (!color.startsWith("#")) {
+                color = "#" + color;
+            }
+
+            // Replace common SVG color attributes
+            svgContent = svgContent.replaceAll("fill=\"#[0-9a-fA-F]{3,6}\"", "fill=\"" + color + "\"");
+            svgContent = svgContent.replaceAll("stroke=\"#[0-9a-fA-F]{3,6}\"", "stroke=\"" + color + "\"");
+
+            // Also handle fill: and stroke: in style attributes
+            svgContent = svgContent.replaceAll("fill:#[0-9a-fA-F]{3,6}", "fill:" + color);
+            svgContent = svgContent.replaceAll("stroke:#[0-9a-fA-F]{3,6}", "stroke:" + color);
+        }
+
+        byte[] fileContent = svgContent.getBytes();
+        String filename = sanitizeFilename(elementName) + ".svg";
+        return new DownloadResult(new ByteArrayResource(fileContent), filename, "image/svg+xml");
     }
 }

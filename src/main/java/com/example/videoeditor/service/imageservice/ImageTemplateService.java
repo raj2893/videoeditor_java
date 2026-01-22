@@ -25,14 +25,14 @@ public class ImageTemplateService {
      * Get all active templates
      */
     public List<ImageTemplate> getAllActiveTemplates() {
-        return templateRepository.findByIsActiveTrueOrderByDisplayOrderAscCreatedAtDesc();
+        return templateRepository.findByStatusOrderByDisplayOrderAscCreatedAtDesc("PUBLISHED");
     }
 
     /**
      * Get templates by category
      */
     public List<ImageTemplate> getTemplatesByCategory(String category) {
-        return templateRepository.findByCategoryAndIsActiveTrueOrderByDisplayOrderAsc(category);
+        return templateRepository.findByCategoryAndStatusOrderByDisplayOrderAsc(category, "PUBLISHED");
     }
 
     /**
@@ -61,7 +61,7 @@ public class ImageTemplateService {
         template.setCanvasHeight(canvasHeight);
         template.setDesignJson(designJson);
         template.setTags(tags);
-        template.setIsActive(true);
+        template.setStatus("DRAFT"); // Start as draft
         template.setIsPremium(false);
 
         return templateRepository.save(template);
@@ -113,5 +113,31 @@ public class ImageTemplateService {
      */
     public List<ImageTemplate> getAllTemplates() {
         return templateRepository.findAll();
+    }
+
+    @Transactional
+    public ImageTemplate publishTemplate(Long id) {
+        ImageTemplate template = getTemplateById(id);
+        template.setStatus("PUBLISHED");
+        logger.info("Template published: {}", id);
+        return templateRepository.save(template);
+    }
+
+    // Add an unpublish method:
+    @Transactional
+    public ImageTemplate unpublishTemplate(Long id) {
+        ImageTemplate template = getTemplateById(id);
+        template.setStatus("DRAFT");
+        logger.info("Template unpublished: {}", id);
+        return templateRepository.save(template);
+    }
+
+    // Add archive method:
+    @Transactional
+    public ImageTemplate archiveTemplate(Long id) {
+        ImageTemplate template = getTemplateById(id);
+        template.setStatus("ARCHIVED");
+        logger.info("Template archived: {}", id);
+        return templateRepository.save(template);
     }
 }

@@ -54,6 +54,9 @@ public class ImageTemplate {
     @Column(name = "usage_count")
     private Long usageCount = 0L;
 
+    @Column(name = "status", nullable = false, columnDefinition = "VARCHAR(20) DEFAULT 'DRAFT'")
+    private String status = "DRAFT";
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -69,5 +72,17 @@ public class ImageTemplate {
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
+    }
+
+    // Keep isActive for backward compatibility (derived from status)
+    @Transient
+    public Boolean getIsActive() {
+        return "PUBLISHED".equals(status);
+    }
+
+    // Add a convenience method
+    @Transient
+    public Boolean isDraft() {
+        return "DRAFT".equals(status);
     }
 }

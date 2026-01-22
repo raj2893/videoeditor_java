@@ -24,54 +24,72 @@ def generate_subtitles(audio_path):
         original_stdout = sys.stdout
         sys.stdout = StdoutToStderr()
         try:
-            result = model.transcribe(audio_path, word_timestamps=False, verbose=False)
+            # ✅ KEY CHANGE: Enable word_timestamps
+            result = model.transcribe(audio_path, word_timestamps=True, verbose=False)
         finally:
-            sys.stdout = original_stdout  # Restore stdout
+            sys.stdout = original_stdout
 
         print("Transcription complete", file=sys.stderr)
 
-        # Process segments to create subtitles with 2–3 words per chunk
+        # Process segments to create subtitles with word-level timestamps
         subtitles = []
         for segment in result["segments"]:
             text = segment["text"].strip()
             if not text or segment["end"] <= segment["start"]:
                 continue
 
-            # Split text into words
-            words = text.split()
-            if not words:
-                continue
+            # ✅ NEW: Extract word-level timestamps if available
+            words_data = []
+            if "words" in segment and segment["words"]:
+                for word_info in segment["words"]:
+                    word_text = word_info.get("word", "").strip()
+                    if word_text:
+                        words_data.append({
+                            "word": word_text,
+                            "start": max(0.0, word_info.get("start", segment["start"])),
+                            "end": word_info.get("end", segment["end"])
+                        })
 
-            # Calculate total duration of the segment
-            start_time = max(0.0, segment["start"])
-            end_time = segment["end"]
-            duration = end_time - start_time
-
-            # Create chunks of 2–3 words
-            chunk_size = 3  # Prefer 3 words, fallback to 2 if necessary
+            # Create chunks of 2–3 words with word timestamps
+            chunk_size = 3
             i = 0
-            while i < len(words):
-                # Determine number of words for this chunk (2 or 3)
-                remaining_words = len(words) - i
+            word_list = text.split() if not words_data else [w["word"] for w in words_data]
+
+            while i < len(word_list):
+                remaining_words = len(word_list) - i
                 current_chunk_size = min(chunk_size, remaining_words)
+
                 if current_chunk_size == 1 and i > 0:
-                    # If only one word remains, append it to the previous chunk if possible
-                    if subtitles and subtitles[-1]["end"] == start_time + (duration * i / len(words)):
-                        subtitles[-1]["text"] += " " + words[i]
+                    if subtitles:
+                        subtitles[-1]["text"] += " " + word_list[i]
+                        if words_data and i < len(words_data):
+                            subtitles[-1]["words"].append(words_data[i])
+                            subtitles[-1]["end"] = words_data[i]["end"]
                         i += 1
                         continue
                 elif current_chunk_size == 2 and remaining_words == 2:
-                    current_chunk_size = 2  # Allow 2 words for the last chunk
+                    current_chunk_size = 2
 
-                # Create chunk
-                chunk_text = " ".join(words[i:i + current_chunk_size])
+                # Create chunk with word timestamps
+                chunk_text = " ".join(word_list[i:i + current_chunk_size])
                 if not chunk_text.strip():
                     i += current_chunk_size
                     continue
 
-                # Calculate timing for this chunk
-                chunk_start = start_time + (duration * i / len(words))
-                chunk_end = start_time + (duration * (i + current_chunk_size) / len(words))
+                # Get timing from word timestamps or calculate
+                if words_data and i < len(words_data):
+                    chunk_start = words_data[i]["start"]
+                    chunk_end = words_data[min(i + current_chunk_size - 1, len(words_data) - 1)]["end"]
+                    chunk_words = words_data[i:i + current_chunk_size]
+                else:
+                    # Fallback to calculated timing
+                    start_time = max(0.0, segment["start"])
+                    end_time = segment["end"]
+                    duration = end_time - start_time
+                    chunk_start = start_time + (duration * i / len(word_list))
+                    chunk_end = start_time + (duration * (i + current_chunk_size) / len(word_list))
+                    chunk_words = []
+
                 if chunk_end <= chunk_start:
                     i += current_chunk_size
                     continue
@@ -79,13 +97,15 @@ def generate_subtitles(audio_path):
                 subtitles.append({
                     "start": chunk_start,
                     "end": chunk_end,
-                    "text": chunk_text
+                    "text": chunk_text,
+                    "words": chunk_words  # ✅ NEW: Include word-level timestamps
                 })
                 i += current_chunk_size
 
-        print(f"Generated {len(subtitles)} subtitles", file=sys.stderr)
+        print(f"Generated {len(subtitles)} subtitles with word timestamps", file=sys.stderr)
         for i, subtitle in enumerate(subtitles):
-            print(f"Subtitle {i+1}: start={subtitle['start']:.3f}, end={subtitle['end']:.3f}, text={subtitle['text']}", file=sys.stderr)
+            word_count = len(subtitle.get("words", []))
+            print(f"Subtitle {i+1}: start={subtitle['start']:.3f}, end={subtitle['end']:.3f}, words={word_count}, text={subtitle['text']}", file=sys.stderr)
         return subtitles
     except Exception as e:
         print(f"Error during transcription: {str(e)}", file=sys.stderr)

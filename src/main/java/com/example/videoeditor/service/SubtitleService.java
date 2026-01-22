@@ -171,42 +171,55 @@ public class SubtitleService {
                 throw new IOException("No subtitles generated");
             }
 
-            logger.info("📝 Processing {} raw subtitles into SubtitleDTO objects", rawSubtitles.size());
-            List<SubtitleDTO> subtitles = new ArrayList<>();
-            for (Map<String, Object> raw : rawSubtitles) {
-                double startTime = ((Number) raw.get("start")).doubleValue();
-                double endTime = ((Number) raw.get("end")).doubleValue();
-                String text = (String) raw.get("text");
+          logger.info("📝 Processing {} raw subtitles into SubtitleDTO objects", rawSubtitles.size());
+          List<SubtitleDTO> subtitles = new ArrayList<>();
+          for (Map<String, Object> raw : rawSubtitles) {
+            double startTime = ((Number) raw.get("start")).doubleValue();
+            double endTime = ((Number) raw.get("end")).doubleValue();
+            String text = (String) raw.get("text");
 
-                startTime = Math.max(0, startTime);
-                endTime = Math.min(audioDuration, endTime);
+            startTime = Math.max(0, startTime);
+            endTime = Math.min(audioDuration, endTime);
 
-                if (endTime > startTime && text != null && !text.trim().isEmpty()) {
-                    SubtitleDTO subtitle = new SubtitleDTO();
-                    subtitle.setId(UUID.randomUUID().toString());
-                    subtitle.setTimelineStartTime(startTime);
-                    subtitle.setTimelineEndTime(endTime);
-                    subtitle.setText(text.trim());
+            if (endTime > startTime && text != null && !text.trim().isEmpty()) {
+              SubtitleDTO subtitle = new SubtitleDTO();
+              subtitle.setId(UUID.randomUUID().toString());
+              subtitle.setTimelineStartTime(startTime);
+              subtitle.setTimelineEndTime(endTime);
+              subtitle.setText(text.trim());
 
-                    // Apply style parameters if provided, else use defaults
-                    subtitle.setFontFamily(styleParams != null && styleParams.containsKey("fontFamily") ?
-                            styleParams.get("fontFamily") : "Montserrat Alternates Black");
-                    subtitle.setFontColor(styleParams != null && styleParams.containsKey("fontColor") ?
-                            styleParams.get("fontColor") : "black");
-                    subtitle.setBackgroundColor(styleParams != null && styleParams.containsKey("backgroundColor") ?
-                            styleParams.get("backgroundColor") : "white");
-                    subtitle.setBackgroundOpacity(1.0);
-                    subtitle.setPositionX(0);
-                    subtitle.setPositionY(350);
-                    subtitle.setAlignment("center");
-                    subtitle.setScale(1.5);
-                    subtitle.setBackgroundH(50);
-                    subtitle.setBackgroundW(50);
-                    subtitle.setBackgroundBorderRadius(15);
-
-                    subtitles.add(subtitle);
+              // ✅ NEW: Process word-level timestamps
+              if (raw.containsKey("words")) {
+                List<Map<String, Object>> wordsRaw = (List<Map<String, Object>>) raw.get("words");
+                List<SubtitleDTO.WordTimestamp> wordTimestamps = new ArrayList<>();
+                for (Map<String, Object> wordData : wordsRaw) {
+                  String word = (String) wordData.get("word");
+                  double wordStart = ((Number) wordData.get("start")).doubleValue();
+                  double wordEnd = ((Number) wordData.get("end")).doubleValue();
+                  wordTimestamps.add(new SubtitleDTO.WordTimestamp(word, wordStart, wordEnd));
                 }
+                subtitle.setWords(wordTimestamps);
+              }
+
+              // Apply style parameters (existing code)
+              subtitle.setFontFamily(styleParams != null && styleParams.containsKey("fontFamily") ?
+                  styleParams.get("fontFamily") : "Montserrat Alternates Black");
+              subtitle.setFontColor(styleParams != null && styleParams.containsKey("fontColor") ?
+                  styleParams.get("fontColor") : "black");
+              subtitle.setBackgroundColor(styleParams != null && styleParams.containsKey("backgroundColor") ?
+                  styleParams.get("backgroundColor") : "white");
+              subtitle.setBackgroundOpacity(1.0);
+              subtitle.setPositionX(0);
+              subtitle.setPositionY(350);
+              subtitle.setAlignment("center");
+              subtitle.setScale(1.5);
+              subtitle.setBackgroundH(50);
+              subtitle.setBackgroundW(50);
+              subtitle.setBackgroundBorderRadius(15);
+
+              subtitles.add(subtitle);
             }
+          }
 
             logger.info("✅ Created {} SubtitleDTO objects", subtitles.size());
 

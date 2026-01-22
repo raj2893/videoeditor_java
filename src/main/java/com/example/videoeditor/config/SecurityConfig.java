@@ -68,6 +68,10 @@ public class SecurityConfig implements WebMvcConfigurer {
                 "/videos/edited-videos", "/videos/trim", "/videos/split",
                 "/videos/duration/**").authenticated()
             .requestMatchers("videos/filtered/{userId}/original/{filename}").permitAll()
+            .requestMatchers("/api/ai-voices/get-all-voices").permitAll()
+            .requestMatchers("/api/ai-voices/voices-by-language").permitAll()
+            .requestMatchers("/api/ai-voices/voices-by-gender").permitAll()
+            .requestMatchers("/api/ai-voices/voices-by-language-and-gender").permitAll()
             .requestMatchers("/speed-videos/{userId}/{fileName}").permitAll()
             .requestMatchers("/projects/{projectId}/images/{filename}").permitAll()
             .requestMatchers("image/projects/{projectId}/{filename}").permitAll()

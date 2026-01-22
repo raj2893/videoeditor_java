@@ -23,6 +23,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -51,7 +52,8 @@ public class SoleTTSService {
             String text,
             String voiceName,
             String languageCode,
-            Map<String, String> ssmlConfig) throws IOException, InterruptedException {
+            String emotion,
+            Map<String, String> customConfig) throws IOException, InterruptedException {
         // Validate input
         if (text == null || text.trim().isEmpty()) {
             throw new IllegalArgumentException("Text is required and cannot be empty");
@@ -106,14 +108,17 @@ public class SoleTTSService {
         soleTTS.setUser(user);
 
         try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create(settings)) {
+            // Apply emotion preset - this handles everything
+            Map<String, String> finalSsmlConfig = applyEmotionPreset(emotion, customConfig);
+
             // Build SSML text if config is provided
-            String inputText = (ssmlConfig != null && !ssmlConfig.isEmpty())
-                    ? buildSSMLText(text, ssmlConfig)
+            String inputText = (finalSsmlConfig != null && !finalSsmlConfig.isEmpty())
+                    ? buildSSMLText(text, finalSsmlConfig)
                     : text;
 
             // Use setSsml instead of setText when SSML is present
             SynthesisInput.Builder inputBuilder = SynthesisInput.newBuilder();
-            if (ssmlConfig != null && !ssmlConfig.isEmpty()) {
+            if (finalSsmlConfig != null && !finalSsmlConfig.isEmpty()) {
                 inputBuilder.setSsml(inputText);
             } else {
                 inputBuilder.setText(inputText);
@@ -225,5 +230,75 @@ public class SoleTTSService {
                 .orElseGet(() -> new UserDailyTtsUsage(user, today));
         usage.setCharactersUsed(usage.getCharactersUsed() + characters);
         userDailyTtsUsageRepository.save(usage);
+    }
+
+    private Map<String, String> applyEmotionPreset(String emotion, Map<String, String> customConfig) {
+        Map<String, String> ssmlConfig = new HashMap<>();
+
+        // Apply emotion preset with EXTREME values
+        switch (emotion.toLowerCase()) {
+            case "happy":
+            case "excited":
+                ssmlConfig.put("rate", "1.4");      // Much faster
+                ssmlConfig.put("pitch", "+8st");    // Noticeably higher
+                ssmlConfig.put("volume", "+4dB");   // Louder
+                ssmlConfig.put("emphasis", "strong");
+                break;
+            case "calm":
+            case "relaxed":
+                ssmlConfig.put("rate", "0.75");     // Significantly slower
+                ssmlConfig.put("pitch", "-4st");    // Lower
+                ssmlConfig.put("volume", "-2dB");   // Softer
+                ssmlConfig.put("emphasis", "reduced");
+                break;
+            case "angry":
+            case "intense":
+                ssmlConfig.put("rate", "1.3");      // Fast and aggressive
+                ssmlConfig.put("pitch", "+6st");    // Higher tension
+                ssmlConfig.put("volume", "+6dB");   // Much louder
+                ssmlConfig.put("emphasis", "strong");
+                break;
+            case "sad":
+            case "somber":
+                ssmlConfig.put("rate", "0.7");      // Very slow
+                ssmlConfig.put("pitch", "-6st");    // Much lower
+                ssmlConfig.put("volume", "-3dB");   // Quieter
+                ssmlConfig.put("emphasis", "reduced");
+                break;
+            case "announcer":
+                ssmlConfig.put("rate", "1.0");
+                ssmlConfig.put("pitch", "-2st");    // Authoritative
+                ssmlConfig.put("volume", "+5dB");   // Clear and loud
+                ssmlConfig.put("emphasis", "strong");
+                break;
+            case "meditation":
+                ssmlConfig.put("rate", "0.6");      // Extremely slow
+                ssmlConfig.put("pitch", "-5st");    // Deep and calming
+                ssmlConfig.put("volume", "-1dB");
+                ssmlConfig.put("emphasis", "reduced");
+                break;
+            case "enthusiastic":
+                ssmlConfig.put("rate", "1.5");      // Very fast
+                ssmlConfig.put("pitch", "+10st");   // Very high energy
+                ssmlConfig.put("volume", "+5dB");   // Energetic volume
+                ssmlConfig.put("emphasis", "strong");
+                break;
+            case "professional":
+                ssmlConfig.put("rate", "0.95");
+                ssmlConfig.put("pitch", "0st");     // Neutral
+                ssmlConfig.put("volume", "+1dB");   // Clear
+                // No emphasis for professional
+                break;
+            default:
+                // Default/neutral - no modifications
+                break;
+        }
+
+        // Override with custom config if provided
+        if (customConfig != null && !customConfig.isEmpty()) {
+            ssmlConfig.putAll(customConfig);
+        }
+
+        return ssmlConfig;
     }
 }

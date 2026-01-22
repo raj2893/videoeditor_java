@@ -39,9 +39,10 @@ public class SoleTTSController {
             String text = (String) request.get("text");
             String voiceName = (String) request.get("voiceName");
             String languageCode = (String) request.get("languageCode");
+            String emotion = (String) request.getOrDefault("emotion", "default");  // NEW
 
             @SuppressWarnings("unchecked")
-            Map<String, String> ssmlConfig = (Map<String, String>) request.get("ssmlConfig");
+            Map<String, String> customConfig = (Map<String, String>) request.get("customConfig");
 
             // Validate parameters
             if (text == null || text.trim().isEmpty()) {
@@ -54,8 +55,10 @@ public class SoleTTSController {
                 return ResponseEntity.badRequest().body("Language code is required");
             }
 
-            // Generate TTS
-            SoleTTS soleTTS = soleTTSService.generateTTS(user, text, voiceName, languageCode, ssmlConfig);
+            // Generate TTS with emotion
+            SoleTTS soleTTS = soleTTSService.generateTTS(
+                    user, text, voiceName, languageCode, emotion, customConfig
+            );
 
             // Prepare response
             Map<String, Object> response = new HashMap<>();

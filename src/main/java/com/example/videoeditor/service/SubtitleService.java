@@ -48,6 +48,7 @@ public class SubtitleService {
   private final ObjectMapper objectMapper;
   private final UserRepository userRepository; // Added dependency
   private final UserProcessingUsageRepository userProcessingUsageRepository;
+    private final PlanLimitsService planLimitsService;
 
   @Value("${app.base-dir:D:\\Backend\\videoeditor_java}")
   private String baseDir;
@@ -65,53 +66,73 @@ public class SubtitleService {
           JwtUtil jwtUtil,
           SubtitleMediaRepository subtitleMediaRepository,
           ObjectMapper objectMapper,
-          UserRepository userRepository, UserProcessingUsageRepository userProcessingUsageRepository) {
+          UserRepository userRepository, UserProcessingUsageRepository userProcessingUsageRepository, PlanLimitsService planLimitsService) {
     this.jwtUtil = jwtUtil;
     this.subtitleMediaRepository = subtitleMediaRepository;
     this.objectMapper = objectMapper;
     this.userRepository = userRepository;
       this.userProcessingUsageRepository = userProcessingUsageRepository;
+      this.planLimitsService = planLimitsService;
   }
 
-  public SubtitleMedia uploadMedia(User user, MultipartFile mediaFile) throws IOException {
-    logger.info("Uploading media for user: {}", user.getId());
+    public SubtitleMedia uploadMedia(User user, MultipartFile mediaFile) throws IOException {
+        logger.info("Uploading media for user: {}", user.getId());
 
-    if (mediaFile == null || mediaFile.isEmpty()) {
-      logger.error("MultipartFile is null or empty for user: {}", user.getId());
-      throw new IllegalArgumentException("Media file is null or empty");
+        if (mediaFile == null || mediaFile.isEmpty()) {
+            logger.error("MultipartFile is null or empty for user: {}", user.getId());
+            throw new IllegalArgumentException("Media file is null or empty");
+        }
+
+        String originalDirPath = baseDir + File.separator + "subtitles" + File.separator + user.getId() + File.separator + "original";
+        File originalDir = new File(originalDirPath);
+        if (!originalDir.exists() && !originalDir.mkdirs()) {
+            logger.error("Failed to create original directory: {}", originalDir.getAbsolutePath());
+            throw new IOException("Failed to create original directory");
+        }
+
+        String originalFileName = mediaFile.getOriginalFilename();
+        File inputFile = new File(originalDir, originalFileName);
+        mediaFile.transferTo(inputFile);
+        logger.debug("Saved input media to: {}", inputFile.getAbsolutePath());
+
+        if (inputFile.length() == 0) {
+            logger.error("Input file is empty: {}", inputFile.getAbsolutePath());
+            throw new IOException("Input file is empty");
+        }
+
+        // ✅ NEW: Validate video duration BEFORE saving to database
+        try {
+            double videoDuration = getVideoDuration(inputFile);
+            int maxMinutes = planLimitsService.getMaxVideoLengthMinutes(user);
+
+            if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
+                // Delete the uploaded file since it exceeds limits
+                inputFile.delete();
+                throw new IllegalArgumentException(
+                        "Video length (" + (int)(videoDuration/60) + " min) exceeds maximum allowed (" +
+                                maxMinutes + " minutes). Upgrade your plan."
+                );
+            }
+        } catch (InterruptedException e) {
+            inputFile.delete();
+            Thread.currentThread().interrupt();
+            throw new IOException("Failed to validate video duration: " + e.getMessage());
+        }
+
+        String originalPath = "subtitles/" + user.getId() + "/original/" + originalFileName;
+        String originalCdnUrl = "http://localhost:8080/" + originalPath;
+
+        SubtitleMedia subtitleMedia = new SubtitleMedia();
+        subtitleMedia.setUser(user);
+        subtitleMedia.setOriginalFileName(originalFileName);
+        subtitleMedia.setOriginalPath(originalPath);
+        subtitleMedia.setOriginalCdnUrl(originalCdnUrl);
+        subtitleMedia.setStatus("UPLOADED");
+        subtitleMediaRepository.save(subtitleMedia);
+
+        logger.info("Saved metadata for user: {}, media: {}", user.getId(), originalFileName);
+        return subtitleMedia;
     }
-
-    String originalDirPath = baseDir + File.separator + "subtitles" + File.separator + user.getId() + File.separator + "original";
-    File originalDir = new File(originalDirPath);
-    if (!originalDir.exists() && !originalDir.mkdirs()) {
-      logger.error("Failed to create original directory: {}", originalDir.getAbsolutePath());
-      throw new IOException("Failed to create original directory");
-    }
-
-    String originalFileName = mediaFile.getOriginalFilename();
-    File inputFile = new File(originalDir, originalFileName);
-    mediaFile.transferTo(inputFile);
-    logger.debug("Saved input media to: {}", inputFile.getAbsolutePath());
-
-    if (inputFile.length() == 0) {
-      logger.error("Input file is empty: {}", inputFile.getAbsolutePath());
-      throw new IOException("Input file is empty");
-    }
-
-    String originalPath = "subtitles/" + user.getId() + "/original/" + originalFileName;
-    String originalCdnUrl = "http://localhost:8080/" + originalPath;
-
-    SubtitleMedia subtitleMedia = new SubtitleMedia();
-    subtitleMedia.setUser(user);
-    subtitleMedia.setOriginalFileName(originalFileName);
-    subtitleMedia.setOriginalPath(originalPath);
-    subtitleMedia.setOriginalCdnUrl(originalCdnUrl);
-    subtitleMedia.setStatus("UPLOADED");
-    subtitleMediaRepository.save(subtitleMedia);
-
-    logger.info("Saved metadata for user: {}, media: {}", user.getId(), originalFileName);
-    return subtitleMedia;
-  }
 
     public SubtitleMedia generateSubtitles(User user, Long mediaId, Map<String, String> styleParams) throws IOException, InterruptedException {
         logger.info("Generating subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
@@ -1768,14 +1789,15 @@ public class SubtitleService {
 
     private void validateProcessingLimits(User user, String quality, double videoDuration) throws IllegalArgumentException {
         // Check quality
-        if (quality != null && !user.isQualityAllowed(quality)) {
-            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " + user.getMaxAllowedQuality());
+        if (quality != null && !planLimitsService.isQualityAllowed(user, quality)) {
+            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " +
+                    planLimitsService.getMaxAllowedQuality(user));
         }
 
         // Check monthly limit
-        int maxPerMonth = user.getMaxVideoProcessingPerMonth();
+        int maxPerMonth = planLimitsService.getMaxVideoProcessingPerMonth(user);
         if (maxPerMonth > 0) {
-            String currentYearMonth = YearMonth.now().toString(); // "2025-01"
+            String currentYearMonth = YearMonth.now().toString();
             Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
                     user, "SUBTITLE", currentYearMonth);
 
@@ -1786,7 +1808,7 @@ public class SubtitleService {
         }
 
         // Check video length
-        int maxMinutes = user.getMaxVideoLengthMinutes();
+        int maxMinutes = planLimitsService.getMaxVideoLengthMinutes(user);
         if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
             throw new IllegalArgumentException("Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
         }

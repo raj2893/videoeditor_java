@@ -81,6 +81,7 @@ public class SecurityConfig implements WebMvcConfigurer {
             .requestMatchers("/image_editor/elements/{filename}").permitAll()
             .requestMatchers("/api/image-editor/elements").permitAll()
             .requestMatchers("/api/image-editor/elements/**").permitAll()
+            .requestMatchers("/api/image-editor/templates").permitAll()
             .requestMatchers("elements/{filename}").permitAll()
             .requestMatchers("/projects/{projectId}/audio/{filename}").permitAll()
             .requestMatchers("audio/projects/{projectId}/{filename}").permitAll()

@@ -35,16 +35,18 @@ public class SoleTTSService {
     private final SoleTTSRepository soleTTSRepository;
     private final UserTtsUsageRepository userTtsUsageRepository;
     private final UserDailyTtsUsageRepository userDailyTtsUsageRepository;
+    private final PlanLimitsService planLimitsService;
 
     private final String baseDir = "D:\\Backend\\videoeditor_java";
     String credentialsPath = baseDir + File.separator + "credentials" + File.separator + "video-editor-tts-24b472478ab838d2168992684517cacfab4c11da.json";
 
     public SoleTTSService(
             SoleTTSRepository soleTTSRepository,
-            UserTtsUsageRepository userTtsUsageRepository, UserDailyTtsUsageRepository userDailyTtsUsageRepository) {
+            UserTtsUsageRepository userTtsUsageRepository, UserDailyTtsUsageRepository userDailyTtsUsageRepository, PlanLimitsService planLimitsService) {
         this.soleTTSRepository = soleTTSRepository;
         this.userTtsUsageRepository = userTtsUsageRepository;
         this.userDailyTtsUsageRepository = userDailyTtsUsageRepository;
+        this.planLimitsService = planLimitsService;
     }
 
     public SoleTTS generateTTS(
@@ -65,8 +67,8 @@ public class SoleTTSService {
             throw new IllegalArgumentException("Language code is required");
         }
 
-        // Check max chars per request
-        long maxCharsPerRequest = user.getMaxCharsPerRequest();
+        // ✅ CHANGE: Use planLimitsService instead of user.getMaxCharsPerRequest()
+        long maxCharsPerRequest = planLimitsService.getMaxCharsPerRequest(user);
         if (maxCharsPerRequest > 0 && text.length() > maxCharsPerRequest) {
             throw new IllegalArgumentException(
                     "Text exceeds max characters allowed per request for " + user.getRole() +
@@ -74,8 +76,8 @@ public class SoleTTSService {
             );
         }
 
-        // Check monthly TTS usage (skip if unlimited)
-        long monthlyLimit = user.getMonthlyTtsLimit();
+        // ✅ CHANGE: Use planLimitsService instead of user.getMonthlyTtsLimit()
+        long monthlyLimit = planLimitsService.getMonthlyTtsLimit(user);
         if (monthlyLimit > 0) { // Only check if there's a limit (-1 means unlimited)
             long userUsage = getUserTtsUsage(user);
             if (userUsage + text.length() > monthlyLimit) {
@@ -86,8 +88,8 @@ public class SoleTTSService {
             }
         }
 
-        // Check daily TTS usage (skip if unlimited)
-        long dailyLimit = user.getDailyTtsLimit();
+        // ✅ CHANGE: Use planLimitsService instead of user.getDailyTtsLimit()
+        long dailyLimit = planLimitsService.getDailyTtsLimit(user);
         if (dailyLimit > 0) { // -1 means no daily limit
             long dailyUsage = getUserDailyTtsUsage(user);
             if (dailyUsage + text.length() > dailyLimit) {

@@ -3,9 +3,12 @@ package com.example.videoeditor.controller;
 import com.example.videoeditor.dto.VideoSpeedRequest;
 import com.example.videoeditor.dto.VideoSpeedResponse;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.UserProcessingUsage;
 import com.example.videoeditor.entity.VideoSpeed;
+import com.example.videoeditor.repository.UserProcessingUsageRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
+import com.example.videoeditor.service.PlanLimitsService;
 import com.example.videoeditor.service.VideoSpeedService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -16,8 +19,11 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.time.YearMonth;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
@@ -29,6 +35,8 @@ public class VideoSpeedController {
     private final VideoSpeedService videoSpeedService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final PlanLimitsService planLimitsService;
+    private final UserProcessingUsageRepository userProcessingUsageRepository;
 
     private User getUserFromToken(String token) {
         if (token == null || !token.startsWith("Bearer ")) {
@@ -41,27 +49,27 @@ public class VideoSpeedController {
 
     @PostMapping("/upload")
     public ResponseEntity<?> uploadVideo(
-        @RequestHeader("Authorization") String token,
-        @RequestParam("file") MultipartFile file,
-        @RequestParam(value = "speed", required = false) Double speed) {
+            @RequestHeader("Authorization") String token,
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "speed", required = false) Double speed) {
         try {
             User user = getUserFromToken(token);
             VideoSpeed video = videoSpeedService.uploadVideo(user, file, speed);
             VideoSpeedResponse response = mapToResponse(video);
             logger.info("Video uploaded: id={}", video.getId());
             return ResponseEntity.ok(response);
-        } catch (IOException e) {
-            logger.error("Error uploading video: {}", e.getMessage(), e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of("error", "Failed to upload video: " + e.getMessage()));
         } catch (IllegalArgumentException e) {
             logger.warn("Invalid input: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", e.getMessage()));
+        } catch (IOException e) {
+            logger.error("Error uploading video: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to upload video: " + e.getMessage()));
         } catch (RuntimeException e) {
             logger.warn("Unauthorized: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", e.getMessage()));
         }
     }
 
@@ -158,5 +166,32 @@ public class VideoSpeedController {
         response.setCdnUrl(video.getCdnUrl());
         response.setOriginalFilePath(video.getOriginalFilePath());
         return response;
+    }
+
+    @GetMapping("/plan-limits")
+    public ResponseEntity<?> getPlanLimits(@RequestHeader("Authorization") String token) {
+        try {
+            User user = getUserFromToken(token);
+
+            int videosPerMonth = planLimitsService.getMaxSpeedProcessingPerMonth(user);
+            int maxVideoLength = planLimitsService.getMaxSpeedVideoLengthMinutes(user);
+            String maxQuality = planLimitsService.getMaxSpeedAllowedQuality(user);
+
+            // Get current usage
+            String currentYearMonth = YearMonth.now().toString();
+            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository
+                    .findByUserAndServiceTypeAndYearMonth(user, "VIDEO_SPEED", currentYearMonth);
+            int videosUsed = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("videosPerMonth", videosPerMonth);
+            response.put("videosUsed", videosUsed);
+            response.put("maxVideoLength", maxVideoLength);
+            response.put("maxQuality", maxQuality);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 }

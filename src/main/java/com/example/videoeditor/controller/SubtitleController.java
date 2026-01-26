@@ -3,7 +3,11 @@ package com.example.videoeditor.controller;
 import com.example.videoeditor.dto.SubtitleDTO;
 import com.example.videoeditor.entity.SubtitleMedia;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.entity.UserProcessingUsage;
+import com.example.videoeditor.repository.UserProcessingUsageRepository;
+import com.example.videoeditor.service.PlanLimitsService;
 import com.example.videoeditor.service.SubtitleService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -11,15 +15,21 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.YearMonth;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping("/api/subtitles")
 public class SubtitleController {
 
     @Autowired
     private SubtitleService subtitleService;
+    private final PlanLimitsService planLimitsService;
+    private final UserProcessingUsageRepository userProcessingUsageRepository;
 
     @PostMapping("/upload")
     public ResponseEntity<?> uploadMedia(
@@ -30,9 +40,14 @@ public class SubtitleController {
             SubtitleMedia result = subtitleService.uploadMedia(user, mediaFile);
             return ResponseEntity.ok(result);
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", e.getMessage()));
         } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Upload failed: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Upload failed: " + e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Unexpected error: " + e.getMessage()));
         }
     }
 
@@ -128,6 +143,33 @@ public class SubtitleController {
             return ResponseEntity.ok(mediaList);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Failed to retrieve media: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/plan-limits")
+    public ResponseEntity<?> getPlanLimits(@RequestHeader("Authorization") String token) {
+        try {
+            User user = subtitleService.getUserFromToken(token);
+
+            int videosPerMonth = planLimitsService.getMaxVideoProcessingPerMonth(user);
+            int maxVideoLength = planLimitsService.getMaxVideoLengthMinutes(user);
+            String maxQuality = planLimitsService.getMaxAllowedQuality(user);
+
+            // Get current usage
+            String currentYearMonth = YearMonth.now().toString();
+            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository
+                    .findByUserAndServiceTypeAndYearMonth(user, "SUBTITLE", currentYearMonth);
+            int videosUsed = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("videosPerMonth", videosPerMonth);
+            response.put("videosUsed", videosUsed);
+            response.put("maxVideoLength", maxVideoLength);
+            response.put("maxQuality", maxQuality);
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         }
     }
 }

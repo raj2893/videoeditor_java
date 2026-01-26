@@ -33,6 +33,7 @@ public class VideoSpeedService {
     private final VideoSpeedRepository videoSpeedRepository;
     private final UserProcessingUsageRepository userProcessingUsageRepository;
     private final ObjectMapper objectMapper;
+    private final PlanLimitsService planLimitsService;
 
     @Value("${video-editor.base-path-speed}")
     private String basePath;
@@ -65,6 +66,24 @@ public class VideoSpeedService {
 
         // Save file to local storage
         videoFile.transferTo(new File(filePath));
+
+        try {
+            double videoDuration = getVideoDuration(filePath);
+            int maxMinutes = planLimitsService.getMaxSpeedVideoLengthMinutes(user);
+
+            if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
+                // Delete the uploaded file since it exceeds limits
+                Files.deleteIfExists(Paths.get(filePath));
+                throw new IllegalArgumentException(
+                        "Video length (" + (int)(videoDuration/60) + " min) exceeds maximum allowed (" +
+                                maxMinutes + " minutes). Upgrade your plan."
+                );
+            }
+        } catch (InterruptedException e) {
+            Files.deleteIfExists(Paths.get(filePath));
+            Thread.currentThread().interrupt();
+            throw new IOException("Failed to validate video duration: " + e.getMessage());
+        }
 
         // Create VideoSpeed entity
         VideoSpeed video = new VideoSpeed();
@@ -234,11 +253,12 @@ public class VideoSpeedService {
     }
 
     private void validateProcessingLimits(User user, String quality, double videoDuration) throws IllegalArgumentException {
-        if (quality != null && !user.isQualityAllowed(quality)) {
-            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " + user.getMaxAllowedQuality());
+        if (quality != null && !planLimitsService.isSpeedQualityAllowed(user, quality)) {
+            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " +
+                    planLimitsService.getMaxSpeedAllowedQuality(user));
         }
 
-        int maxPerMonth = user.getMaxVideoProcessingPerMonth();
+        int maxPerMonth = planLimitsService.getMaxSpeedProcessingPerMonth(user);
         if (maxPerMonth > 0) {
             String currentYearMonth = YearMonth.now().toString();
             Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
@@ -250,7 +270,7 @@ public class VideoSpeedService {
             }
         }
 
-        int maxMinutes = user.getMaxVideoLengthMinutes();
+        int maxMinutes = planLimitsService.getMaxSpeedVideoLengthMinutes(user);
         if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
             throw new IllegalArgumentException("Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
         }

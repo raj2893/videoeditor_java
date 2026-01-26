@@ -23,7 +23,6 @@ public class ImageTemplateController {
      */
     @GetMapping
     public ResponseEntity<?> getAllTemplates(
-            @RequestHeader("Authorization") String token,
             @RequestParam(value = "category", required = false) String category) {
         try {
             List<ImageTemplate> templates;

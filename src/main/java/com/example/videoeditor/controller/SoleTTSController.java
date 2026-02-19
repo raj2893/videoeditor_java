@@ -2,15 +2,20 @@ package com.example.videoeditor.controller;
 
 import com.example.videoeditor.entity.SoleTTS;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.enums.PlanType;
+import com.example.videoeditor.repository.UserPlanRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
+import com.example.videoeditor.service.PlanLimitsService;
 import com.example.videoeditor.service.SoleTTSService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -20,11 +25,15 @@ public class SoleTTSController {
     private final SoleTTSService soleTTSService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final UserPlanRepository userPlanRepository;
+    private final PlanLimitsService planLimitsService;
 
-    public SoleTTSController(SoleTTSService soleTTSService, JwtUtil jwtUtil, UserRepository userRepository) {
+    public SoleTTSController(SoleTTSService soleTTSService, JwtUtil jwtUtil, UserRepository userRepository, UserPlanRepository userPlanRepository, PlanLimitsService planLimitsService) {
         this.soleTTSService = soleTTSService;
       this.jwtUtil = jwtUtil;
       this.userRepository = userRepository;
+        this.userPlanRepository = userPlanRepository;
+        this.planLimitsService = planLimitsService;
     }
 
     @PostMapping("/generate")
@@ -86,11 +95,11 @@ public class SoleTTSController {
         try {
             User user = getUserFromToken(token);
             long monthlyUsage = soleTTSService.getUserTtsUsage(user);
-            long monthlyLimit = user.getMonthlyTtsLimit();
+            long monthlyLimit = planLimitsService.getMonthlyTtsLimit(user);
             long monthlyRemaining = monthlyLimit > 0 ? monthlyLimit - monthlyUsage : -1;
             long dailyUsage = soleTTSService.getUserDailyTtsUsage(user);
-            long dailyLimit = user.getDailyTtsLimit();
-            long dailyRemaining = dailyLimit > 0 ? dailyLimit - dailyUsage : -1; // -1 means unlimited
+            long dailyLimit = planLimitsService.getDailyTtsLimit(user);
+            long dailyRemaining = dailyLimit > 0 ? dailyLimit - dailyUsage : -1;
 
             Map<String, Object> response = new HashMap<>();
             response.put("monthly", Map.of(
@@ -113,6 +122,59 @@ public class SoleTTSController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Unexpected error: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/history")
+    public ResponseEntity<?> getTtsHistory(@RequestHeader("Authorization") String token) {
+        try {
+            User user = getUserFromToken(token);
+
+            // Check if user has access to history
+            if (!hasHistoryAccess(user)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of(
+                                "error", "History access denied",
+                                "message", "Upgrade to AI Voice PRO or a premium plan to access your generation history"
+                        ));
+            }
+
+            List<SoleTTS> history = soleTTSService.getUserHistory(user);
+
+            List<Map<String, Object>> historyResponse = history.stream()
+                    .map(tts -> {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("id", tts.getId());
+                        item.put("audioPath", tts.getAudioPath());
+                        item.put("createdAt", tts.getCreatedAt());
+                        return item;
+                    })
+                    .toList();
+
+            return ResponseEntity.ok(Map.of(
+                    "history", historyResponse,
+                    "hasAccess", true
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Unauthorized: " + e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Unexpected error: " + e.getMessage()));
+        }
+    }
+
+    private boolean hasHistoryAccess(User user) {
+        // Allow if user is not BASIC
+        if (user.getRole() != User.Role.BASIC) {
+            return true;
+        }
+
+        // If BASIC, check if they have AI_VOICE_PRO plan
+        return userPlanRepository.findActiveUserPlan(
+                user,
+                PlanType.AI_VOICE_PRO,
+                LocalDateTime.now()
+        ).isPresent();
     }
 
     public User getUserFromToken(String token) {

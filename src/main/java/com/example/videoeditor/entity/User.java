@@ -144,79 +144,7 @@ public class User {
         this.planExpiresAt = planExpiresAt;
     }
 
-    public long getMonthlyTtsLimit() {
-        return switch (this.role) {
-            case BASIC -> 3000;
-            case CREATOR -> 50000;
-            case STUDIO -> 150000;
-            case ADMIN -> -1;
-        };
-    }
-
-    public long getDailyTtsLimit() {
-        return switch (this.role) {
-            case BASIC -> 700;      // 1,000 characters/day
-            case CREATOR -> 5000;    // 5,000 characters/day
-            case STUDIO -> -1;       // -1 means no daily limit
-            case ADMIN -> -1;
-        };
-    }
-
-    public long getMaxCharsPerRequest() {
-        return switch (this.role) {
-            case BASIC -> 250;
-            case CREATOR -> 2500;
-            case STUDIO -> 5000;
-            case ADMIN -> 10000;
-        };
-    }
-
     public boolean isAdmin() {
         return this.role == Role.ADMIN;
-    }
-
-    public int getMaxVideoProcessingPerMonth() {
-        return switch (this.role) {
-            case BASIC -> 5;
-            case CREATOR -> 10;
-            case STUDIO, ADMIN -> -1; // unlimited
-        };
-    }
-
-    public int getMaxVideoLengthMinutes() {
-        return switch (this.role) {
-            case BASIC -> 5;
-            case CREATOR -> 15;
-            case STUDIO, ADMIN -> -1; // unlimited
-        };
-    }
-
-    public String getMaxAllowedQuality() {
-        return switch (this.role) {
-            case BASIC -> "720p";
-            case CREATOR -> "1440p";
-            case STUDIO, ADMIN -> "4k";
-        };
-    }
-
-    public boolean isQualityAllowed(String quality) {
-        int requestedQuality = parseQuality(quality);
-        int maxQuality = parseQuality(getMaxAllowedQuality());
-        return requestedQuality <= maxQuality;
-    }
-
-    private int parseQuality(String quality) {
-        return switch (quality.toLowerCase()) {
-            case "144p" -> 144;
-            case "240p" -> 240;
-            case "360p" -> 360;
-            case "480p" -> 480;
-            case "720p" -> 720;
-            case "1080p" -> 1080;
-            case "1440p" -> 1440;
-            case "2k" -> 1440;
-            case "4k" -> 2160;
-            default -> 0;
-        };
     }
 }

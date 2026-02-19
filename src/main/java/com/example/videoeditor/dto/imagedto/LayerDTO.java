@@ -97,6 +97,8 @@ public class LayerDTO {
   private Double backgroundWidth;
 
   private String linethroughColor;
+    private String shapeMask;
+    private Integer maskRadius;
 
   @Data
   public static class FilterDTO {

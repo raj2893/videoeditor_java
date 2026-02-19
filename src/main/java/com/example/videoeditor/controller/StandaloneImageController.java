@@ -108,4 +108,15 @@ public class StandaloneImageController {
     return "application/octet-stream"; // Default fallback
   }
 
+    @GetMapping("/api/standalone-images/usage-stats")
+    public ResponseEntity<?> getUsageStats(@RequestHeader("Authorization") String token) {
+        try {
+            User user = standaloneImageService.getUserFromToken(token);
+            Map<String, Object> stats = standaloneImageService.getUserBackgroundRemovalStats(user);
+            return ResponseEntity.ok(stats);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", e.getMessage()));
+        }
+    }
+
 }

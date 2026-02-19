@@ -21,7 +21,7 @@ public class PlanLimitsService {
     public long getMonthlyTtsLimit(User user) {
         // Get limit from bundled plan
         long bundledLimit = switch (user.getRole()) {
-            case BASIC -> 3000;
+            case BASIC -> 2000;
             case CREATOR -> 60000;
             case STUDIO -> 200000;
             case ADMIN -> -1;
@@ -40,7 +40,7 @@ public class PlanLimitsService {
 
     public long getDailyTtsLimit(User user) {
         long bundledLimit = switch (user.getRole()) {
-            case BASIC -> 700;
+            case BASIC -> 200;
             case CREATOR -> 15000;
             case STUDIO -> -1;
             case ADMIN -> -1;
@@ -57,7 +57,7 @@ public class PlanLimitsService {
 
     public long getMaxCharsPerRequest(User user) {
         long bundledLimit = switch (user.getRole()) {
-            case BASIC -> 250;
+            case BASIC -> 150;
             case CREATOR -> 3500;
             case STUDIO -> 5000;
             case ADMIN -> 10000;
@@ -241,5 +241,115 @@ public class PlanLimitsService {
         return plans.stream()
                 .filter(plan -> plan.getExpiryDate() == null || plan.getExpiryDate().isAfter(now))
                 .toList();
+    }
+
+
+    public long getDailyImageGenLimit(User user) {
+        switch (user.getRole()) {
+            case BASIC:
+                return 1;
+            case CREATOR:
+                return 15;
+            case ADMIN:
+            case STUDIO:
+                return 30;
+            default:
+                return 0;
+        }
+    }
+
+    public long getMonthlyImageGenLimit(User user) {
+        switch (user.getRole()) {
+            case BASIC:
+                return 5;
+            case CREATOR:
+                return 400;
+            case ADMIN:
+            case STUDIO:
+                return 900;
+            default:
+                return 0;
+        }
+    }
+
+    public int getImagesPerRequest(User user) {
+        switch (user.getRole()) {
+            case BASIC:
+            case ADMIN:
+                return 1;
+            case CREATOR:
+                return 2;
+            case STUDIO:
+                return 4;
+            default:
+                return 1;
+        }
+    }
+
+    public String getImageResolution(User user) {
+        switch (user.getRole()) {
+            case BASIC:
+            case ADMIN:
+                return "1024x1024";  // Changed from 512x512
+            case CREATOR:
+                return "896x1152";   // Changed from 768x768, portrait orientation
+            case STUDIO:
+                return "1024x1024";  // Changed from 768x768
+            default:
+                return "1024x1024";
+        }
+    }
+
+    public int getImageSteps(User user) {
+        return 22; // Same for all plans
+    }
+
+    public double getImageCfgScale(User user) {
+        return 8.0; // Same for all plans
+    }
+
+    // ==================== BACKGROUND REMOVAL LIMITS ====================
+
+    public int getMonthlyBackgroundRemovalLimit(User user) {
+        int bundledLimit = switch (user.getRole()) {
+            case BASIC -> 10;
+            case CREATOR -> 500;
+            case STUDIO, ADMIN -> 2000;
+        };
+
+        Optional<UserPlan> bgRemovalPlan = getActivePlan(user, PlanType.BG_REMOVAL_PRO);
+        if (bgRemovalPlan.isPresent()) {
+            int individualLimit = 300;
+            return (int) getBetterLimit(bundledLimit, individualLimit);
+        }
+
+        return bundledLimit;
+    }
+
+    public String getMaxBackgroundRemovalQuality(User user) {
+        String bundledQuality = switch (user.getRole()) {
+            case BASIC -> "720p";
+            case CREATOR -> "1080p";
+            case STUDIO, ADMIN -> "4k";
+        };
+
+        Optional<UserPlan> bgRemovalPlan = getActivePlan(user, PlanType.BG_REMOVAL_PRO);
+        if (bgRemovalPlan.isPresent()) {
+            String individualQuality = "1080p"; // Full HD for BG PRO plan
+            return getBetterQuality(bundledQuality, individualQuality);
+        }
+
+        return bundledQuality;
+    }
+
+    public int getMaxBackgroundRemovalDimension(User user) {
+        String quality = getMaxBackgroundRemovalQuality(user);
+        return switch (quality.toLowerCase()) {
+            case "720p" -> 1280;
+            case "1080p" -> 1920;
+            case "1440p", "2k" -> 2560;
+            case "4k" -> 3840;
+            default -> 1280;
+        };
     }
 }

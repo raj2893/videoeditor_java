@@ -303,4 +303,8 @@ public class SoleTTSService {
 
         return ssmlConfig;
     }
+
+    public List<SoleTTS> getUserHistory(User user) {
+        return soleTTSRepository.findByUserOrderByCreatedAtDesc(user);
+    }
 }

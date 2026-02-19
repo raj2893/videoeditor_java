@@ -1,11 +1,14 @@
 package com.example.videoeditor.service;
 
 import com.example.videoeditor.entity.StandaloneImage;
+import com.example.videoeditor.entity.StandaloneImageUsage;
 import com.example.videoeditor.entity.User;
 import com.example.videoeditor.repository.StandaloneImageRepository;
+import com.example.videoeditor.repository.StandaloneImageUsageRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -15,20 +18,26 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class StandaloneImageService {
 
   private final JwtUtil jwtUtil;
   private final UserRepository userRepository;
+  private final PlanLimitsService planLimitsService;
+  private final StandaloneImageUsageRepository usageRepository;
 
-  private final String baseDir = "D:\\Backend\\videoEditor-main";
+  private final String baseDir = "D:\\Backend\\videoeditor_java";
 
   private final String backgroundRemovalScriptPath = baseDir + File.separator + "scripts" + File.separator + "remove_background.py";
 
-  private final String pythonPath = System.getenv().getOrDefault("PYTHON_PATH", "C:\\Users\\raj.p\\AppData\\Local\\Programs\\Python\\Python311\\python.exe");
+  private final String pythonPath = System.getenv().getOrDefault("PYTHON_PATH", "C:\\Users\\praj1\\AppData\\Local\\Programs\\Python\\Python311\\python.exe");
 
   @Autowired
   private StandaloneImageRepository standaloneImageRepository;
@@ -36,13 +45,26 @@ public class StandaloneImageService {
   @Autowired
   private ObjectMapper objectMapper;
 
-  public StandaloneImageService(JwtUtil jwtUtil, UserRepository userRepository) {
+  public StandaloneImageService(JwtUtil jwtUtil, UserRepository userRepository, PlanLimitsService planLimitsService, StandaloneImageUsageRepository usageRepository) {
     this.jwtUtil = jwtUtil;
     this.userRepository = userRepository;
+      this.planLimitsService = planLimitsService;
+      this.usageRepository = usageRepository;
   }
 
   public StandaloneImage processStandaloneImageBackgroundRemoval(User user, MultipartFile imageFile)
       throws IOException, InterruptedException {
+
+      String currentMonth = YearMonth.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
+      StandaloneImageUsage usage = usageRepository.findByUserAndUsageMonth(user, currentMonth)
+              .orElse(new StandaloneImageUsage(user, currentMonth));
+
+      int monthlyLimit = planLimitsService.getMonthlyBackgroundRemovalLimit(user);
+      if (monthlyLimit != -1 && usage.getCount() >= monthlyLimit) {
+          throw new IOException("Monthly background removal limit reached (" + monthlyLimit + " images). Please upgrade your plan.");
+      }
+
+      int maxDimension = planLimitsService.getMaxBackgroundRemovalDimension(user);
 
     // Save input file
     File originalDir = new File(baseDir, "images/standalone/" + user.getId() + "/original");
@@ -67,7 +89,8 @@ public class StandaloneImageService {
         pythonPath,
         backgroundRemovalScriptPath,
         inputFile.getAbsolutePath(),
-        outputFile.getAbsolutePath()
+        outputFile.getAbsolutePath(),
+        String.valueOf(maxDimension)
     );
 
     ProcessBuilder pb = new ProcessBuilder(command);
@@ -90,6 +113,22 @@ public class StandaloneImageService {
     if (!outputFile.exists()) {
       throw new IOException("Output file not created: " + outputFile.getAbsolutePath());
     }
+
+      try {
+          String jsonOutput = output.toString().trim();
+          if (jsonOutput.startsWith("{")) {
+              JSONObject result = new JSONObject(jsonOutput);
+              if (result.has("width") && result.has("height")) {
+                  System.out.println("Processed image dimensions: " + result.getInt("width") + "x" + result.getInt("height"));
+              }
+          }
+      } catch (Exception e) {
+          // Ignore JSON parsing errors - the file was created successfully
+          System.out.println("Could not parse output JSON, but file was created successfully");
+      }
+
+    usage.incrementCount();
+    usageRepository.save(usage);
 
     // Save standalone image record
     StandaloneImage standaloneImage = new StandaloneImage();
@@ -116,4 +155,22 @@ public class StandaloneImageService {
   public List<StandaloneImage> getUserImages(User user) {
     return standaloneImageRepository.findByUser(user);
   }
+
+    public Map<String, Object> getUserBackgroundRemovalStats(User user) {
+        String currentMonth = YearMonth.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
+        StandaloneImageUsage usage = usageRepository.findByUserAndUsageMonth(user, currentMonth)
+                .orElse(new StandaloneImageUsage(user, currentMonth));
+
+        int monthlyLimit = planLimitsService.getMonthlyBackgroundRemovalLimit(user);
+        String maxQuality = planLimitsService.getMaxBackgroundRemovalQuality(user);
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("usedThisMonth", usage.getCount());
+        stats.put("monthlyLimit", monthlyLimit);
+        stats.put("remaining", monthlyLimit == -1 ? -1 : monthlyLimit - usage.getCount());
+        stats.put("maxQuality", maxQuality);
+        stats.put("userRole", user.getRole().toString());
+
+        return stats;
+    }
 }

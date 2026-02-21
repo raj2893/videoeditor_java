@@ -1,10 +1,14 @@
 package com.example.videoeditor.service.imageservice;
 
 import com.example.videoeditor.entity.imageentity.ElementDownload;
+import com.example.videoeditor.entity.imageentity.ElementDownloadUsage;
 import com.example.videoeditor.entity.imageentity.ImageElement;
 import com.example.videoeditor.entity.User;
 import com.example.videoeditor.repository.imagerepository.ElementDownloadRepository;
+import com.example.videoeditor.repository.imagerepository.ElementDownloadUsageRepository;
 import com.example.videoeditor.repository.imagerepository.ImageElementRepository;
+import com.example.videoeditor.service.PlanLimitsService;
+import lombok.RequiredArgsConstructor;
 import org.apache.batik.transcoder.TranscoderException;
 import org.apache.batik.transcoder.TranscoderInput;
 import org.apache.batik.transcoder.TranscoderOutput;
@@ -25,8 +29,11 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.YearMonth;
 
 @Service
+@RequiredArgsConstructor
 public class ElementDownloadService {
 
     private static final Logger logger = LoggerFactory.getLogger(ElementDownloadService.class);
@@ -36,12 +43,8 @@ public class ElementDownloadService {
 
     private final ElementDownloadRepository downloadRepository;
     private final ImageElementRepository elementRepository;
-
-    public ElementDownloadService(ElementDownloadRepository downloadRepository, 
-                                 ImageElementRepository elementRepository) {
-        this.downloadRepository = downloadRepository;
-        this.elementRepository = elementRepository;
-    }
+    private final ElementDownloadUsageRepository downloadUsageRepository;
+    private final PlanLimitsService planLimitsService;
 
     /**
      * Download element in specified format
@@ -51,11 +54,59 @@ public class ElementDownloadService {
                                           String color, User user, String ipAddress) throws IOException {
         logger.info("Downloading element {} in format {} with resolution {}", elementId, format, resolution);
 
-        // Validate element exists
         ImageElement element = elementRepository.findById(elementId)
-            .orElseThrow(() -> new IllegalArgumentException("Element not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Element not found"));
 
-        // Record download
+        format = format.toUpperCase();
+
+        // ---- Enforce limits for logged-in users ----
+        if (user != null) {
+            // SVG format check
+            if ("SVG".equals(format) && !planLimitsService.canDownloadSvg(user)) {
+                throw new IllegalArgumentException("SVG download requires SVG_PRO plan or CREATOR/STUDIO/ADMIN role.");
+            }
+
+            // Resolution check
+            int[] dimensions = parseResolutionForValidation(resolution);
+            int maxRes = planLimitsService.getMaxElementDownloadResolution(user);
+            if (dimensions[0] > maxRes || dimensions[1] > maxRes) {
+                throw new IllegalArgumentException(
+                        "Resolution exceeds your plan limit. Max allowed: " + maxRes + "x" + maxRes);
+            }
+
+            // Daily limit check
+            int dailyLimit = planLimitsService.getDailyElementDownloadLimit(user);
+            if (dailyLimit > 0) {
+                int dailyUsage = getDailyDownloadCount(user);
+                if (dailyUsage >= dailyLimit) {
+                    throw new IllegalStateException(
+                            "Daily download limit reached (" + dailyLimit + "/day). Upgrade your plan for more.");
+                }
+            }
+
+            // Monthly limit check
+            int monthlyLimit = planLimitsService.getMonthlyElementDownloadLimit(user);
+            if (monthlyLimit > 0) {
+                int monthlyUsage = getMonthlyDownloadCount(user);
+                if (monthlyUsage >= monthlyLimit) {
+                    throw new IllegalStateException(
+                            "Monthly download limit reached (" + monthlyLimit + "/month). Upgrade your plan for more.");
+                }
+            }
+
+            // Increment usage
+            incrementDownloadUsage(user);
+        } else {
+            // Anonymous users: restrict to PNG/JPG only, max 512x512
+            if ("SVG".equals(format)) {
+                throw new IllegalArgumentException("SVG download requires an account with SVG_PRO plan.");
+            }
+            int[] dimensions = parseResolutionForValidation(resolution);
+            if (dimensions[0] > 512 || dimensions[1] > 512) {
+                throw new IllegalArgumentException("Resolution exceeds limit for guests. Max allowed: 512x512");
+            }
+        }
+
         recordDownload(elementId, user != null ? user.getId() : null, format, resolution, ipAddress);
 
         // Get file path
@@ -368,5 +419,39 @@ public class ElementDownloadService {
         byte[] fileContent = svgContent.getBytes();
         String filename = sanitizeFilename(elementName) + ".svg";
         return new DownloadResult(new ByteArrayResource(fileContent), filename, "image/svg+xml");
+    }
+
+    private int[] parseResolutionForValidation(String resolution) {
+        if (resolution == null || resolution.isEmpty()) {
+            return new int[]{512, 512}; // default
+        }
+        String[] parts = resolution.split("x");
+        if (parts.length != 2) return new int[]{512, 512};
+        try {
+            return new int[]{Integer.parseInt(parts[0]), Integer.parseInt(parts[1])};
+        } catch (NumberFormatException e) {
+            return new int[]{512, 512};
+        }
+    }
+
+    public int getDailyDownloadCount(User user) {
+        return downloadUsageRepository
+                .findByUserIdAndUsageDate(user.getId(), LocalDate.now())
+                .map(ElementDownloadUsage::getDailyCount)
+                .orElse(0);
+    }
+
+    public int getMonthlyDownloadCount(User user) {
+        return downloadUsageRepository
+                .sumMonthlyCountByUserIdAndYearMonth(user.getId(), YearMonth.now().toString());
+    }
+
+    private void incrementDownloadUsage(User user) {
+        ElementDownloadUsage usage = downloadUsageRepository
+                .findByUserIdAndUsageDate(user.getId(), LocalDate.now())
+                .orElseGet(() -> new ElementDownloadUsage(user.getId()));
+        usage.setDailyCount(usage.getDailyCount() + 1);
+        usage.setMonthlyCount(usage.getMonthlyCount() + 1);
+        downloadUsageRepository.save(usage);
     }
 }

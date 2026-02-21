@@ -8,6 +8,7 @@ import com.example.videoeditor.entity.imageentity.ImageAsset;
 import com.example.videoeditor.entity.imageentity.ImageElement;
 import com.example.videoeditor.entity.imageentity.ImageProject;
 import com.example.videoeditor.entity.User;
+import com.example.videoeditor.service.PlanLimitsService;
 import com.example.videoeditor.service.imageservice.ElementDownloadService;
 import com.example.videoeditor.service.imageservice.ImageAssetService;
 import com.example.videoeditor.service.imageservice.ImageEditorService;
@@ -34,6 +35,7 @@ public class ImageEditorController {
     private final ImageAssetService imageAssetService;
     private final ImageElementService imageElementService;
     private final ElementDownloadService elementDownloadService;
+    private final PlanLimitsService planLimitsService;
 
     /**
      * Create new project
@@ -339,10 +341,65 @@ public class ImageEditorController {
                     .contentType(org.springframework.http.MediaType.parseMediaType(result.getContentType()))
                     .body(result.getResource());
 
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         } catch (IOException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/elements/{id}/download-usage")
+    public ResponseEntity<?> getDownloadUsage(
+            @PathVariable Long id,
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        try {
+            if (token == null || token.isEmpty()) {
+                return ResponseEntity.ok(Map.of("dailyCount", 0, "monthlyCount", 0));
+            }
+            User user = imageEditorService.getUserFromToken(token);
+            int daily = elementDownloadService.getDailyDownloadCount(user);
+            int monthly = elementDownloadService.getMonthlyDownloadCount(user);
+            return ResponseEntity.ok(Map.of("dailyCount", daily, "monthlyCount", monthly));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of("dailyCount", 0, "monthlyCount", 0));
+        }
+    }
+
+    @GetMapping("/elements/download-limits")
+    public ResponseEntity<?> getDownloadLimits(
+            @RequestHeader(value = "Authorization", required = false) String token) {
+        try {
+            User user = null;
+            if (token != null && !token.isEmpty()) {
+                try {
+                    user = imageEditorService.getUserFromToken(token);
+                } catch (Exception e) {
+                    // anonymous
+                }
+            }
+
+            if (user == null) {
+                return ResponseEntity.ok(Map.of(
+                        "canDownloadSvg", false,
+                        "maxResolution", 512,
+                        "dailyLimit", 2,
+                        "monthlyLimit", 10,
+                        "plan", "GUEST"
+                ));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "canDownloadSvg", planLimitsService.canDownloadSvg(user),
+                    "maxResolution", planLimitsService.getMaxElementDownloadResolution(user),
+                    "dailyLimit", planLimitsService.getDailyElementDownloadLimit(user),
+                    "monthlyLimit", planLimitsService.getMonthlyElementDownloadLimit(user),
+                    "plan", user.getRole().toString()
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to fetch limits"));
         }
     }
 

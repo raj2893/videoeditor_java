@@ -9,8 +9,6 @@ public class User {
 
     public enum Role {
         BASIC,
-        CREATOR,
-        STUDIO,
         ADMIN
     }
 

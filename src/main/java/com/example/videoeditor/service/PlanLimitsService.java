@@ -238,4 +238,33 @@ public class PlanLimitsService {
                 .toList();
     }
 
+    // ==================== EXTERNAL TTS LIMITS (OpenAI / Azure / AWS) ====================
+    // Cost parity with Google (~$0.015-0.016/1K chars), so same limits apply
+
+    public long getMonthlyExternalTtsLimit(User user) {
+        // Same as Google — cost is identical
+        return getMonthlyTtsLimit(user);
+    }
+
+    public long getDailyExternalTtsLimit(User user) {
+        return getDailyTtsLimit(user);
+    }
+
+    public long getMaxExternalTtsCharsPerRequest(User user) {
+        return getMaxCharsPerRequest(user);
+    }
+
+    public boolean hasExternalTtsAccess(User user) {
+        // Only paid plans — BASIC users stay on Google only
+        return user.isAdmin() || isStudio(user) || isCreator(user) || isCreatorLite(user);
+    }
+
+    public boolean shouldAddWatermark(User user) {
+        return !user.isAdmin() && !isStudio(user) && !isCreator(user) && !isCreatorLite(user);
+    }
+
+    public boolean hasSpeedControl(User user) {
+        return user.isAdmin() || isStudio(user) || isCreator(user) || isCreatorLite(user);
+    }
+
 }

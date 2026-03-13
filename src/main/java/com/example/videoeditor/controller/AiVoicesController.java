@@ -43,4 +43,10 @@ public class AiVoicesController {
     List<VoiceInfo> filteredVoices = aiVoicesService.getVoicesByLanguageAndGender(language, gender);
     return ResponseEntity.ok(filteredVoices);
   }
+
+    @GetMapping("/external-voices")
+    public ResponseEntity<List<VoiceInfo>> getExternalVoices(
+            @RequestParam(required = false) String provider) {
+        return ResponseEntity.ok(aiVoicesService.getExternalVoices(provider));
+    }
 }

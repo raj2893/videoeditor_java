@@ -21,6 +21,10 @@ public class SoleTTS {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private TtsProvider provider = TtsProvider.GOOGLE;
+
     // Constructors
     public SoleTTS() {
         this.createdAt = LocalDateTime.now();
@@ -57,5 +61,17 @@ public class SoleTTS {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public TtsProvider getProvider() {
+        return provider;
+    }
+
+    public void setProvider(TtsProvider provider) {
+        this.provider = provider;
+    }
+
+    public enum TtsProvider {
+        GOOGLE, OPENAI, AZURE
     }
 }

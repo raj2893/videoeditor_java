@@ -1886,4 +1886,37 @@ public class SubtitleService {
         return settings;
     }
 
+    public SubtitleMedia deleteSingleSubtitle(User user, Long mediaId, String subtitleId) throws IOException {
+        SubtitleMedia subtitleMedia = subtitleMediaRepository.findById(mediaId)
+                .orElseThrow(() -> new IllegalArgumentException("Media not found"));
+
+        if (!subtitleMedia.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Not authorized");
+        }
+
+        List<SubtitleDTO> subtitles = objectMapper.readValue(
+                subtitleMedia.getSubtitlesJson(), new TypeReference<List<SubtitleDTO>>() {});
+
+        boolean removed = subtitles.removeIf(s -> s.getId().equals(subtitleId));
+        if (!removed) {
+            throw new IllegalArgumentException("Subtitle not found: " + subtitleId);
+        }
+
+        subtitleMedia.setSubtitlesJson(objectMapper.writeValueAsString(subtitles));
+        subtitleMediaRepository.save(subtitleMedia);
+        return subtitleMedia;
+    }
+
+    public SubtitleMedia replaceAllSubtitles(User user, Long mediaId, List<SubtitleDTO> subtitles) throws IOException {
+        SubtitleMedia subtitleMedia = subtitleMediaRepository.findById(mediaId)
+                .orElseThrow(() -> new IllegalArgumentException("Media not found"));
+
+        if (!subtitleMedia.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Not authorized");
+        }
+
+        subtitleMedia.setSubtitlesJson(objectMapper.writeValueAsString(subtitles));
+        subtitleMediaRepository.save(subtitleMedia);
+        return subtitleMedia;
+    }
 }

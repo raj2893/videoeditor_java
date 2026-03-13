@@ -141,12 +141,12 @@ public class VideoSpeedService {
         video.setLastModified(LocalDateTime.now());
         videoSpeedRepository.save(video);
 
-        processVideoWithFFmpeg(video, finalQuality);
+        processVideoWithFFmpeg(video, finalQuality, planLimitsService.shouldAddWatermark(user));
 
         return video;
     }
 
-    private void processVideoWithFFmpeg(VideoSpeed video, String quality) throws IOException {
+    private void processVideoWithFFmpeg(VideoSpeed video, String quality, boolean addWatermark) throws IOException {
         String inputPath = video.getOriginalFilePath();
         String outputFileName = "output_" + System.currentTimeMillis() + ".mp4";
         Path outputDir = Paths.get(basePath, video.getUser().getId().toString());
@@ -164,14 +164,26 @@ public class VideoSpeedService {
             }
 
             Map<String, String> qualitySettings = getFFmpegQualitySettings(quality);
+            String videoFilter = String.format("setpts=%f*PTS,scale=%s", 1.0 / video.getSpeed(), qualitySettings.get("scale"));
+            if (addWatermark) {
+                String fontPath = getClass().getClassLoader()
+                        .getResource("fonts/LexendGiga-Bold.ttf")
+                        .getPath()
+                        .replaceFirst("^/", "")
+                        .replace("/", "\\\\")
+                        .replace(":", "\\:");
+                videoFilter += String.format(
+                        ",drawtext=text='SCENITH':fontfile='%s':fontcolor=white:fontsize=h/20:alpha=0.75:x=w-tw-20:y=20",
+                        fontPath
+                );
+            }
 
             String ffmpegCommand = String.format(
-                    "%s -i \"%s\" -filter:v \"setpts=%f*PTS,scale=%s\" -filter:a \"atempo=%f\" -c:v libx264 -preset %s -crf %s -c:a aac -y \"%s\"",
+                    "%s -i \"%s\" -filter:v \"%s\" -filter:a \"atempo=%f\" -c:v libx264 -preset %s -crf %s -c:a aac -y \"%s\"",
                     ffmpegPath,
                     inputPath,
-                    1.0 / video.getSpeed(),
-                    qualitySettings.get("scale"),
-                    video.getSpeed(),  // ✅ Audio speed fix
+                    videoFilter,
+                    video.getSpeed(),
                     qualitySettings.get("preset"),
                     qualitySettings.get("crf"),
                     outputPath

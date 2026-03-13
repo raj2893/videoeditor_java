@@ -3,9 +3,7 @@ package com.example.videoeditor.controller;
 import com.example.videoeditor.dto.SubtitleDTO;
 import com.example.videoeditor.entity.SubtitleMedia;
 import com.example.videoeditor.entity.User;
-import com.example.videoeditor.entity.UserProcessingUsage;
-import com.example.videoeditor.repository.UserProcessingUsageRepository;
-import com.example.videoeditor.service.PlanLimitsService;
+import com.example.videoeditor.service.CreditService;
 import com.example.videoeditor.service.SubtitleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,8 +26,7 @@ public class SubtitleController {
 
     @Autowired
     private SubtitleService subtitleService;
-    private final PlanLimitsService planLimitsService;
-    private final UserProcessingUsageRepository userProcessingUsageRepository;
+    private final CreditService creditService;
 
     @PostMapping("/upload")
     public ResponseEntity<?> uploadMedia(
@@ -150,23 +147,12 @@ public class SubtitleController {
     public ResponseEntity<?> getPlanLimits(@RequestHeader("Authorization") String token) {
         try {
             User user = subtitleService.getUserFromToken(token);
-
-            int videosPerMonth = planLimitsService.getMaxVideoProcessingPerMonth(user);
-            int maxVideoLength = planLimitsService.getMaxVideoLengthMinutes(user);
-            String maxQuality = planLimitsService.getMaxAllowedQuality(user);
-
-            // Get current usage
-            String currentYearMonth = YearMonth.now().toString();
-            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository
-                    .findByUserAndServiceTypeAndYearMonth(user, "SUBTITLE", currentYearMonth);
-            int videosUsed = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
-
             Map<String, Object> response = new HashMap<>();
-            response.put("videosPerMonth", videosPerMonth);
-            response.put("videosUsed", videosUsed);
-            response.put("maxVideoLength", maxVideoLength);
-            response.put("maxQuality", maxQuality);
-
+            response.put("maxVideoLength", creditService.getMaxVideoLengthMinutes(user));
+            response.put("maxQuality", creditService.getMaxVideoQuality(user));
+            response.put("hasWatermark", creditService.hasWatermark(user));
+            response.put("costPerGeneration", CreditService.COST_SUBTITLE_GEN);
+            response.put("balance", creditService.getBalance(user));
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));

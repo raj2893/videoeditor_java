@@ -2,36 +2,33 @@ package com.example.videoeditor.controller.imagecontroller;
 
 import com.example.videoeditor.entity.User;
 import com.example.videoeditor.entity.imageentity.SoleImageGen;
+import com.example.videoeditor.enums.ImageGenModel;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
-import com.example.videoeditor.service.PlanLimitsService;
+import com.example.videoeditor.service.CreditService;
 import com.example.videoeditor.service.imageservice.SoleImageGenService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/sole-image-gen")
 public class SoleImageGenController {
 
     private final SoleImageGenService soleImageGenService;
-    private final PlanLimitsService planLimitsService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final CreditService creditService;
 
     public SoleImageGenController(
             SoleImageGenService soleImageGenService,
-            PlanLimitsService planLimitsService,
             JwtUtil jwtUtil,
-            UserRepository userRepository) {
+            UserRepository userRepository, CreditService creditService) {
         this.soleImageGenService = soleImageGenService;
-        this.planLimitsService = planLimitsService;
+        this.creditService = creditService;
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
     }
@@ -92,35 +89,24 @@ public class SoleImageGenController {
     public ResponseEntity<?> getImageGenUsage(@RequestHeader("Authorization") String token) {
         try {
             User user = getUserFromToken(token);
-
-            long monthlyUsage = soleImageGenService.getUserMonthlyImageGenUsage(user);
-            long monthlyLimit = planLimitsService.getMonthlyImageGenLimit(user);
-            long monthlyRemaining = monthlyLimit > 0 ? monthlyLimit - monthlyUsage : -1;
-
-            long dailyUsage = soleImageGenService.getUserDailyImageGenUsage(user);
-            long dailyLimit = planLimitsService.getDailyImageGenLimit(user);
-            long dailyRemaining = dailyLimit > 0 ? dailyLimit - dailyUsage : -1;
-
             Map<String, Object> response = new HashMap<>();
-            response.put("monthly", Map.of(
-                    "used", monthlyUsage,
-                    "limit", monthlyLimit,
-                    "remaining", monthlyRemaining
-            ));
-            response.put("daily", Map.of(
-                    "used", dailyUsage,
-                    "limit", dailyLimit,
-                    "remaining", dailyRemaining
-            ));
-            response.put("role", user.getRole().toString());
-            response.put("imagesPerRequest", planLimitsService.getImagesPerRequest(user));
-            response.put("resolution", planLimitsService.getImageResolution(user));
+            response.put("balance", creditService.getBalance(user));
+            response.put("planType", user.getPlanType());
+            response.put("expiresAt", user.getPlanExpiresAt());
+            response.put("canGenerate", true);
 
+            // All models with their credit costs — no per-plan filtering
+            List<Map<String, Object>> models = Arrays.stream(
+                            ImageGenModel.values())
+                    .map(m -> {
+                        Map<String, Object> map = new HashMap<>();
+                        map.put("id", m.name());
+                        map.put("displayName", m.getDisplayName());
+                        map.put("creditsPerImage", m.getCreditsPerImage());
+                        return map;
+                    }).toList();
+            response.put("availableModels", models);
             return ResponseEntity.ok(response);
-
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body("Unauthorized: " + e.getMessage());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Unexpected error: " + e.getMessage());

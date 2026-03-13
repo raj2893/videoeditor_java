@@ -2,59 +2,47 @@ package com.example.videoeditor.service;
 
 import com.example.videoeditor.entity.AiVideoGen;
 import com.example.videoeditor.entity.User;
-import com.example.videoeditor.entity.UserVideoGenCredits;
 import com.example.videoeditor.enums.VideoGenModel;
 import com.example.videoeditor.repository.AiVideoGenRepository;
-import com.example.videoeditor.repository.UserVideoGenCreditsRepository;
-import okhttp3.*;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import okhttp3.*;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.YearMonth;
 import java.util.Base64;
 import java.util.List;
-import java.util.Optional;
 
 @Service
 public class AiVideoGenService {
 
     private static final Logger logger = LoggerFactory.getLogger(AiVideoGenService.class);
 
-    // fal.ai queue base URL — all video models use this async pattern
     private static final String FAL_QUEUE_URL = "https://queue.fal.run/";
 
     private final AiVideoGenRepository videoGenRepository;
-    private final UserVideoGenCreditsRepository creditsRepository;
-    private final VideoGenPlanService planService;
     private final OkHttpClient httpClient;
+    private final CreditService creditService;
 
     private final String baseDir = "D:\\Backend\\videoeditor_java";
     private final String apiKey;
 
     public AiVideoGenService(
             AiVideoGenRepository videoGenRepository,
-            UserVideoGenCreditsRepository creditsRepository,
-            VideoGenPlanService planService) throws IOException {
+            CreditService creditService) throws IOException {
         this.videoGenRepository = videoGenRepository;
-        this.creditsRepository = creditsRepository;
-        this.planService = planService;
+        this.creditService = creditService;
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
-
-        // Single fal.ai API key works for ALL models
-        // Get yours at: https://fal.ai/dashboard/keys
         String credentialsPath = baseDir + File.separator + "credentials"
                 + File.separator + "fal-api-key.txt";
         this.apiKey = Files.readString(new File(credentialsPath).toPath()).trim();
@@ -68,7 +56,10 @@ public class AiVideoGenService {
      * STEP 1: Submit a text-to-video generation job to fal.ai.
      * Returns immediately with a falRequestId — generation is async.
      *
-     * @throws IllegalStateException if user has no plan or insufficient credits
+     * @param resolution "480p", "720p", or "1080p".
+     *                   Only affects cost for Wan 2.5. Pass null to use model default.
+     *
+     * @throws IllegalStateException    if user has insufficient credits
      * @throws IllegalArgumentException if model is not accessible or params invalid
      */
     public AiVideoGen submitTextToVideo(
@@ -78,15 +69,16 @@ public class AiVideoGenService {
             String negativePrompt,
             int durationSeconds,
             boolean audioEnabled,
-            String aspectRatio) throws IOException {
+            String aspectRatio,
+            String resolution) throws IOException {
 
+        String resolvedResolution = resolveResolution(model, resolution);
         validateRequest(user, model, durationSeconds, prompt);
         checkFalBalance();
 
-        int creditsNeeded = model.calculateCredits(durationSeconds, audioEnabled);
+        int creditsNeeded = model.calculateCredits(durationSeconds, audioEnabled, resolvedResolution);
         checkAndReserveCredits(user, creditsNeeded);
 
-        // Build fal.ai request payload
         JSONObject payload = new JSONObject();
         payload.put("prompt", prompt);
         if (negativePrompt != null && !negativePrompt.isBlank()) {
@@ -94,25 +86,25 @@ public class AiVideoGenService {
         }
         payload.put("duration", String.valueOf(durationSeconds));
         payload.put("aspect_ratio", aspectRatio != null ? aspectRatio : "16:9");
-        payload.put("resolution", "480p");
+        payload.put("resolution", resolvedResolution);
 
-        // Kling-specific: audio flag
         if (model.isSupportsAudio()) {
             payload.put("enable_audio", audioEnabled);
         }
 
         String falRequestId = submitToFalQueue(model.getTextToVideoEndpoint(), payload);
 
-        // Persist record
         AiVideoGen record = buildRecord(user, model, AiVideoGen.GenerationType.TEXT_TO_VIDEO,
                 prompt, negativePrompt, null, durationSeconds, audioEnabled,
-                aspectRatio, creditsNeeded, falRequestId);
+                aspectRatio, resolvedResolution, creditsNeeded, falRequestId);
         return videoGenRepository.save(record);
     }
 
     /**
      * STEP 1 (variant): Submit an image-to-video job.
-     * referenceImageUrl should be a public URL or base64 data URL of the uploaded image.
+     *
+     * @param resolution "480p", "720p", or "1080p".
+     *                   Only affects cost for Wan 2.5. Pass null to use model default.
      */
     public AiVideoGen submitImageToVideo(
             User user,
@@ -122,12 +114,14 @@ public class AiVideoGenService {
             String referenceImageLocalPath,
             int durationSeconds,
             boolean audioEnabled,
-            String aspectRatio) throws IOException {
+            String aspectRatio,
+            String resolution) throws IOException {
 
+        String resolvedResolution = resolveResolution(model, resolution);
         validateRequest(user, model, durationSeconds, prompt);
         checkFalBalance();
 
-        int creditsNeeded = model.calculateCredits(durationSeconds, audioEnabled);
+        int creditsNeeded = model.calculateCredits(durationSeconds, audioEnabled, resolvedResolution);
         checkAndReserveCredits(user, creditsNeeded);
 
         JSONObject payload = new JSONObject();
@@ -135,6 +129,7 @@ public class AiVideoGenService {
         payload.put("image_url", referenceImageUrl);
         payload.put("duration", String.valueOf(durationSeconds));
         payload.put("aspect_ratio", aspectRatio != null ? aspectRatio : "16:9");
+        payload.put("resolution", resolvedResolution);
         if (model.isSupportsAudio()) {
             payload.put("enable_audio", audioEnabled);
         }
@@ -143,35 +138,29 @@ public class AiVideoGenService {
 
         AiVideoGen record = buildRecord(user, model, AiVideoGen.GenerationType.IMAGE_TO_VIDEO,
                 prompt, null, referenceImageLocalPath, durationSeconds, audioEnabled,
-                aspectRatio, creditsNeeded, falRequestId);
+                aspectRatio, resolvedResolution, creditsNeeded, falRequestId);
         return videoGenRepository.save(record);
     }
 
     /**
      * STEP 2: Poll fal.ai for job status.
-     * Call this from your /status/{falRequestId} endpoint.
      * When status is COMPLETED, automatically downloads and saves the video.
-     *
-     * Returns the updated AiVideoGen record.
+     * When status is FAILED, automatically refunds credits.
      */
     public AiVideoGen checkAndUpdateStatus(String falRequestId) throws IOException {
         AiVideoGen record = videoGenRepository.findByFalRequestId(falRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Video job not found: " + falRequestId));
 
-        // Skip if already terminal
         if (record.getStatus() == AiVideoGen.Status.COMPLETED
                 || record.getStatus() == AiVideoGen.Status.FAILED) {
             return record;
         }
 
-        String statusEndpoint = FAL_QUEUE_URL + record.getModel().getTextToVideoEndpoint()
-                + "/requests/" + falRequestId + "/status";
+        String endpoint = record.getGenerationType() == AiVideoGen.GenerationType.IMAGE_TO_VIDEO
+                ? record.getModel().getImageToVideoEndpoint()
+                : record.getModel().getTextToVideoEndpoint();
 
-        // Use image-to-video endpoint if that's the type
-        if (record.getGenerationType() == AiVideoGen.GenerationType.IMAGE_TO_VIDEO) {
-            statusEndpoint = FAL_QUEUE_URL + record.getModel().getImageToVideoEndpoint()
-                    + "/requests/" + falRequestId + "/status";
-        }
+        String statusEndpoint = FAL_QUEUE_URL + endpoint + "/requests/" + falRequestId + "/status";
 
         Request statusRequest = new Request.Builder()
                 .url(statusEndpoint)
@@ -191,10 +180,8 @@ public class AiVideoGenService {
 
             switch (status) {
                 case "COMPLETED" -> {
-                    // Fetch the result
                     String resultUrl = getResultUrl(record, falRequestId);
                     if (resultUrl != null) {
-                        // Download and save video locally
                         String localPath = downloadVideo(record, resultUrl);
                         record.setVideoPath(localPath);
                         record.setVideoUrl(resultUrl);
@@ -207,7 +194,6 @@ public class AiVideoGenService {
                     String errorMsg = json.optString("error", "Unknown error from fal.ai");
                     record.setStatus(AiVideoGen.Status.FAILED);
                     record.setErrorMessage(errorMsg);
-                    // Refund credits on failure
                     refundCredits(record.getUser(), record.getCreditsUsed());
                     logger.error("Video generation failed for {}: {}", falRequestId, errorMsg);
                 }
@@ -220,27 +206,6 @@ public class AiVideoGenService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CREDIT MANAGEMENT
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public int getRemainingMonthlyCredits(User user) {
-        int limit = planService.getMonthlyCredits(user);
-        int used = getMonthlyCreditsUsed(user);
-        return limit - used;
-    }
-
-    public int getRemainingDailyCredits(User user) {
-        int dailyLimit = planService.getDailyCredits(user);
-        UserVideoGenCredits credits = getOrCreateCreditsRecord(user);
-        resetDailyIfNeeded(credits);
-        return dailyLimit - credits.getTodayCreditsUsed();
-    }
-
-    public int getMonthlyCreditsUsed(User user) {
-        return getOrCreateCreditsRecord(user).getCreditsUsed();
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
     // HISTORY
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -248,29 +213,35 @@ public class AiVideoGenService {
         return videoGenRepository.findByUserOrderByCreatedAtDesc(user);
     }
 
-    public List<AiVideoGen> getUserPendingJobs(User user) {
-        return videoGenRepository.findByUserAndStatusOrderByCreatedAtDesc(
-                user, AiVideoGen.Status.PENDING);
-    }
-
     // ─────────────────────────────────────────────────────────────────────────
     // PRIVATE HELPERS
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Resolves the resolution to use for a request.
+     * - For Wan 2.5: uses the user-provided resolution, defaulting to "480p".
+     * - For all other models: always uses the model's fixed default (1080p),
+     *   ignoring any user-provided value since it doesn't affect API cost.
+     */
+    private String resolveResolution(VideoGenModel model, String requestedResolution) {
+        if (model == VideoGenModel.WAN_2_5) {
+            if (requestedResolution == null || requestedResolution.isBlank()) {
+                return "480p"; // safe default for Wan 2.5
+            }
+            String res = requestedResolution.toLowerCase();
+            if (!res.equals("480p") && !res.equals("720p") && !res.equals("1080p")) {
+                throw new IllegalArgumentException(
+                        "Invalid resolution for Wan 2.5. Must be 480p, 720p, or 1080p.");
+            }
+            return res;
+        }
+        // For Kling and Veo models, resolution is fixed — ignore user input
+        return model.getDefaultResolution();
+    }
+
     private void validateRequest(User user, VideoGenModel model, int durationSeconds, String prompt) {
-        if (!planService.hasAnyVideoGenPlan(user)) {
-            throw new IllegalStateException("No active AI Video Generation plan. Please purchase a plan to continue.");
-        }
-        if (!planService.canUseModel(user, model)) {
-            throw new IllegalArgumentException(
-                    "Model '" + model.getDisplayName() + "' requires a higher plan. "
-                    + "Please upgrade to access this model.");
-        }
-        int maxDuration = planService.getMaxDurationSeconds(user);
-        if (durationSeconds > maxDuration) {
-            throw new IllegalArgumentException(
-                    "Your plan supports a maximum of " + maxDuration + " seconds. "
-                    + "Upgrade to Video Pro or Elite for 10-second videos.");
+        if (durationSeconds != 5 && durationSeconds != 10) {
+            throw new IllegalArgumentException("Duration must be 5 or 10 seconds.");
         }
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException("Prompt cannot be empty.");
@@ -278,39 +249,12 @@ public class AiVideoGenService {
     }
 
     private void checkAndReserveCredits(User user, int creditsNeeded) {
-        int monthlyLimit = planService.getMonthlyCredits(user);
-        int dailyLimit = planService.getDailyCredits(user);
-
-        UserVideoGenCredits credits = getOrCreateCreditsRecord(user);
-        resetDailyIfNeeded(credits);
-
-        if (credits.getCreditsUsed() + creditsNeeded > monthlyLimit) {
-            throw new IllegalStateException(
-                    "Insufficient monthly credits. You need " + creditsNeeded
-                    + " credits but only have " + (monthlyLimit - credits.getCreditsUsed()) + " remaining.");
-        }
-        if (credits.getTodayCreditsUsed() + creditsNeeded > dailyLimit) {
-            throw new IllegalStateException(
-                    "Daily credit limit reached. You need " + creditsNeeded
-                    + " credits but only have " + (dailyLimit - credits.getTodayCreditsUsed()) + " remaining today.");
-        }
-
-        // Deduct credits immediately (before generation starts)
-        credits.setCreditsUsed(credits.getCreditsUsed() + creditsNeeded);
-        credits.setTodayCreditsUsed(credits.getTodayCreditsUsed() + creditsNeeded);
-        creditsRepository.save(credits);
+        creditService.spend(user, creditsNeeded,
+                "Video gen: " + creditsNeeded + " credits");
     }
 
     private void refundCredits(User user, int creditsToRefund) {
-        try {
-            UserVideoGenCredits credits = getOrCreateCreditsRecord(user);
-            credits.setCreditsUsed(Math.max(0, credits.getCreditsUsed() - creditsToRefund));
-            credits.setTodayCreditsUsed(Math.max(0, credits.getTodayCreditsUsed() - creditsToRefund));
-            creditsRepository.save(credits);
-            logger.info("Refunded {} credits to user {}", creditsToRefund, user.getId());
-        } catch (Exception e) {
-            logger.error("Failed to refund credits for user {}: {}", user.getId(), e.getMessage());
-        }
+        creditService.refund(user, creditsToRefund, "Video gen failed — refund");
     }
 
     private void checkFalBalance() throws IOException {
@@ -321,7 +265,7 @@ public class AiVideoGenService {
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) return; // fail silently, let fal.ai reject it
+            if (!response.isSuccessful()) return;
             JSONObject json = new JSONObject(response.body().string());
             double balance = json.optDouble("balance", -1);
             if (balance == 0.0) {
@@ -331,10 +275,6 @@ public class AiVideoGenService {
         }
     }
 
-    /**
-     * Submit a job to fal.ai's async queue.
-     * Returns the fal.ai request ID.
-     */
     private String submitToFalQueue(String modelEndpoint, JSONObject payload) throws IOException {
         String url = FAL_QUEUE_URL + modelEndpoint;
 
@@ -363,9 +303,6 @@ public class AiVideoGenService {
         }
     }
 
-    /**
-     * Once status is COMPLETED, fetch the result JSON to get the video URL.
-     */
     private String getResultUrl(AiVideoGen record, String falRequestId) throws IOException {
         String endpoint = record.getGenerationType() == AiVideoGen.GenerationType.IMAGE_TO_VIDEO
                 ? record.getModel().getImageToVideoEndpoint()
@@ -383,8 +320,6 @@ public class AiVideoGenService {
             if (!response.isSuccessful()) return null;
             String body = response.body().string();
             JSONObject json = new JSONObject(body);
-
-            // fal.ai returns: { "video": { "url": "https://..." } }
             if (json.has("video")) {
                 return json.getJSONObject("video").optString("url");
             }
@@ -392,10 +327,6 @@ public class AiVideoGenService {
         }
     }
 
-    /**
-     * Download the video from fal.ai's temporary URL and save it locally.
-     * Returns the relative path for serving to the frontend.
-     */
     private String downloadVideo(AiVideoGen record, String videoUrl) throws IOException {
         File videoDir = new File(baseDir, "ai_video_gen" + File.separator + record.getUser().getId());
         videoDir.mkdirs();
@@ -423,17 +354,16 @@ public class AiVideoGenService {
         }
 
         logger.info("Downloaded video to: {}", videoFile.getAbsolutePath());
-        // Return a relative path for serving via your static file controller
         return "videos/ai_video_gen/" + record.getUser().getId() + "/" + fileName;
     }
 
     private AiVideoGen buildRecord(User user, VideoGenModel model,
-                                    AiVideoGen.GenerationType type,
-                                    String prompt, String negativePrompt,
-                                    String referenceImagePath,
-                                    int durationSeconds, boolean audioEnabled,
-                                    String aspectRatio, int creditsUsed,
-                                    String falRequestId) {
+                                   AiVideoGen.GenerationType type,
+                                   String prompt, String negativePrompt,
+                                   String referenceImagePath,
+                                   int durationSeconds, boolean audioEnabled,
+                                   String aspectRatio, String resolution,
+                                   int creditsUsed, String falRequestId) {
         AiVideoGen record = new AiVideoGen();
         record.setUser(user);
         record.setModel(model);
@@ -444,39 +374,14 @@ public class AiVideoGenService {
         record.setDurationSeconds(durationSeconds);
         record.setAudioEnabled(audioEnabled);
         record.setAspectRatio(aspectRatio);
+        record.setResolution(resolution);
         record.setCreditsUsed(creditsUsed);
         record.setFalRequestId(falRequestId);
         record.setStatus(AiVideoGen.Status.PENDING);
-        record.setResolution(model.getResolution());
         return record;
     }
 
-    private UserVideoGenCredits getOrCreateCreditsRecord(User user) {
-        String month = YearMonth.now().toString();
-        return creditsRepository.findByUserAndCreditMonth(user, month)
-                .orElseGet(() -> {
-                    UserVideoGenCredits newRecord = new UserVideoGenCredits(user, YearMonth.now());
-                    newRecord.setLastResetDate(LocalDate.now().toString());
-                    return creditsRepository.save(newRecord);
-                });
-    }
-
-    /**
-     * Resets today's credit usage if the date has changed since last access.
-     * This handles the daily cap reset automatically without a cron job.
-     */
-    private void resetDailyIfNeeded(UserVideoGenCredits credits) {
-        String today = LocalDate.now().toString();
-        if (!today.equals(credits.getLastResetDate())) {
-            credits.setTodayCreditsUsed(0);
-            credits.setLastResetDate(today);
-            creditsRepository.save(credits);
-        }
-    }
-
     public String uploadImageToFal(MultipartFile imageFile) throws IOException {
-        // fal.ai accepts base64 data URIs directly in the image_url field.
-        // This is the officially documented approach for non-JS/Python clients.
         String base64 = Base64.getEncoder().encodeToString(imageFile.getBytes());
         String contentType = imageFile.getContentType() != null
                 ? imageFile.getContentType() : "image/jpeg";

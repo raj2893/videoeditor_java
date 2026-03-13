@@ -7,6 +7,7 @@ import com.example.videoeditor.entity.User;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
 import com.example.videoeditor.service.AuthService;
+import com.example.videoeditor.service.CreditService;
 import jakarta.mail.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,11 +25,13 @@ public class AuthController {
     private final AuthService authService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final CreditService creditService;
 
-    public AuthController(AuthService authService, JwtUtil jwtUtil, UserRepository userRepository) {
+    public AuthController(AuthService authService, JwtUtil jwtUtil, UserRepository userRepository, CreditService creditService) {
         this.authService = authService;
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
+        this.creditService = creditService;
     }
 
     @GetMapping("/verify-email")
@@ -61,12 +64,6 @@ public class AuthController {
                         return new RuntimeException("User not found");
                     });
 
-            if (user.getPlanExpiresAt() != null && LocalDateTime.now().isAfter(user.getPlanExpiresAt())) {
-                user.setRole(User.Role.BASIC);
-                user.setPlanExpiresAt(null);
-                userRepository.save(user);
-            }
-
             logger.info("User found: email={}, name={}, profilePicture={}, googleAuth={}",
                     user.getEmail(), user.getName(), user.getProfilePicture(), user.isGoogleAuth());
 
@@ -76,14 +73,16 @@ public class AuthController {
                     user.getName() != null ? user.getName() : "",
                     user.getProfilePicture() != null ? user.getProfilePicture() : "",
                     user.isGoogleAuth(),
-                    user.getRole().name()
+                    user.getRole().name(),
+                    creditService.getBalance(user),
+                    user.getPlanType().name()
             );
 
             return ResponseEntity.ok(profileResponse);
         } catch (Exception e) {
             logger.error("Error fetching user profile: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new UserProfileResponse(null, null, null, null, false, null));
+                    .body(new UserProfileResponse(null, null, null, null, false, null, 0, null));
         }
     }
 

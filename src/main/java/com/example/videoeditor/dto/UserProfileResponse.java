@@ -7,14 +7,18 @@ public class UserProfileResponse {
     private String picture;
     private boolean googleAuth;
     private String role;
+    private int creditBalance;
+    private String planType;
 
-    public UserProfileResponse(Long id, String email, String name, String picture, boolean googleAuth, String role) {
+    public UserProfileResponse(Long id, String email, String name, String picture, boolean googleAuth, String role, int creditBalance, String planType) {
       this.id = id;
       this.email = email;
         this.name = name;
         this.picture = picture;
         this.googleAuth = googleAuth;
         this.role = role;
+        this.creditBalance = creditBalance;
+        this.planType = planType;
     }
 
     public Long getId() {
@@ -65,4 +69,9 @@ public class UserProfileResponse {
     public void setRole(String role) {
         this.role = role;
     }
+
+    public int getCreditBalance() { return creditBalance; }
+    public void setCreditBalance(int creditBalance) { this.creditBalance = creditBalance; }
+    public String getPlanType() { return planType; }
+    public void setPlanType(String planType) { this.planType = planType; }
 }

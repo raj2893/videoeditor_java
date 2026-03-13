@@ -34,31 +34,24 @@ public class ExternalTtsService {
     private final String baseDir = "D:\\Backend\\videoeditor_java";
 
     private final SoleTTSRepository soleTTSRepository;
-    private final ExternalTtsUsageRepository usageRepository;
-    private final ExternalTtsDailyUsageRepository dailyUsageRepository;
-    private final PlanLimitsService planLimitsService;
+    private final CreditService creditService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
     public ExternalTtsService(
             SoleTTSRepository soleTTSRepository,
-            ExternalTtsUsageRepository usageRepository,
-            ExternalTtsDailyUsageRepository dailyUsageRepository,
-            PlanLimitsService planLimitsService) {
+            CreditService creditService) {
         this.soleTTSRepository = soleTTSRepository;
-        this.usageRepository = usageRepository;
-        this.dailyUsageRepository = dailyUsageRepository;
-        this.planLimitsService = planLimitsService;
+        this.creditService = creditService;
     }
 
     public SoleTTS generateTTS(User user, String text, String voiceId,
                                TtsProvider provider, Double speed) throws IOException, InterruptedException {
 
-        // 1. Access check — BASIC users cannot use external providers
-        if (!planLimitsService.hasExternalTtsAccess(user)) {
+        // 1. Access check
+        if (!creditService.canAccessPaidFeatures(user)) {
             throw new IllegalStateException(
-                "External AI voices require an active paid plan (Creator Lite or higher)"
-            );
+                    "External AI voices require an active paid plan (Creator Lite or higher)");
         }
 
         // 2. Basic validation
@@ -67,35 +60,16 @@ public class ExternalTtsService {
         if (voiceId == null || voiceId.trim().isEmpty())
             throw new IllegalArgumentException("Voice ID is required");
 
-        // 3. Per-request character limit
-        long maxChars = planLimitsService.getMaxExternalTtsCharsPerRequest(user);
-        if (maxChars > 0 && text.length() > maxChars) {
+        // 3. Per-request char limit
+        long maxChars = creditService.getMaxVoiceCharsPerRequest(user);
+        if (text.length() > maxChars) {
             throw new IllegalArgumentException(
-                "Text exceeds limit for your plan (" + maxChars + " chars per request)"
-            );
+                    "Text exceeds limit for your plan (" + maxChars + " chars per request)");
         }
 
-        // 4. Monthly quota check
-        long monthlyLimit = planLimitsService.getMonthlyExternalTtsLimit(user);
-        if (monthlyLimit > 0) {
-            long used = getMonthlyUsage(user, provider);
-            if (used + text.length() > monthlyLimit) {
-                throw new IllegalStateException(
-                    "Monthly " + provider + " voice limit reached (Limit: " + monthlyLimit + ", Used: " + used + ")"
-                );
-            }
-        }
-
-        // 5. Daily quota check
-        long dailyLimit = planLimitsService.getDailyExternalTtsLimit(user);
-        if (dailyLimit > 0) {
-            long usedToday = getDailyUsage(user, provider);
-            if (usedToday + text.length() > dailyLimit) {
-                throw new IllegalStateException(
-                    "Daily " + provider + " voice limit reached (Daily Limit: " + dailyLimit + ", Used: " + usedToday + ")"
-                );
-            }
-        }
+        // 4+5. Deduct from unified credit pool (1 credit per 100 chars)
+        int cost = (int) Math.ceil(text.length() / 100.0);
+        creditService.spend(user, cost, "External AI Voice (" + provider + "): " + text.length() + " chars");
 
         // 6. Route to correct provider
         byte[] audioBytes = switch (provider) {
@@ -123,10 +97,6 @@ public class ExternalTtsService {
         soleTTS.setCreatedAt(LocalDateTime.now());
         soleTTS.setProvider(provider);
         soleTTSRepository.save(soleTTS);
-
-        // 9. Update usage
-        updateMonthlyUsage(user, provider, text.length());
-        updateDailyUsage(user, provider, text.length());
 
         logger.info("{} TTS generated for user {}: {} chars", provider, user.getId(), text.length());
         return soleTTS;
@@ -189,37 +159,5 @@ public class ExternalTtsService {
             throw new IOException("Azure TTS error " + response.statusCode() + ": " + new String(response.body()));
         }
         return response.body();
-    }
-
-    // ─── Usage Tracking ───────────────────────────────────────────────────────
-
-    public long getMonthlyUsage(User user, TtsProvider provider) {
-        return usageRepository.findByUserAndProviderAndMonth(user, provider, YearMonth.now())
-            .map(ExternalTtsUsage::getCharactersUsed)
-            .orElse(0L);
-    }
-
-    public long getDailyUsage(User user, TtsProvider provider) {
-        return dailyUsageRepository.findByUserAndProviderAndUsageDate(user, provider, LocalDate.now())
-            .map(ExternalTtsDailyUsage::getCharactersUsed)
-            .orElse(0L);
-    }
-
-    private void updateMonthlyUsage(User user, TtsProvider provider, long chars) {
-        YearMonth month = YearMonth.now();
-        ExternalTtsUsage usage = usageRepository
-            .findByUserAndProviderAndMonth(user, provider, month)
-            .orElseGet(() -> new ExternalTtsUsage(user, provider, month));
-        usage.setCharactersUsed(usage.getCharactersUsed() + chars);
-        usageRepository.save(usage);
-    }
-
-    private void updateDailyUsage(User user, TtsProvider provider, long chars) {
-        LocalDate today = LocalDate.now();
-        ExternalTtsDailyUsage usage = dailyUsageRepository
-            .findByUserAndProviderAndUsageDate(user, provider, today)
-            .orElseGet(() -> new ExternalTtsDailyUsage(user, provider, today));
-        usage.setCharactersUsed(usage.getCharactersUsed() + chars);
-        dailyUsageRepository.save(usage);
     }
 }

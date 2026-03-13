@@ -8,7 +8,7 @@ import com.example.videoeditor.entity.VideoSpeed;
 import com.example.videoeditor.repository.UserProcessingUsageRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
-import com.example.videoeditor.service.PlanLimitsService;
+import com.example.videoeditor.service.CreditService;
 import com.example.videoeditor.service.VideoSpeedService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -35,8 +35,7 @@ public class VideoSpeedController {
     private final VideoSpeedService videoSpeedService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
-    private final PlanLimitsService planLimitsService;
-    private final UserProcessingUsageRepository userProcessingUsageRepository;
+    private final CreditService creditService;
 
     private User getUserFromToken(String token) {
         if (token == null || !token.startsWith("Bearer ")) {
@@ -172,23 +171,12 @@ public class VideoSpeedController {
     public ResponseEntity<?> getPlanLimits(@RequestHeader("Authorization") String token) {
         try {
             User user = getUserFromToken(token);
-
-            int videosPerMonth = planLimitsService.getMaxSpeedProcessingPerMonth(user);
-            int maxVideoLength = planLimitsService.getMaxSpeedVideoLengthMinutes(user);
-            String maxQuality = planLimitsService.getMaxSpeedAllowedQuality(user);
-
-            // Get current usage
-            String currentYearMonth = YearMonth.now().toString();
-            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository
-                    .findByUserAndServiceTypeAndYearMonth(user, "VIDEO_SPEED", currentYearMonth);
-            int videosUsed = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
-
             Map<String, Object> response = new HashMap<>();
-            response.put("videosPerMonth", videosPerMonth);
-            response.put("videosUsed", videosUsed);
-            response.put("maxVideoLength", maxVideoLength);
-            response.put("maxQuality", maxQuality);
-
+            response.put("maxVideoLength", creditService.getMaxVideoLengthMinutes(user));
+            response.put("maxQuality", creditService.getMaxVideoQuality(user));
+            response.put("hasWatermark", creditService.hasWatermark(user));
+            response.put("costPerExport", CreditService.COST_VIDEO_SPEED);
+            response.put("balance", creditService.getBalance(user));
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));

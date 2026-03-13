@@ -1,5 +1,6 @@
 package com.example.videoeditor.entity;
 
+import com.example.videoeditor.enums.PlanType;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -51,6 +52,18 @@ public class User {
 
     @Column
     private LocalDateTime planExpiresAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "plan_type", nullable = false)
+    private PlanType planType = PlanType.FREE;
+
+    public PlanType getPlanType() {
+        return planType;
+    }
+
+    public void setPlanType(PlanType planType) {
+        this.planType = planType;
+    }
 
     // Add getter and setter
     public String getProfilePicture() {

@@ -6,8 +6,8 @@ import com.example.videoeditor.enums.PlanType;
 import com.example.videoeditor.repository.UserPlanRepository;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
+import com.example.videoeditor.service.CreditService;
 import com.example.videoeditor.service.ExternalTtsService;
-import com.example.videoeditor.service.PlanLimitsService;
 import com.example.videoeditor.service.SoleTTSService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,16 +26,14 @@ public class SoleTTSController {
     private final SoleTTSService soleTTSService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
-    private final UserPlanRepository userPlanRepository;
-    private final PlanLimitsService planLimitsService;
+    private final CreditService creditService;
     private final ExternalTtsService externalTtsService;
 
-    public SoleTTSController(SoleTTSService soleTTSService, JwtUtil jwtUtil, UserRepository userRepository, UserPlanRepository userPlanRepository, PlanLimitsService planLimitsService, ExternalTtsService externalTtsService) {
+    public SoleTTSController(SoleTTSService soleTTSService, JwtUtil jwtUtil, UserRepository userRepository, ExternalTtsService externalTtsService, CreditService creditService) {
         this.soleTTSService = soleTTSService;
       this.jwtUtil = jwtUtil;
       this.userRepository = userRepository;
-        this.userPlanRepository = userPlanRepository;
-        this.planLimitsService = planLimitsService;
+      this.creditService = creditService;
         this.externalTtsService = externalTtsService;
     }
 
@@ -58,9 +56,7 @@ public class SoleTTSController {
             if (speed < 0.5 || speed > 4.0) {
                 return ResponseEntity.badRequest().body("Speed must be between 0.5 and 4.0");
             }
-            if (!planLimitsService.hasSpeedControl(user)) {
-                speed = 1.0;
-            }
+            if (!creditService.isPaid(user)) { speed = 1.0; }
 
             @SuppressWarnings("unchecked")
             Map<String, String> customConfig = (Map<String, String>) request.get("customConfig");
@@ -106,53 +102,20 @@ public class SoleTTSController {
     public ResponseEntity<?> getTtsUsage(@RequestHeader("Authorization") String token) {
         try {
             User user = getUserFromToken(token);
-            long monthlyUsage = soleTTSService.getUserTtsUsage(user);
-            long monthlyLimit = planLimitsService.getMonthlyTtsLimit(user);
-            long monthlyRemaining = monthlyLimit > 0 ? monthlyLimit - monthlyUsage : -1;
-            long dailyUsage = soleTTSService.getUserDailyTtsUsage(user);
-            long dailyLimit = planLimitsService.getDailyTtsLimit(user);
-            long maxCharRequest = planLimitsService.getMaxCharsPerRequest(user);
-            long dailyRemaining = dailyLimit > 0 ? dailyLimit - dailyUsage : -1;
-
             Map<String, Object> response = new HashMap<>();
-            response.put("monthly", Map.of(
-                    "used", monthlyUsage,
-                    "limit", monthlyLimit,
-                    "remaining", monthlyRemaining
+            response.put("balance", creditService.getBalance(user));
+            response.put("planType", user.getPlanType());
+            response.put("maxCharsPerRequest", creditService.getMaxVoiceCharsPerRequest(user));
+            response.put("isPaid", creditService.isPaid(user));
+            response.put("creditCostPer100Chars", 1);
+            response.put("externalProviders", Map.of("hasAccess", creditService.isPaid(user)
             ));
-            response.put("daily", Map.of(
-                    "used", dailyUsage,
-                    "limit", dailyLimit,
-                    "remaining", dailyRemaining
-            ));
-            response.put("maxCharRequest", maxCharRequest);
-            response.put("role", user.getRole().toString());
 
-            Map<String, Object> externalUsage = new HashMap<>();
-            for (SoleTTS.TtsProvider p : new SoleTTS.TtsProvider[]{
-                    SoleTTS.TtsProvider.OPENAI, SoleTTS.TtsProvider.AZURE}) {
-                long elMonthly = externalTtsService.getMonthlyUsage(user, p);
-                long elDaily = externalTtsService.getDailyUsage(user, p);
-                long limit = planLimitsService.getMonthlyExternalTtsLimit(user);
-                long elMaxCharRequest = planLimitsService.getMaxExternalTtsCharsPerRequest(user);
-                long dailyLim = planLimitsService.getDailyExternalTtsLimit(user);
-                externalUsage.put(p.name().toLowerCase(), Map.of(
-                        "monthly", Map.of("used", elMonthly, "limit", limit, "remaining", limit > 0 ? limit - elMonthly : -1),
-                        "daily",   Map.of("used", elDaily,   "limit", dailyLim, "remaining", dailyLim > 0 ? dailyLim - elDaily : -1)
-                ));
-                externalUsage.put("maxCharRequest", elMaxCharRequest);
+            if (!creditService.isPaid(user)) {
+                response.put("freeVoiceCharsUsed", creditService.getFreeVoiceCharsUsed(user));
+                response.put("freeVoiceCharsLimit", CreditService.FREE_VOICE_CHARS_PER_MONTH);
             }
-
-            // Then add to the response map:
-            response.put("externalProviders", Map.of(
-                    "hasAccess", planLimitsService.hasExternalTtsAccess(user),
-                    "usage", externalUsage
-            ));
-
             return ResponseEntity.ok(response);
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body("Unauthorized: " + e.getMessage());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Unexpected error: " + e.getMessage());
@@ -233,9 +196,7 @@ public class SoleTTSController {
             if (speed < 0.5 || speed > 4.0) {
                 return ResponseEntity.badRequest().body("Speed must be between 0.5 and 4.0");
             }
-            if (!planLimitsService.hasSpeedControl(user)) {
-                speed = 1.0;
-            }
+            if (!creditService.isPaid(user)) { speed = 1.0; }
 
             SoleTTS soleTTS = externalTtsService.generateTTS(user, text, voiceId, provider, speed);
 
@@ -264,10 +225,7 @@ public class SoleTTSController {
     }
 
     private boolean hasHistoryAccess(User user) {
-        if (user.isAdmin()) return true;
-        return planLimitsService.getActiveUserPlans(user).stream()
-                .anyMatch(p -> p.getPlanType() == PlanType.CREATOR
-                        || p.getPlanType() == PlanType.STUDIO);
+        return user.isAdmin() || creditService.isPaid(user);
     }
 
     public User getUserFromToken(String token) {

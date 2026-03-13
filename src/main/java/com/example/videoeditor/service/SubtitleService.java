@@ -46,9 +46,8 @@ public class SubtitleService {
   private final JwtUtil jwtUtil;
   private final SubtitleMediaRepository subtitleMediaRepository;
   private final ObjectMapper objectMapper;
-  private final UserRepository userRepository; // Added dependency
-  private final UserProcessingUsageRepository userProcessingUsageRepository;
-    private final PlanLimitsService planLimitsService;
+  private final UserRepository userRepository;
+  private final CreditService creditService;
 
   @Value("${app.base-dir:D:\\Backend\\videoeditor_java}")
   private String baseDir;
@@ -66,13 +65,12 @@ public class SubtitleService {
           JwtUtil jwtUtil,
           SubtitleMediaRepository subtitleMediaRepository,
           ObjectMapper objectMapper,
-          UserRepository userRepository, UserProcessingUsageRepository userProcessingUsageRepository, PlanLimitsService planLimitsService) {
+          UserRepository userRepository, CreditService creditService) {
     this.jwtUtil = jwtUtil;
     this.subtitleMediaRepository = subtitleMediaRepository;
     this.objectMapper = objectMapper;
     this.userRepository = userRepository;
-      this.userProcessingUsageRepository = userProcessingUsageRepository;
-      this.planLimitsService = planLimitsService;
+      this.creditService = creditService;
   }
 
     public SubtitleMedia uploadMedia(User user, MultipartFile mediaFile) throws IOException {
@@ -103,7 +101,7 @@ public class SubtitleService {
         // ✅ NEW: Validate video duration BEFORE saving to database
         try {
             double videoDuration = getVideoDuration(inputFile);
-            int maxMinutes = planLimitsService.getMaxVideoLengthMinutes(user);
+            int maxMinutes = creditService.getMaxVideoLengthMinutes(user);
 
             if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
                 // Delete the uploaded file since it exceeds limits
@@ -816,8 +814,6 @@ public class SubtitleService {
       subtitleMedia.setStatus("SUCCESS");
       subtitleMedia.setProgress(100.0);
       subtitleMediaRepository.save(subtitleMedia);
-
-      incrementUsageCount(user);
 
       logger.info("Successfully processed subtitles for user: {}, mediaId: {}", user.getId(), mediaId);
       return subtitleMedia;
@@ -1787,51 +1783,37 @@ public class SubtitleService {
       return false;
   }
 
-    private void validateProcessingLimits(User user, String quality, double videoDuration) throws IllegalArgumentException {
-        // Check quality
-        if (quality != null && !planLimitsService.isQualityAllowed(user, quality)) {
-            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " +
-                    planLimitsService.getMaxAllowedQuality(user));
-        }
-
-        // Check monthly limit
-        int maxPerMonth = planLimitsService.getMaxVideoProcessingPerMonth(user);
-        if (maxPerMonth > 0) {
-            String currentYearMonth = YearMonth.now().toString();
-            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
-                    user, "SUBTITLE", currentYearMonth);
-
-            int currentCount = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
-            if (currentCount >= maxPerMonth) {
-                throw new IllegalArgumentException("Monthly processing limit reached (" + maxPerMonth + "). Upgrade your plan for more.");
+    private void validateProcessingLimits(User user, String quality, double videoDuration) {
+        // Quality check
+        if (quality != null) {
+            int requested = parseQuality(quality);
+            int max = parseQuality(creditService.getMaxVideoQuality(user));
+            if (requested > max) {
+                throw new IllegalArgumentException(
+                        "Quality " + quality + " not allowed. Maximum allowed: "
+                                + creditService.getMaxVideoQuality(user));
             }
         }
 
-        // Check video length
-        int maxMinutes = planLimitsService.getMaxVideoLengthMinutes(user);
+        // Video length check
+        int maxMinutes = creditService.getMaxVideoLengthMinutes(user);
         if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
-            throw new IllegalArgumentException("Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
+            throw new IllegalArgumentException(
+                    "Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
         }
+
+        // Deduct credits — 10 per subtitle generation
+        creditService.spend(user, CreditService.COST_SUBTITLE_GEN, "Subtitle generation");
     }
 
-    // Add method to increment usage after successful processing
-    private void incrementUsageCount(User user) {
-        String currentYearMonth = YearMonth.now().toString();
-        Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
-                user, "SUBTITLE", currentYearMonth);
-
-        UserProcessingUsage usage;
-        if (usageOpt.isPresent()) {
-            usage = usageOpt.get();
-            usage.setProcessCount(usage.getProcessCount() + 1);
-        } else {
-            usage = new UserProcessingUsage();
-            usage.setUser(user);
-            usage.setServiceType("SUBTITLE");
-            usage.setYearMonth(currentYearMonth);
-            usage.setProcessCount(1);
-        }
-        userProcessingUsageRepository.save(usage);
+    private int parseQuality(String quality) {
+        return switch (quality.toLowerCase()) {
+            case "720p"        -> 720;
+            case "1080p"       -> 1080;
+            case "1440p", "2k" -> 1440;
+            case "4k"          -> 2160;
+            default            -> 720;
+        };
     }
 
     private Map<String, String> getFFmpegQualitySettings(String quality) {

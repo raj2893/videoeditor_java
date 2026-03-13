@@ -6,19 +6,12 @@ import com.example.videoeditor.enums.VideoGenModel;
 import com.example.videoeditor.repository.UserRepository;
 import com.example.videoeditor.security.JwtUtil;
 import com.example.videoeditor.service.AiVideoGenService;
-import com.example.videoeditor.service.VideoGenPlanService;
-import okhttp3.MediaType;
-import okhttp3.MultipartBody;
-import okhttp3.Request;
-import okhttp3.Response;
-import org.json.JSONObject;
+import com.example.videoeditor.service.CreditService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -47,19 +40,19 @@ import java.util.stream.Collectors;
 public class AiVideoGenController {
 
     private final AiVideoGenService videoGenService;
-    private final VideoGenPlanService planService;
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final CreditService creditService;
 
     private final String baseDir = "D:\\Backend\\videoeditor_java";
 
     public AiVideoGenController(
             AiVideoGenService videoGenService,
-            VideoGenPlanService planService,
             JwtUtil jwtUtil,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            CreditService creditService) {
         this.videoGenService = videoGenService;
-        this.planService = planService;
+        this.creditService = creditService;
         this.jwtUtil = jwtUtil;
         this.userRepository = userRepository;
     }
@@ -73,32 +66,24 @@ public class AiVideoGenController {
         try {
             User user = getUserFromToken(token);
 
-            if (!planService.hasAnyVideoGenPlan(user)) {
-                return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
-                        .body("No active AI Video Generation plan. Please purchase a plan.");
-            }
-
-            List<VideoGenModel> availableModels = planService.getAvailableModels(user);
-
-            List<Map<String, Object>> modelList = availableModels.stream().map(model -> {
+            List<Map<String, Object>> modelList = Arrays.stream(VideoGenModel.values()).map(model -> {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("id", model.name());
                 m.put("displayName", model.getDisplayName());
-                m.put("tier", model.getTier().name());
-                m.put("resolution", model.getResolution());
+                m.put("defaultResolution", model.getDefaultResolution());
                 m.put("supportsAudio", model.isSupportsAudio());
-                m.put("creditsPerFiveSeconds", model.getCreditsPerFiveSeconds());
-                m.put("creditsPer10Seconds", model.getCreditsPerFiveSeconds() * 2);
                 m.put("description", model.getDescription());
+                // Include the full credit cost matrix for the frontend to display
+                // "This will cost X credits" before the user confirms
+                m.put("creditCosts", buildModelCreditMatrix(model));
                 return m;
-            }).collect(Collectors.toList());
+            }).toList();
 
             return ResponseEntity.ok(Map.of(
                     "models", modelList,
-                    "activePlan", planService.getActivePlanName(user),
-                    "maxDurationSeconds", planService.getMaxDurationSeconds(user)
+                    "balance", creditService.getBalance(user),
+                    "maxDurationSeconds", 10
             ));
-
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Unauthorized: " + e.getMessage());
         }
@@ -112,21 +97,12 @@ public class AiVideoGenController {
     public ResponseEntity<?> getCredits(@RequestHeader("Authorization") String token) {
         try {
             User user = getUserFromToken(token);
-
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("monthlyLimit", planService.getMonthlyCredits(user));
-            response.put("monthlyUsed", videoGenService.getMonthlyCreditsUsed(user));
-            response.put("monthlyRemaining", videoGenService.getRemainingMonthlyCredits(user));
-            response.put("dailyLimit", planService.getDailyCredits(user));
-            response.put("dailyRemaining", videoGenService.getRemainingDailyCredits(user));
-            response.put("activePlan", planService.getActivePlanName(user));
-            response.put("hasVideoPlan", planService.hasAnyVideoGenPlan(user));
-
-            // Credit cost reference table for frontend
-            response.put("creditCosts", buildCreditCostReference());
-
-            return ResponseEntity.ok(response);
-
+            return ResponseEntity.ok(Map.of(
+                    "balance", creditService.getBalance(user),
+                    "planType", user.getPlanType(),
+                    "expiresAt", user.getPlanExpiresAt() != null ? user.getPlanExpiresAt() : "N/A",
+                    "creditCosts", buildFullCreditCostReference()
+            ));
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Unauthorized: " + e.getMessage());
         }
@@ -143,18 +119,20 @@ public class AiVideoGenController {
         try {
             User user = getUserFromToken(token);
 
-            String modelId = (String) request.get("model");
-            String prompt = (String) request.get("prompt");
+            String modelId        = (String) request.get("model");
+            String prompt         = (String) request.get("prompt");
             String negativePrompt = (String) request.getOrDefault("negativePrompt", null);
-            int durationSeconds = ((Number) request.getOrDefault("durationSeconds", 5)).intValue();
-            boolean audioEnabled = (Boolean) request.getOrDefault("audioEnabled", false);
-            String aspectRatio = (String) request.getOrDefault("aspectRatio", "16:9");
+            int durationSeconds   = ((Number) request.getOrDefault("durationSeconds", 5)).intValue();
+            boolean audioEnabled  = (Boolean) request.getOrDefault("audioEnabled", false);
+            String aspectRatio    = (String) request.getOrDefault("aspectRatio", "16:9");
+            // Resolution: only user-selectable for Wan 2.5. Defaults to model's default otherwise.
+            String resolution     = (String) request.getOrDefault("resolution", null);
 
             VideoGenModel model = parseModel(modelId);
 
             AiVideoGen job = videoGenService.submitTextToVideo(
                     user, model, prompt, negativePrompt,
-                    durationSeconds, audioEnabled, aspectRatio);
+                    durationSeconds, audioEnabled, aspectRatio, resolution);
 
             return ResponseEntity.ok(buildJobResponse(job));
 
@@ -180,17 +158,18 @@ public class AiVideoGenController {
             @RequestParam(value = "durationSeconds", defaultValue = "5") int durationSeconds,
             @RequestParam(value = "audioEnabled", defaultValue = "false") boolean audioEnabled,
             @RequestParam(value = "aspectRatio", defaultValue = "16:9") String aspectRatio,
+            // Resolution only matters for Wan 2.5 — ignored for other models
+            @RequestParam(value = "resolution", required = false) String resolution,
             @RequestParam("image") MultipartFile imageFile) {
         try {
             User user = getUserFromToken(token);
             VideoGenModel model = parseModel(modelId);
 
-            // Upload image to fal.ai storage — returns a CDN URL
             String falImageUrl = videoGenService.uploadImageToFal(imageFile);
 
             AiVideoGen job = videoGenService.submitImageToVideo(
                     user, model, prompt, falImageUrl, null,
-                    durationSeconds, audioEnabled, aspectRatio);
+                    durationSeconds, audioEnabled, aspectRatio, resolution);
 
             return ResponseEntity.ok(buildJobResponse(job));
 
@@ -214,12 +193,9 @@ public class AiVideoGenController {
             @RequestHeader("Authorization") String token,
             @PathVariable String falRequestId) {
         try {
-            // Authenticate (we still want to prevent unauthorized polling)
             getUserFromToken(token);
-
             AiVideoGen job = videoGenService.checkAndUpdateStatus(falRequestId);
             return ResponseEntity.ok(buildJobResponse(job));
-
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         } catch (IOException e) {
@@ -239,13 +215,10 @@ public class AiVideoGenController {
         try {
             User user = getUserFromToken(token);
             List<AiVideoGen> history = videoGenService.getUserHistory(user);
-
             List<Map<String, Object>> result = history.stream()
                     .map(this::buildJobResponse)
                     .collect(Collectors.toList());
-
             return ResponseEntity.ok(result);
-
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Unauthorized: " + e.getMessage());
         }
@@ -272,7 +245,6 @@ public class AiVideoGenController {
         map.put("videoPath", job.getVideoPath());
         map.put("createdAt", job.getCreatedAt());
         map.put("completedAt", job.getCompletedAt());
-        // Only include error message if failed
         if (job.getStatus() == AiVideoGen.Status.FAILED) {
             map.put("errorMessage", job.getErrorMessage());
         }
@@ -288,34 +260,73 @@ public class AiVideoGenController {
         }
     }
 
-    private String saveUploadedImage(User user, MultipartFile imageFile) throws IOException {
-        File dir = new File(baseDir, "video_ref_images" + File.separator + user.getId());
-        dir.mkdirs();
-        String fileName = "ref_" + System.currentTimeMillis() + "_" + imageFile.getOriginalFilename();
-        File savedFile = new File(dir, fileName);
-        try (FileOutputStream fos = new FileOutputStream(savedFile)) {
-            fos.write(imageFile.getBytes());
+    /**
+     * Builds a full credit cost matrix for a single model.
+     * Used in the /models response so the frontend can show
+     * "This will cost X credits" before the user confirms.
+     *
+     * Example output for Wan 2.5:
+     *   [
+     *     { resolution: "480p", duration: 5, audio: false, credits: 46 },
+     *     { resolution: "480p", duration: 10, audio: false, credits: 92 },
+     *     ...
+     *   ]
+     */
+    private List<Map<String, Object>> buildModelCreditMatrix(VideoGenModel model) {
+        List<Map<String, Object>> matrix = new ArrayList<>();
+
+        if (model == VideoGenModel.WAN_2_5) {
+            // Wan 2.5: resolution-variable, no audio
+            for (String res : List.of("480p", "720p", "1080p")) {
+                for (int dur : List.of(5, 10)) {
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("resolution", res);
+                    entry.put("duration", dur);
+                    entry.put("audio", false);
+                    entry.put("credits", model.calculateCredits(dur, false, res));
+                    matrix.add(entry);
+                }
+            }
+        } else {
+            // All other models: fixed resolution, audio on/off where supported
+            String res = model.getDefaultResolution();
+            for (int dur : List.of(5, 10)) {
+                // Audio off
+                Map<String, Object> off = new LinkedHashMap<>();
+                off.put("resolution", res);
+                off.put("duration", dur);
+                off.put("audio", false);
+                off.put("credits", model.calculateCredits(dur, false, res));
+                matrix.add(off);
+
+                // Audio on (only for models that support it)
+                if (model.isSupportsAudio()) {
+                    Map<String, Object> on = new LinkedHashMap<>();
+                    on.put("resolution", res);
+                    on.put("duration", dur);
+                    on.put("audio", true);
+                    on.put("credits", model.calculateCredits(dur, true, res));
+                    matrix.add(on);
+                }
+            }
         }
-        return "images/video_ref/" + user.getId() + "/" + fileName;
+
+        return matrix;
     }
 
     /**
-     * Returns a credit cost reference table for the frontend to display
-     * "This will cost X credits" before user confirms generation.
+     * Returns the full credit cost reference for all models — used in /credits response.
      */
-    private List<Map<String, Object>> buildCreditCostReference() {
-        List<Map<String, Object>> costs = new ArrayList<>();
-        for (VideoGenModel model : VideoGenModel.values()) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("model", model.name());
-            entry.put("displayName", model.getDisplayName());
-            entry.put("5s_no_audio", model.calculateCredits(5, false));
-            entry.put("5s_with_audio", model.isSupportsAudio() ? model.calculateCredits(5, true) : "N/A");
-            entry.put("10s_no_audio", model.calculateCredits(10, false));
-            entry.put("10s_with_audio", model.isSupportsAudio() ? model.calculateCredits(10, true) : "N/A");
-            costs.add(entry);
-        }
-        return costs;
+    private List<Map<String, Object>> buildFullCreditCostReference() {
+        return Arrays.stream(VideoGenModel.values())
+                .map(model -> {
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("model", model.name());
+                    entry.put("displayName", model.getDisplayName());
+                    entry.put("costs", buildModelCreditMatrix(model));
+                    return entry;
+                })
+                .collect(Collectors.toList());
     }
 
     private User getUserFromToken(String token) {

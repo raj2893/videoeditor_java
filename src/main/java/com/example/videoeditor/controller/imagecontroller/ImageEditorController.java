@@ -8,7 +8,7 @@ import com.example.videoeditor.entity.imageentity.ImageAsset;
 import com.example.videoeditor.entity.imageentity.ImageElement;
 import com.example.videoeditor.entity.imageentity.ImageProject;
 import com.example.videoeditor.entity.User;
-import com.example.videoeditor.service.PlanLimitsService;
+import com.example.videoeditor.service.CreditService;
 import com.example.videoeditor.service.imageservice.ElementDownloadService;
 import com.example.videoeditor.service.imageservice.ImageAssetService;
 import com.example.videoeditor.service.imageservice.ImageEditorService;
@@ -35,8 +35,7 @@ public class ImageEditorController {
     private final ImageAssetService imageAssetService;
     private final ImageElementService imageElementService;
     private final ElementDownloadService elementDownloadService;
-    private final PlanLimitsService planLimitsService;
-
+    private final CreditService creditService;
     /**
      * Create new project
      * POST /api/image-editor/projects
@@ -373,29 +372,22 @@ public class ImageEditorController {
         try {
             User user = null;
             if (token != null && !token.isEmpty()) {
-                try {
-                    user = imageEditorService.getUserFromToken(token);
-                } catch (Exception e) {
-                    // anonymous
-                }
+                try { user = imageEditorService.getUserFromToken(token); } catch (Exception e) {}
             }
 
             if (user == null) {
                 return ResponseEntity.ok(Map.of(
                         "canDownloadSvg", false,
                         "maxResolution", 512,
-                        "dailyLimit", 2,
-                        "monthlyLimit", 10,
                         "plan", "GUEST"
                 ));
             }
 
+            boolean paid = creditService.isPaid(user);
             return ResponseEntity.ok(Map.of(
-                    "canDownloadSvg", planLimitsService.canDownloadSvg(user),
-                    "maxResolution", planLimitsService.getMaxElementDownloadResolution(user),
-                    "dailyLimit", planLimitsService.getDailyElementDownloadLimit(user),
-                    "monthlyLimit", planLimitsService.getMonthlyElementDownloadLimit(user),
-                    "plan", user.getRole().toString()
+                    "canDownloadSvg", paid,
+                    "maxResolution", paid ? "unlimited" : 512,
+                    "plan", user.getPlanType().toString()
             ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

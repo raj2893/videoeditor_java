@@ -7,7 +7,7 @@ import com.example.videoeditor.entity.User;
 import com.example.videoeditor.repository.imagerepository.ElementDownloadRepository;
 import com.example.videoeditor.repository.imagerepository.ElementDownloadUsageRepository;
 import com.example.videoeditor.repository.imagerepository.ImageElementRepository;
-import com.example.videoeditor.service.PlanLimitsService;
+import com.example.videoeditor.service.CreditService;
 import lombok.RequiredArgsConstructor;
 import org.apache.batik.transcoder.TranscoderException;
 import org.apache.batik.transcoder.TranscoderInput;
@@ -44,7 +44,7 @@ public class ElementDownloadService {
     private final ElementDownloadRepository downloadRepository;
     private final ImageElementRepository elementRepository;
     private final ElementDownloadUsageRepository downloadUsageRepository;
-    private final PlanLimitsService planLimitsService;
+    private final CreditService creditService;
 
     /**
      * Download element in specified format
@@ -62,40 +62,19 @@ public class ElementDownloadService {
         // ---- Enforce limits for logged-in users ----
         if (user != null) {
             // SVG format check
-            if ("SVG".equals(format) && !planLimitsService.canDownloadSvg(user)) {
+            if ("SVG".equals(format) && !creditService.isPaid(user)) {
                 throw new IllegalArgumentException("SVG download requires SVG_PRO plan or CREATOR/STUDIO/ADMIN role.");
             }
 
             // Resolution check
             int[] dimensions = parseResolutionForValidation(resolution);
-            int maxRes = planLimitsService.getMaxElementDownloadResolution(user);
+            int maxRes = creditService.isPaid(user) ? Integer.MAX_VALUE : 256;
             if (dimensions[0] > maxRes || dimensions[1] > maxRes) {
                 throw new IllegalArgumentException(
                         "Resolution exceeds your plan limit. Max allowed: " + maxRes + "x" + maxRes);
             }
 
-            // Daily limit check
-            int dailyLimit = planLimitsService.getDailyElementDownloadLimit(user);
-            if (dailyLimit > 0) {
-                int dailyUsage = getDailyDownloadCount(user);
-                if (dailyUsage >= dailyLimit) {
-                    throw new IllegalStateException(
-                            "Daily download limit reached (" + dailyLimit + "/day). Upgrade your plan for more.");
-                }
-            }
-
-            // Monthly limit check
-            int monthlyLimit = planLimitsService.getMonthlyElementDownloadLimit(user);
-            if (monthlyLimit > 0) {
-                int monthlyUsage = getMonthlyDownloadCount(user);
-                if (monthlyUsage >= monthlyLimit) {
-                    throw new IllegalStateException(
-                            "Monthly download limit reached (" + monthlyLimit + "/month). Upgrade your plan for more.");
-                }
-            }
-
             // Increment usage
-            incrementDownloadUsage(user);
         } else {
             // Anonymous users: restrict to PNG/JPG only, max 512x512
             if ("SVG".equals(format)) {
@@ -444,14 +423,5 @@ public class ElementDownloadService {
     public int getMonthlyDownloadCount(User user) {
         return downloadUsageRepository
                 .sumMonthlyCountByUserIdAndYearMonth(user.getId(), YearMonth.now().toString());
-    }
-
-    private void incrementDownloadUsage(User user) {
-        ElementDownloadUsage usage = downloadUsageRepository
-                .findByUserIdAndUsageDate(user.getId(), LocalDate.now())
-                .orElseGet(() -> new ElementDownloadUsage(user.getId()));
-        usage.setDailyCount(usage.getDailyCount() + 1);
-        usage.setMonthlyCount(usage.getMonthlyCount() + 1);
-        downloadUsageRepository.save(usage);
     }
 }

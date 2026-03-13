@@ -7,7 +7,7 @@ import com.example.videoeditor.entity.imageentity.UserImageGenUsage;
 import com.example.videoeditor.repository.imagerepository.SoleImageGenRepository;
 import com.example.videoeditor.repository.imagerepository.UserDailyImageGenUsageRepository;
 import com.example.videoeditor.repository.imagerepository.UserImageGenUsageRepository;
-import com.example.videoeditor.service.PlanLimitsService;
+import com.example.videoeditor.service.CreditService;
 import okhttp3.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -33,23 +33,16 @@ public class SoleImageGenService {
     private static final String STABILITY_API_URL = "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image";
 
     private final SoleImageGenRepository soleImageGenRepository;
-    private final UserImageGenUsageRepository userImageGenUsageRepository;
-    private final UserDailyImageGenUsageRepository userDailyImageGenUsageRepository;
-    private final PlanLimitsService planLimitsService;
     private final OkHttpClient httpClient;
+    private final CreditService creditService;
 
     private final String baseDir = "D:\\Backend\\videoeditor_java";
     private final String apiKey;
 
     public SoleImageGenService(
-            SoleImageGenRepository soleImageGenRepository,
-            UserImageGenUsageRepository userImageGenUsageRepository,
-            UserDailyImageGenUsageRepository userDailyImageGenUsageRepository,
-            PlanLimitsService planLimitsService) throws IOException {
+            SoleImageGenRepository soleImageGenRepository, CreditService creditService) throws IOException {
         this.soleImageGenRepository = soleImageGenRepository;
-        this.userImageGenUsageRepository = userImageGenUsageRepository;
-        this.userDailyImageGenUsageRepository = userDailyImageGenUsageRepository;
-        this.planLimitsService = planLimitsService;
+        this.creditService = creditService;
         this.httpClient = new OkHttpClient();
 
         // Load API key from file
@@ -67,35 +60,14 @@ public class SoleImageGenService {
             throw new IllegalArgumentException("Prompt is required and cannot be empty");
         }
 
-        // Get plan limits
-        long dailyLimit = planLimitsService.getDailyImageGenLimit(user);
-        long monthlyLimit = planLimitsService.getMonthlyImageGenLimit(user);
-        int imagesPerRequest = planLimitsService.getImagesPerRequest(user);
-        String resolution = planLimitsService.getImageResolution(user);
-        int steps = planLimitsService.getImageSteps(user);
-        double cfgScale = planLimitsService.getImageCfgScale(user);
+        // Stability Core model = 2 credits (hardcoded here since this service uses only Stability)
+        creditService.spend(user, 2, "Image gen: Stability Core");
 
-        // Check monthly limit
-        if (monthlyLimit > 0) {
-            long monthlyUsage = getUserMonthlyImageGenUsage(user);
-            if (monthlyUsage + 1 > monthlyLimit) {
-                throw new IllegalStateException(
-                        "Monthly AI Image Generation limit exceeded for plan: " + user.getRole() +
-                                " (Limit: " + monthlyLimit + ", Used: " + monthlyUsage + ")"
-                );
-            }
-        }
-
-        // Check daily limit
-        if (dailyLimit > 0) {
-            long dailyUsage = getUserDailyImageGenUsage(user);
-            if (dailyUsage + 1 > dailyLimit) {
-                throw new IllegalStateException(
-                        "Daily AI Image Generation limit exceeded for plan: " + user.getRole() +
-                                " (Daily Limit: " + dailyLimit + ", Used Today: " + dailyUsage + ")"
-                );
-            }
-        }
+        // Keep these hardcoded defaults since they're no longer plan-driven
+        int imagesPerRequest = 1;
+        String resolution = "1024x1024";
+        int steps = 30;
+        double cfgScale = 7.0;
 
         int width, height;
         switch (resolution) {
@@ -216,43 +188,8 @@ public class SoleImageGenService {
                 soleImageGenRepository.save(soleImageGen);
                 generatedImages.add(soleImageGen);
             }
-
-            // Update usage (only count as 1 generation regardless of number of images)
-            updateUserMonthlyImageGenUsage(user, 1);
-            updateUserDailyImageGenUsage(user, 1);
-
             return generatedImages;
         }
-    }
-
-    public long getUserMonthlyImageGenUsage(User user) {
-        YearMonth currentMonth = YearMonth.now();
-        return userImageGenUsageRepository.findByUserAndMonth(user, currentMonth)
-                .map(UserImageGenUsage::getGenerationsUsed)
-                .orElse(0L);
-    }
-
-    private void updateUserMonthlyImageGenUsage(User user, long count) {
-        YearMonth currentMonth = YearMonth.now();
-        UserImageGenUsage usage = userImageGenUsageRepository.findByUserAndMonth(user, currentMonth)
-                .orElseGet(() -> new UserImageGenUsage(user, currentMonth));
-        usage.setGenerationsUsed(usage.getGenerationsUsed() + count);
-        userImageGenUsageRepository.save(usage);
-    }
-
-    public long getUserDailyImageGenUsage(User user) {
-        LocalDate today = LocalDate.now();
-        return userDailyImageGenUsageRepository.findByUserAndUsageDate(user, today)
-                .map(UserDailyImageGenUsage::getGenerationsUsed)
-                .orElse(0L);
-    }
-
-    private void updateUserDailyImageGenUsage(User user, long count) {
-        LocalDate today = LocalDate.now();
-        UserDailyImageGenUsage usage = userDailyImageGenUsageRepository.findByUserAndUsageDate(user, today)
-                .orElseGet(() -> new UserDailyImageGenUsage(user, today));
-        usage.setGenerationsUsed(usage.getGenerationsUsed() + count);
-        userDailyImageGenUsageRepository.save(usage);
     }
 
     public List<SoleImageGen> getUserGenerations(User user) {

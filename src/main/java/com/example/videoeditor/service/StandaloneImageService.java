@@ -30,8 +30,7 @@ public class StandaloneImageService {
 
   private final JwtUtil jwtUtil;
   private final UserRepository userRepository;
-  private final PlanLimitsService planLimitsService;
-  private final StandaloneImageUsageRepository usageRepository;
+  private final CreditService creditService;
 
   private final String baseDir = "D:\\Backend\\videoeditor_java";
 
@@ -45,26 +44,19 @@ public class StandaloneImageService {
   @Autowired
   private ObjectMapper objectMapper;
 
-  public StandaloneImageService(JwtUtil jwtUtil, UserRepository userRepository, PlanLimitsService planLimitsService, StandaloneImageUsageRepository usageRepository) {
+  public StandaloneImageService(JwtUtil jwtUtil, UserRepository userRepository, CreditService creditService) {
     this.jwtUtil = jwtUtil;
     this.userRepository = userRepository;
-      this.planLimitsService = planLimitsService;
-      this.usageRepository = usageRepository;
+      this.creditService = creditService;
   }
 
   public StandaloneImage processStandaloneImageBackgroundRemoval(User user, MultipartFile imageFile)
       throws IOException, InterruptedException {
 
       String currentMonth = YearMonth.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
-      StandaloneImageUsage usage = usageRepository.findByUserAndUsageMonth(user, currentMonth)
-              .orElse(new StandaloneImageUsage(user, currentMonth));
 
-      int monthlyLimit = planLimitsService.getMonthlyBackgroundRemovalLimit(user);
-      if (monthlyLimit != -1 && usage.getCount() >= monthlyLimit) {
-          throw new IOException("Monthly background removal limit reached (" + monthlyLimit + " images). Please upgrade your plan.");
-      }
-
-      int maxDimension = planLimitsService.getMaxBackgroundRemovalDimension(user);
+      creditService.spend(user, CreditService.COST_BG_REMOVAL, "Background removal");
+      int maxDimension = creditService.isPaid(user) ? 3840 : 1280;
 
     // Save input file
     File originalDir = new File(baseDir, "images/standalone/" + user.getId() + "/original");
@@ -127,9 +119,6 @@ public class StandaloneImageService {
           System.out.println("Could not parse output JSON, but file was created successfully");
       }
 
-    usage.incrementCount();
-    usageRepository.save(usage);
-
     // Save standalone image record
     StandaloneImage standaloneImage = new StandaloneImage();
     standaloneImage.setUser(user);
@@ -151,26 +140,15 @@ public class StandaloneImageService {
         .orElseThrow(() -> new RuntimeException("User not found"));
   }
 
+    public Map<String, Object> getUserBackgroundRemovalStats(User user) {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("balance", creditService.getBalance(user));
+        stats.put("costPerRemoval", CreditService.COST_BG_REMOVAL);
+        stats.put("isPaid", creditService.isPaid(user));
+        return stats;
+    }
 
   public List<StandaloneImage> getUserImages(User user) {
     return standaloneImageRepository.findByUser(user);
   }
-
-    public Map<String, Object> getUserBackgroundRemovalStats(User user) {
-        String currentMonth = YearMonth.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
-        StandaloneImageUsage usage = usageRepository.findByUserAndUsageMonth(user, currentMonth)
-                .orElse(new StandaloneImageUsage(user, currentMonth));
-
-        int monthlyLimit = planLimitsService.getMonthlyBackgroundRemovalLimit(user);
-        String maxQuality = planLimitsService.getMaxBackgroundRemovalQuality(user);
-
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("usedThisMonth", usage.getCount());
-        stats.put("monthlyLimit", monthlyLimit);
-        stats.put("remaining", monthlyLimit == -1 ? -1 : monthlyLimit - usage.getCount());
-        stats.put("maxQuality", maxQuality);
-        stats.put("userRole", user.getRole().toString());
-
-        return stats;
-    }
 }

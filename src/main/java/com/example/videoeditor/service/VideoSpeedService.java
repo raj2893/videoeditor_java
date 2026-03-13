@@ -31,9 +31,8 @@ public class VideoSpeedService {
     private static final Logger logger = LoggerFactory.getLogger(VideoSpeedService.class);
 
     private final VideoSpeedRepository videoSpeedRepository;
-    private final UserProcessingUsageRepository userProcessingUsageRepository;
     private final ObjectMapper objectMapper;
-    private final PlanLimitsService planLimitsService;
+    private final CreditService creditService;
 
     @Value("${video-editor.base-path-speed}")
     private String basePath;
@@ -69,7 +68,7 @@ public class VideoSpeedService {
 
         try {
             double videoDuration = getVideoDuration(filePath);
-            int maxMinutes = planLimitsService.getMaxSpeedVideoLengthMinutes(user);
+            int maxMinutes = creditService.getMaxVideoLengthMinutes(user);
 
             if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
                 // Delete the uploaded file since it exceeds limits
@@ -141,7 +140,7 @@ public class VideoSpeedService {
         video.setLastModified(LocalDateTime.now());
         videoSpeedRepository.save(video);
 
-        processVideoWithFFmpeg(video, finalQuality, planLimitsService.shouldAddWatermark(user));
+        processVideoWithFFmpeg(video, finalQuality, creditService.hasWatermark(user));
 
         return video;
     }
@@ -215,7 +214,6 @@ public class VideoSpeedService {
                     video.setProgress(100.0);
                     video.setOutputFilePath(outputPath);
                     video.setCdnUrl(outputPath); // Set cdnUrl to local output path
-                    incrementUsageCount(video.getUser());
                 } else {
                     video.setStatus("FAILED");
                     video.setProgress(0.0);
@@ -264,47 +262,37 @@ public class VideoSpeedService {
         );
     }
 
-    private void validateProcessingLimits(User user, String quality, double videoDuration) throws IllegalArgumentException {
-        if (quality != null && !planLimitsService.isSpeedQualityAllowed(user, quality)) {
-            throw new IllegalArgumentException("Quality " + quality + " not allowed. Maximum allowed: " +
-                    planLimitsService.getMaxSpeedAllowedQuality(user));
-        }
-
-        int maxPerMonth = planLimitsService.getMaxSpeedProcessingPerMonth(user);
-        if (maxPerMonth > 0) {
-            String currentYearMonth = YearMonth.now().toString();
-            Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
-                    user, "VIDEO_SPEED", currentYearMonth);
-
-            int currentCount = usageOpt.map(UserProcessingUsage::getProcessCount).orElse(0);
-            if (currentCount >= maxPerMonth) {
-                throw new IllegalArgumentException("Monthly processing limit reached (" + maxPerMonth + "). Upgrade your plan for more.");
+    private void validateProcessingLimits(User user, String quality, double videoDuration) {
+        // Quality check
+        if (quality != null) {
+            int requested = parseQuality(quality);
+            int max = parseQuality(creditService.getMaxVideoQuality(user));
+            if (requested > max) {
+                throw new IllegalArgumentException(
+                        "Quality " + quality + " not allowed. Maximum allowed: "
+                                + creditService.getMaxVideoQuality(user));
             }
         }
 
-        int maxMinutes = planLimitsService.getMaxSpeedVideoLengthMinutes(user);
+        // Video length check
+        int maxMinutes = creditService.getMaxVideoLengthMinutes(user);
         if (maxMinutes > 0 && videoDuration > maxMinutes * 60) {
-            throw new IllegalArgumentException("Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
+            throw new IllegalArgumentException(
+                    "Video length exceeds maximum allowed (" + maxMinutes + " minutes). Upgrade your plan.");
         }
+
+        // Credit check — 10 credits per export
+        creditService.spend(user, CreditService.COST_VIDEO_SPEED, "Video speed modifier export");
     }
 
-    private void incrementUsageCount(User user) {
-        String currentYearMonth = YearMonth.now().toString();
-        Optional<UserProcessingUsage> usageOpt = userProcessingUsageRepository.findByUserAndServiceTypeAndYearMonth(
-                user, "VIDEO_SPEED", currentYearMonth);
-
-        UserProcessingUsage usage;
-        if (usageOpt.isPresent()) {
-            usage = usageOpt.get();
-            usage.setProcessCount(usage.getProcessCount() + 1);
-        } else {
-            usage = new UserProcessingUsage();
-            usage.setUser(user);
-            usage.setServiceType("VIDEO_SPEED");
-            usage.setYearMonth(currentYearMonth);
-            usage.setProcessCount(1);
-        }
-        userProcessingUsageRepository.save(usage);
+    private int parseQuality(String quality) {
+        return switch (quality.toLowerCase()) {
+            case "720p"        -> 720;
+            case "1080p"       -> 1080;
+            case "1440p", "2k" -> 1440;
+            case "4k"          -> 2160;
+            default            -> 720;
+        };
     }
 
     private Map<String, String> getFFmpegQualitySettings(String quality) {
